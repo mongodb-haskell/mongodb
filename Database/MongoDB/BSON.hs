@@ -1,4 +1,12 @@
-
+module Database.MongoDB.BSON
+    (
+     BSValue(..),
+     BSONObject,
+     toBSONObject,
+     fromBSONObject,
+     BinarySubType(..)
+    )
+where
 import Control.Monad
 import Data.Binary
 import Data.Binary.Get

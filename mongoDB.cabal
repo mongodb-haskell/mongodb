@@ -1,0 +1,11 @@
+Name:                mongoDB
+Version:             0.1
+License:             MIT
+Build-Depends:       base,
+	             binary,
+		     bytestring,
+		     data-binary-ieee754,
+		     time,
+		     utf8-string
+Build-Type:          Simple
+Exposed-modules:     Database.MongoDB.BSON
