@@ -9,3 +9,4 @@ Build-Depends:       base,
 		     utf8-string
 Build-Type:          Simple
 Exposed-modules:     Database.MongoDB.BSON
+Other-modules:       Database.MongoDB.Util
