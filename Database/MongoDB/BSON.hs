@@ -1,9 +1,8 @@
 module Database.MongoDB.BSON
     (
      BSValue(..),
-     BSONObject,
+     BSONObject(..),
      toBSONObject,
-     fromBSONObject,
      BinarySubType(..)
     )
 where
@@ -42,7 +41,9 @@ data BSValue
     | BSMaxKey
     deriving (Show, Eq, Ord)
 
-newtype BSONObject = BSONObject { fromBSONObject :: Map.Map L8.ByteString BSValue }
+newtype BSONObject = BSONObject {
+      fromBSONObject :: Map.Map L8.ByteString BSValue
+    }
     deriving (Eq, Ord, Show)
 
 toBSONObject :: [(L8.ByteString, BSValue)] -> BSONObject

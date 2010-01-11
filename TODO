@@ -5,3 +5,8 @@ BSON
 ----
 + support something like toSql (convert a haskell type to bson)
 + reject keys that start with "$" or "."
+
+MongoDB
+-------
++ support safe operations
++ auto-reconnection
