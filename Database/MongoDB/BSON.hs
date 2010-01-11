@@ -18,6 +18,7 @@ import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Char8 as LC
 import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Int
+import qualified Data.Map as Map
 import qualified Data.List as List
 import Data.Time.Clock.POSIX
 import Database.MongoDB.Util
@@ -41,11 +42,11 @@ data BSValue
     | BSMaxKey
     deriving (Show, Eq, Ord)
 
-newtype BSONObject = BSONObject { fromBSONObject :: [(L8.ByteString, BSValue)] }
+newtype BSONObject = BSONObject { fromBSONObject :: Map.Map L8.ByteString BSValue }
     deriving (Eq, Ord, Show)
 
 toBSONObject :: [(L8.ByteString, BSValue)] -> BSONObject
-toBSONObject = BSONObject
+toBSONObject = BSONObject . Map.fromList
 
 data DataType =
     Data_min_key        | -- -1
@@ -112,7 +113,7 @@ getVal Data_string = do
 getVal Data_object = getObj >>= \(len, obj) -> return (len, BSObject obj)
 getVal Data_array = do
   (len, arr) <- getRawObj
-  let arr2 = List.foldl (\acc (k,v) -> v : acc) [] arr -- reverse and remove key
+  let arr2 = Map.fold (:) [] arr -- reverse and remove key
   return (len, BSArray arr2)
 getVal Data_binary = do
   skip 4
@@ -135,15 +136,15 @@ getInnerObj bytesLeft obj = do
   (keySz, key) <- getS
   (valSz, val) <- getVal typ
   getInnerObj (bytesLeft - 1 - fromIntegral keySz - fromIntegral valSz) $
-              liftM ((key, val) :) obj
+              liftM (Map.insert key val) obj
 
 getRawObj = do
   bytes <- getI32
-  obj <- getInnerObj (bytes - 4) $ return []
+  obj <- getInnerObj (bytes - 4) $ return Map.empty
   getNull
   return (fromIntegral bytes, obj)
 
-getObj = getRawObj >>= \(len, obj) ->  return (len, toBSONObject obj)
+getObj = getRawObj >>= \(len, obj) ->  return (len, BSONObject obj)
 
 getDataType = liftM toDataType getI8
 
@@ -195,7 +196,7 @@ putVal BSMinKey       = flush
 putVal BSMaxKey       = flush
 
 putObj obj   = putOutterObj bs
-    where bs = runPut $ forM_ (fromBSONObject obj) $ \(k, v) ->
+    where bs = runPut $ forM_ (Map.toList (fromBSONObject obj)) $ \(k, v) ->
                putType v >> putS k >> putVal v
 
 putOutterObj bytes = do

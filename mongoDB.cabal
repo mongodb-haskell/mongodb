@@ -4,6 +4,7 @@ License:             MIT
 Build-Depends:       base,
 	             binary,
 		     bytestring,
+		     containers,
 		     data-binary-ieee754,
 		     time,
 		     utf8-string

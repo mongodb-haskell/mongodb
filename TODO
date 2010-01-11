@@ -3,5 +3,5 @@ TODO
 
 BSON
 ----
-+ more efficient dictionary type (also ordered?)
 + support something like toSql (convert a haskell type to bson)
++ reject keys that start with "$" or "."
