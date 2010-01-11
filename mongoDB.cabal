@@ -6,8 +6,11 @@ Build-Depends:       base,
 		     bytestring,
 		     containers,
 		     data-binary-ieee754,
+		     network,
+		     random,
 		     time,
 		     utf8-string
 Build-Type:          Simple
-Exposed-modules:     Database.MongoDB.BSON
+Exposed-modules:     Database.MongoDB,
+		     Database.MongoDB.BSON
 Other-modules:       Database.MongoDB.Util
