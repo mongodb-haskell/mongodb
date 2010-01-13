@@ -181,20 +181,20 @@ putVal (BSBinary t bs)= do putI32 $ fromIntegral $ 4 + L.length bs
                            putI8 $ fromBinarySubType t
                            putI32 $ fromIntegral $ L.length bs
                            putLazyByteString bs
-putVal BSUndefined    = flush
+putVal BSUndefined    = putNothing
 putVal (BSObjectId o) = putLazyByteString o
 putVal (BSBool False) = putI8 0
 putVal (BSBool True)  = putI8 1
 putVal (BSDate pt)    = putI64 $ round $ 1000 * realToFrac pt
-putVal BSNull         = flush
+putVal BSNull         = putNothing
 putVal (BSRegex r opt)= do putS r
                            putByteString $ pack $ List.sort opt
                            putNull
 putVal (BSSymbol s)   = putI32 (fromIntegral $ 1 + L8.length s) >> putS s
 putVal (BSInt32 i)    = putI32 i
 putVal (BSInt64 i)    = putI64 i
-putVal BSMinKey       = flush
-putVal BSMaxKey       = flush
+putVal BSMinKey       = putNothing
+putVal BSMaxKey       = putNothing
 
 putObj obj   = putOutterObj bs
     where bs = runPut $ forM_ (Map.toList (fromBSONObject obj)) $ \(k, v) ->

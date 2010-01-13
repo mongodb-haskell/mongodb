@@ -1,6 +1,6 @@
 module Database.MongoDB.Util
     (
-     putI8, putI32, putI64, putNull, putS,
+     putI8, putI32, putI64, putNothing, putNull, putS,
      getI8, getI32, getI64, getC, getS, getNull,
     )
 where
@@ -8,6 +8,7 @@ import Control.Monad
 import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
+import Data.ByteString.Char8
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Char          (chr, ord)
@@ -35,6 +36,8 @@ putI32 = putWord32le . fromIntegral
 
 putI64 :: Int64 -> Put
 putI64 = putWord64le . fromIntegral
+
+putNothing = putByteString $ pack ""
 
 putNull = putI8 0
 
