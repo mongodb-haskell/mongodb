@@ -10,3 +10,5 @@ MongoDB
 -------
 + support safe operations
 + auto-reconnection
++ seemless iterator (using lazy lists?)
++ destoy cursor (how?/when?)
