@@ -121,7 +121,9 @@ query c col skip ret sel fsel = do
                putI32 skip
                putI32 ret
                put sel
-               put fsel
+               case fsel of
+                    Nothing -> putNothing
+                    Just fsel -> put fsel
   (reqID, msg) <- packMsg c OP_QUERY body
   L.hPut (cHandle c) msg
   return reqID
