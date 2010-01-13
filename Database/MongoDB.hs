@@ -10,6 +10,7 @@ module Database.MongoDB
 where
 import Control.Monad
 import Data.Binary
+import Data.Binary.Get
 import Data.Binary.Put
 import Data.ByteString.Char8
 import qualified Data.ByteString.Lazy as L
@@ -113,7 +114,7 @@ insertMany c col docs = do
   return reqID
 
 query :: Connection -> Collection -> NumToSkip -> NumToReturn -> Selector ->
-         Maybe FieldSelector -> IO RequestID
+         Maybe FieldSelector -> IO [BSONObject]
 query c col skip ret sel fsel = do
   let body = runPut $ do
                putI32 0 -- TODO opts
@@ -126,7 +127,44 @@ query c col skip ret sel fsel = do
                     Just fsel -> put fsel
   (reqID, msg) <- packMsg c OP_QUERY body
   L.hPut (cHandle c) msg
-  return reqID
+  getReply c reqID
+
+data Hdr = Hdr {
+      hMsgLen :: Int32,
+      hReqID :: Int32,
+      hRespTo :: Int32,
+      hOp :: Opcode
+    } deriving (Show)
+
+data Reply = Reply {
+      rRespFlags :: Int32,
+      rCursorID :: Int64,
+      rStartFrom :: Int32,
+      rNumReturned :: Int32
+    } deriving (Show)
+
+getReply :: Connection -> RequestID -> IO [BSONObject]
+getReply c reqID = do
+  let h = cHandle c
+  hdrBytes <- L.hGet h 16
+  let hdr = flip runGet hdrBytes $ do
+                     msgLen <- getI32
+                     reqID <- getI32
+                     respTo <- getI32
+                     op <- getI32
+                     return $ Hdr msgLen reqID respTo $ toOpcode op
+  -- TODO assert OP_REPLY = hOp hdr
+  -- TODO assert hReqID hdr
+  replyBytes <- L.hGet h 20
+  let reply = flip runGet replyBytes $ do
+                     respFlags <- getI32
+                     cursorID <- getI64
+                     startFrom <- getI32
+                     numReturned <- getI32
+                     return $ (Reply respFlags cursorID startFrom numReturned)
+  docBytes <- L.hGet h $ fromIntegral $ hMsgLen hdr - 16 - 20
+  return $ flip runGet docBytes $ do
+                     forM [1 .. rNumReturned reply] $ \_ -> get
 
 putCol col = putByteString (pack col) >> putNull
 
