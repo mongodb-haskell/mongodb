@@ -4,11 +4,25 @@ TODO
 BSON
 ----
 + support something like toSql (convert a haskell type to bson)
-+ reject keys that start with "$" or "."
+  - write convertible instances
++ on insert/update: reject keys that start with "$" or "."
++ data support for common mongo "$symbols"
 
 MongoDB
 -------
 + support safe operations
 + auto-reconnection
-+ seemless iterator (using lazy lists?)
++ seemless iterator (using lazy lists?) (unsafeInterleaveIO)
+  - hdbc has a fetchRow that returns a Maybe and auto-closes their statement
+    once everything's been read
+  - hdbc has a fetchAllRows that builds up a lazy list using fetchRow (so
+    it auto-closes the statement)
 + destoy cursor (how?/when?)
+
+Misc
+----
++ learn more about haskelldb, anything we can learn from there
++ go through pymongo api and figure out what parts to adopt (also look
+  at other languages?)
++ support for aggricated commands like listing collections
+
