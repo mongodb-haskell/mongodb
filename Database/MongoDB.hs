@@ -86,9 +86,9 @@ delete c col sel = do
                      putCol col
                      putI32 0
                      put sel
-  (reqId, msg) <- packMsg c OP_DELETE body
+  (reqID, msg) <- packMsg c OP_DELETE body
   L.hPut (cHandle c) msg
-  return reqId
+  return reqID
 
 remove = delete
 
@@ -98,9 +98,9 @@ insert c col doc = do
                      putI32 0
                      putCol col
                      put doc
-  (reqId, msg) <- packMsg c OP_INSERT body
+  (reqID, msg) <- packMsg c OP_INSERT body
   L.hPut (cHandle c) msg
-  return reqId
+  return reqID
 
 insertMany :: Connection -> Collection -> [BSONObject] -> IO RequestID
 insertMany c col docs = do
@@ -108,9 +108,9 @@ insertMany c col docs = do
                putI32 0
                putCol col
                forM_ docs put
-  (reqId, msg) <- packMsg c OP_INSERT body
+  (reqID, msg) <- packMsg c OP_INSERT body
   L.hPut (cHandle c) msg
-  return reqId
+  return reqID
 
 query :: Connection -> Collection -> NumToSkip -> NumToReturn -> Selector ->
          Maybe FieldSelector -> IO RequestID
@@ -122,23 +122,22 @@ query c col skip ret sel fsel = do
                putI32 ret
                put sel
                put fsel
-  (reqId, msg) <- packMsg c OP_QUERY body
+  (reqID, msg) <- packMsg c OP_QUERY body
   L.hPut (cHandle c) msg
-  return reqId
-
+  return reqID
 
 putCol col = putByteString (pack col) >> putNull
 
 packMsg :: Connection -> Opcode -> L.ByteString -> IO (RequestID, L.ByteString)
 packMsg c op body = do
-  reqId <- randNum c
+  reqID <- randNum c
   let msg = runPut $ do
                       putI32 $ fromIntegral $ L.length body + 16
-                      putI32 reqId
+                      putI32 reqID
                       putI32 0
                       putI32 $ fromOpcode op
                       putLazyByteString body
-  return (reqId, msg)
+  return (reqID, msg)
 
 randNum :: Connection -> IO Int32
 randNum Connection { cRand = nsRef } = atomicModifyIORef nsRef $ \ns ->
