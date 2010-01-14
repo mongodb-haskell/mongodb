@@ -93,6 +93,13 @@ fromQueryOpts opts = List.foldl (.|.) 0 $ fmap toVal opts
           toVal QO_OpLogReplay = 8
           toVal QO_NoCursorTimeout = 16
 
+data UpdateFlag = UF_Upsert
+                | UF_Multiupdate
+                deriving (Show, Enum)
+
+fromUpdateFlags flags = List.foldl (.|.) 0 $
+                        flip fmap flags $ (1 `shiftL`) . fromEnum
+
 delete :: Connection -> Collection -> Selector -> IO RequestID
 delete c col sel = do
   let body = runPut $ do
@@ -141,6 +148,20 @@ query c col opts skip ret sel fsel = do
   (reqID, msg) <- packMsg c OP_QUERY body
   L.hPut (cHandle c) msg
   getReply c reqID
+
+update :: Connection -> Collection ->
+          [UpdateFlag] -> Selector -> BSONObject -> IO RequestID
+update c col flags sel obj = do
+  let body = runPut $ do
+               putI32 0
+               putCol col
+               putI32 $ fromUpdateFlags flags
+               put sel
+               put obj
+  (reqID, msg) <- packMsg c OP_UPDATE body
+  L.hPut (cHandle c) msg
+  return reqID
+
 
 data Hdr = Hdr {
       hMsgLen :: Int32,
