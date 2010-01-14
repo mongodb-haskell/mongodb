@@ -81,13 +81,13 @@ type RequestID = Int32
 type NumToSkip = Int32
 type NumToReturn = Int32
 
-data QueryOpts = QO_TailableCursor
+data QueryOpt = QO_TailableCursor
                | QO_SlaveOK
                | QO_OpLogReplay
                | QO_NoCursorTimeout
                deriving (Show)
 
-fromQueryOpts [opts] = List.foldl (.|.) 0 $ fmap toVal opts
+fromQueryOpts opts = List.foldl (.|.) 0 $ fmap toVal opts
     where toVal QO_TailableCursor = 2
           toVal QO_SlaveOK = 4
           toVal QO_OpLogReplay = 8
@@ -126,11 +126,11 @@ insertMany c col docs = do
   L.hPut (cHandle c) msg
   return reqID
 
-query :: Connection -> Collection -> [QueryOpts] -> NumToSkip -> NumToReturn ->
+query :: Connection -> Collection -> [QueryOpt] -> NumToSkip -> NumToReturn ->
          Selector -> Maybe FieldSelector -> IO [BSONObject]
 query c col opts skip ret sel fsel = do
   let body = runPut $ do
-               putI32 0 -- TODO opts
+               putI32 $ fromQueryOpts opts
                putCol col
                putI32 skip
                putI32 ret
