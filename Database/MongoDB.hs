@@ -1,11 +1,11 @@
 module Database.MongoDB
     (
      connect, connectOnPort,
-     delete,
-     remove,
-     insert,
-     insertMany,
-     query
+     delete, insert, insertMany, query, remove, update,
+     Collection, FieldSelector, NumToSkip, NumToReturn, RequestID, Selector,
+     Opcode(..),
+     QueryOpt(..),
+     UpdateFlag(..),
     )
 where
 import Control.Exception (assert)
