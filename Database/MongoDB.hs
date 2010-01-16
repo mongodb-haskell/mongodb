@@ -8,6 +8,7 @@ module Database.MongoDB
      query
     )
 where
+import Control.Exception (assert)
 import Control.Monad
 import Data.Binary
 import Data.Binary.Get
@@ -187,8 +188,8 @@ getReply c reqID = do
                      respTo <- getI32
                      op <- getI32
                      return $ Hdr msgLen reqID respTo $ toOpcode op
-  -- TODO assert OP_REPLY = hOp hdr
-  -- TODO assert hReqID hdr
+  assert (OP_REPLY == hOp hdr) $ return ()
+  assert (hRespTo hdr == reqID) $ return ()
   replyBytes <- L.hGet h 20
   let reply = flip runGet replyBytes $ do
                      respFlags <- getI32
@@ -196,6 +197,7 @@ getReply c reqID = do
                      startFrom <- getI32
                      numReturned <- getI32
                      return $ (Reply respFlags cursorID startFrom numReturned)
+  assert (rRespFlags reply == 0) $ return ()
   docBytes <- L.hGet h $ fromIntegral $ hMsgLen hdr - 16 - 20
   return $ flip runGet docBytes $ do
                      forM [1 .. rNumReturned reply] $ \_ -> get
