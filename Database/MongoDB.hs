@@ -3,6 +3,7 @@ module Database.MongoDB
      connect, connectOnPort, conClose,
      delete, insert, insertMany, query, remove, update,
      nextDoc, finish,
+     find,
      Collection, FieldSelector, NumToSkip, NumToReturn, RequestID, Selector,
      Opcode(..),
      QueryOpt(..),
@@ -15,7 +16,7 @@ import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
 import Data.Bits
-import Data.ByteString.Char8
+import Data.ByteString.Char8 hiding (find)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Int
@@ -147,6 +148,11 @@ insertMany c col docs = do
   L.hPut (cHandle c) msg
   return reqID
 
+{- | Open a cursor to find documents. If you need full functionality,
+see 'query' -}
+find :: Connection -> Collection -> Selector -> IO Cursor
+find c col sel = query c col [] 0 0 sel Nothing
+
 query :: Connection -> Collection -> [QueryOpt] -> NumToSkip -> NumToReturn ->
          Selector -> Maybe FieldSelector -> IO Cursor
 query c col opts skip ret sel fsel = do
@@ -228,6 +234,8 @@ getReply h = do
                return $ (Reply respFlags cursorID startFrom numReturned)
 
 
+{- | Return one document or Nothing if there are no more.
+Automatically closes the curosr when last document is read -}
 nextDoc :: Cursor -> IO (Maybe BSONObject)
 nextDoc cur = do
   closed <- readIORef $ curClosed cur
