@@ -14,3 +14,4 @@ Build-Type:          Simple
 Exposed-modules:     Database.MongoDB,
 		     Database.MongoDB.BSON
 Other-modules:       Database.MongoDB.Util
+ghc-options:         -Wall -Werror

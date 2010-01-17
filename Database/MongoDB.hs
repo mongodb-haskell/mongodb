@@ -35,7 +35,7 @@ module Database.MongoDB
      UpdateFlag(..),
     )
 where
-import Control.Exception (assert)
+import Control.Exception
 import Control.Monad
 import Data.Binary
 import Data.Binary.Get
@@ -43,10 +43,10 @@ import Data.Binary.Put
 import Data.Bits
 import Data.ByteString.Char8 hiding (find)
 import qualified Data.ByteString.Lazy as L
-import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Int
 import Data.IORef
 import qualified Data.List as List
+import Data.Typeable
 import Database.MongoDB.BSON
 import Database.MongoDB.Util
 import qualified Network
@@ -95,6 +95,18 @@ data Opcode
     | OP_KILL_CURSORS	-- 2007	 Tell database client is done with a cursor
     deriving (Show, Eq)
 
+data MongoDBInternalError = MongoDBInternalError String
+                            deriving (Eq, Show, Read)
+
+mongoDBInternalError :: TyCon
+mongoDBInternalError = mkTyCon "Database.MongoDB.MongoDBInternalError"
+
+instance Typeable MongoDBInternalError where
+    typeOf _ = mkTyConApp mongoDBInternalError []
+
+instance Exception MongoDBInternalError
+
+fromOpcode :: Opcode -> Int32
 fromOpcode OP_REPLY        =    1
 fromOpcode OP_MSG          = 1000
 fromOpcode OP_UPDATE       = 2001
@@ -105,6 +117,7 @@ fromOpcode OP_GET_MORE     = 2005
 fromOpcode OP_DELETE       = 2006
 fromOpcode OP_KILL_CURSORS = 2007
 
+toOpcode :: Int32 -> Opcode
 toOpcode    1 = OP_REPLY
 toOpcode 1000 = OP_MSG
 toOpcode 2001 = OP_UPDATE
@@ -114,6 +127,7 @@ toOpcode 2004 = OP_QUERY
 toOpcode 2005 = OP_GET_MORE
 toOpcode 2006 = OP_DELETE
 toOpcode 2007 = OP_KILL_CURSORS
+toOpcode n = throw $ MongoDBInternalError $ "Got unexpected Opcode: " ++ show n
 
 type Collection = String
 type Selector = BSONObject
@@ -128,6 +142,7 @@ data QueryOpt = QO_TailableCursor
                | QO_NoCursorTimeout
                deriving (Show)
 
+fromQueryOpts :: [QueryOpt] -> Int32
 fromQueryOpts opts = List.foldl (.|.) 0 $ fmap toVal opts
     where toVal QO_TailableCursor = 2
           toVal QO_SlaveOK = 4
@@ -138,6 +153,7 @@ data UpdateFlag = UF_Upsert
                 | UF_Multiupdate
                 deriving (Show, Enum)
 
+fromUpdateFlags :: [UpdateFlag] -> Int32
 fromUpdateFlags flags = List.foldl (.|.) 0 $
                         flip fmap flags $ (1 `shiftL`) . fromEnum
 
@@ -152,6 +168,7 @@ delete c col sel = do
   L.hPut (cHandle c) msg
   return reqID
 
+remove :: Connection -> Collection -> Selector -> IO RequestID
 remove = delete
 
 insert :: Connection -> Collection -> BSONObject -> IO RequestID
@@ -190,18 +207,18 @@ quickFind' c col sel = find c col sel >>= allDocs'
 
 query :: Connection -> Collection -> [QueryOpt] -> NumToSkip -> NumToReturn ->
          Selector -> Maybe FieldSelector -> IO Cursor
-query c col opts skip ret sel fsel = do
+query c col opts nskip ret sel fsel = do
   let h = cHandle c
 
   let body = runPut $ do
                putI32 $ fromQueryOpts opts
                putCol col
-               putI32 skip
+               putI32 nskip
                putI32 ret
                put sel
                case fsel of
                     Nothing -> putNothing
-                    Just fsel -> put fsel
+                    Just _ -> put fsel
   (reqID, msg) <- packMsg c OP_QUERY body
   L.hPut h msg
 
@@ -238,35 +255,37 @@ update c col flags sel obj = do
 
 data Hdr = Hdr {
       hMsgLen :: Int32,
-      hReqID :: Int32,
+      -- hReqID :: Int32,
       hRespTo :: Int32,
       hOp :: Opcode
     } deriving (Show)
 
 data Reply = Reply {
       rRespFlags :: Int32,
-      rCursorID :: Int64,
-      rStartFrom :: Int32,
-      rNumReturned :: Int32
+      rCursorID :: Int64
+      -- rStartFrom :: Int32,
+      -- rNumReturned :: Int32
     } deriving (Show)
 
+getHeader :: Handle -> IO Hdr
 getHeader h = do
   hdrBytes <- L.hGet h 16
   return $ flip runGet hdrBytes $ do
                 msgLen <- getI32
-                reqID <- getI32
+                skip 4 -- reqID <- getI32
                 respTo <- getI32
                 op <- getI32
-                return $ Hdr msgLen reqID respTo $ toOpcode op
+                return $ Hdr msgLen respTo $ toOpcode op
 
+getReply :: Handle -> IO Reply
 getReply h = do
   replyBytes <- L.hGet h 20
   return $ flip runGet replyBytes $ do
                respFlags <- getI32
                cursorID <- getI64
-               startFrom <- getI32
-               numReturned <- getI32
-               return $ (Reply respFlags cursorID startFrom numReturned)
+               skip 4 -- startFrom <- getI32
+               skip 4 -- numReturned <- getI32
+               return $ (Reply respFlags cursorID)
 
 
 {- | Return one document or Nothing if there are no more.
@@ -317,6 +336,7 @@ allDocs' cur = do
     Nothing -> return []
     Just d -> allDocs' cur >>= return . (d :)
 
+getFirstDoc :: L.ByteString -> (BSONObject, L.ByteString)
 getFirstDoc docBytes = flip runGet docBytes $ do
                          doc <- get
                          docBytes' <- getRemainingLazyByteString
@@ -340,7 +360,6 @@ getMore cur = do
   assert (hRespTo hdr == reqID) $ return ()
   reply <- getReply h
   assert (rRespFlags reply == 0) $ return ()
-  cid <- readIORef (curID cur)
   case rCursorID reply of
        0 -> writeIORef (curID cur) 0
        ncid -> assert (ncid == cid) $ return ()
@@ -352,7 +371,6 @@ getMore cur = do
       writeIORef (curDocBytes cur) docBytes'
       return $ Just doc
 
-
 {- Manually close a cursor -- usually not needed. -}
 finish :: Cursor -> IO ()
 finish cur = do
@@ -362,11 +380,12 @@ finish cur = do
                  putI32 0
                  putI32 1
                  putI64 cid
-  (reqID, msg) <- packMsg (curCon cur) OP_KILL_CURSORS body
+  (_reqID, msg) <- packMsg (curCon cur) OP_KILL_CURSORS body
   L.hPut h msg
   writeIORef (curClosed cur) True
   return ()
 
+putCol :: Collection -> Put
 putCol col = putByteString (pack col) >> putNull
 
 packMsg :: Connection -> Opcode -> L.ByteString -> IO (RequestID, L.ByteString)
