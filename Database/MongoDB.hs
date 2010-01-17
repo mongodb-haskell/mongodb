@@ -28,7 +28,7 @@ module Database.MongoDB
      connect, connectOnPort, conClose,
      delete, insert, insertMany, query, remove, update,
      find,
-     allDocs, finish, nextDoc,
+     allDocs, allDocs', finish, nextDoc,
      Collection, FieldSelector, NumToSkip, NumToReturn, RequestID, Selector,
      Opcode(..),
      QueryOpt(..),
@@ -297,6 +297,16 @@ allDocs cur = unsafeInterleaveIO $ do
                 case doc of
                   Nothing -> return []
                   Just d -> allDocs cur >>= return . (d :)
+
+{- | Returns a strict list of all (of the rest) of the documents in
+the cursor. This means that all of the documents will immediately be
+read out of the database and loaded into memory. -}
+allDocs' :: Cursor -> IO [BSONObject]
+allDocs' cur = do
+  doc <- nextDoc cur
+  case doc of
+    Nothing -> return []
+    Just d -> allDocs' cur >>= return . (d :)
 
 getFirstDoc docBytes = flip runGet docBytes $ do
                          doc <- get
