@@ -2,7 +2,7 @@ module Database.MongoDB
     (
      connect, connectOnPort, conClose,
      delete, insert, insertMany, query, remove, update,
-     nextDoc, curClose,
+     nextDoc, finish,
      Collection, FieldSelector, NumToSkip, NumToReturn, RequestID, Selector,
      Opcode(..),
      QueryOpt(..),
@@ -281,8 +281,9 @@ getMore cur = do
       return $ Just doc
 
 
-curClose :: Cursor -> IO ()
-curClose cur = do
+{- Manually close a cursor -- usually not needed. -}
+finish :: Cursor -> IO ()
+finish cur = do
   let h = cHandle $ curCon cur
   cid <- readIORef $ curID cur
   let body = runPut $ do
