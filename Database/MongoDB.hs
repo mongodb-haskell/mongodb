@@ -130,8 +130,8 @@ toOpcode 2007 = OP_KILL_CURSORS
 toOpcode n = throw $ MongoDBInternalError $ "Got unexpected Opcode: " ++ show n
 
 type Collection = String
-type Selector = BSONObject
-type FieldSelector = BSONObject
+type Selector = BsonDoc
+type FieldSelector = BsonDoc
 type RequestID = Int32
 type NumToSkip = Int32
 type NumToReturn = Int32
@@ -171,7 +171,7 @@ delete c col sel = do
 remove :: Connection -> Collection -> Selector -> IO RequestID
 remove = delete
 
-insert :: Connection -> Collection -> BSONObject -> IO RequestID
+insert :: Connection -> Collection -> BsonDoc -> IO RequestID
 insert c col doc = do
   let body = runPut $ do
                      putI32 0
@@ -181,7 +181,7 @@ insert c col doc = do
   L.hPut (cHandle c) msg
   return reqID
 
-insertMany :: Connection -> Collection -> [BSONObject] -> IO RequestID
+insertMany :: Connection -> Collection -> [BsonDoc] -> IO RequestID
 insertMany c col docs = do
   let body = runPut $ do
                putI32 0
@@ -198,11 +198,11 @@ find c col sel = query c col [] 0 0 sel Nothing
 
 {- | Perform a query and return the result as a lazy list. Be sure to
 understand the comments about using the lazy list given for 'allDocs'. -}
-quickFind :: Connection -> Collection -> Selector -> IO [BSONObject]
+quickFind :: Connection -> Collection -> Selector -> IO [BsonDoc]
 quickFind c col sel = find c col sel >>= allDocs
 
 {- | Perform a query and return the result as a strict list. -}
-quickFind' :: Connection -> Collection -> Selector -> IO [BSONObject]
+quickFind' :: Connection -> Collection -> Selector -> IO [BsonDoc]
 quickFind' c col sel = find c col sel >>= allDocs'
 
 query :: Connection -> Collection -> [QueryOpt] -> NumToSkip -> NumToReturn ->
@@ -240,7 +240,7 @@ query c col opts nskip ret sel fsel = do
              }
 
 update :: Connection -> Collection ->
-          [UpdateFlag] -> Selector -> BSONObject -> IO RequestID
+          [UpdateFlag] -> Selector -> BsonDoc -> IO RequestID
 update c col flags sel obj = do
   let body = runPut $ do
                putI32 0
@@ -290,7 +290,7 @@ getReply h = do
 
 {- | Return one document or Nothing if there are no more.
 Automatically closes the curosr when last document is read -}
-nextDoc :: Cursor -> IO (Maybe BSONObject)
+nextDoc :: Cursor -> IO (Maybe BsonDoc)
 nextDoc cur = do
   closed <- readIORef $ curClosed cur
   case closed of
@@ -319,7 +319,7 @@ If you don't consume to the end of the list, you must manually close
 the cursor or you will leak the cursor, which may also leak on the
 database side.
 -}
-allDocs :: Cursor -> IO [BSONObject]
+allDocs :: Cursor -> IO [BsonDoc]
 allDocs cur = unsafeInterleaveIO $ do
                 doc <- nextDoc cur
                 case doc of
@@ -329,20 +329,20 @@ allDocs cur = unsafeInterleaveIO $ do
 {- | Returns a strict list of all (of the rest) of the documents in
 the cursor. This means that all of the documents will immediately be
 read out of the database and loaded into memory. -}
-allDocs' :: Cursor -> IO [BSONObject]
+allDocs' :: Cursor -> IO [BsonDoc]
 allDocs' cur = do
   doc <- nextDoc cur
   case doc of
     Nothing -> return []
     Just d -> allDocs' cur >>= return . (d :)
 
-getFirstDoc :: L.ByteString -> (BSONObject, L.ByteString)
+getFirstDoc :: L.ByteString -> (BsonDoc, L.ByteString)
 getFirstDoc docBytes = flip runGet docBytes $ do
                          doc <- get
                          docBytes' <- getRemainingLazyByteString
                          return (doc, docBytes')
 
-getMore :: Cursor -> IO (Maybe BSONObject)
+getMore :: Cursor -> IO (Maybe BsonDoc)
 getMore cur = do
   let h = cHandle $ curCon cur
 
