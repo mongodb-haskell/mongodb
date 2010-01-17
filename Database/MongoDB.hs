@@ -1,8 +1,8 @@
 module Database.MongoDB
     (
-     connect, connectOnPort,
+     connect, connectOnPort, conClose,
      delete, insert, insertMany, query, remove, update,
-     nextDoc,
+     nextDoc, curClose,
      Collection, FieldSelector, NumToSkip, NumToReturn, RequestID, Selector,
      Opcode(..),
      QueryOpt(..),
@@ -43,6 +43,9 @@ connectOnPort host port = do
                      fromIntegral (maxBound :: Int32)) r
   nsRef <- newIORef ns
   return $ Connection { cHandle = h, cRand = nsRef }
+
+conClose :: Connection -> IO ()
+conClose = hClose . cHandle
 
 data Cursor = Cursor {
       curCon :: Connection,
@@ -276,6 +279,20 @@ getMore cur = do
       let (doc, docBytes') = getFirstDoc docBytes
       writeIORef (curDocBytes cur) docBytes'
       return $ Just doc
+
+
+curClose :: Cursor -> IO ()
+curClose cur = do
+  let h = cHandle $ curCon cur
+  cid <- readIORef $ curID cur
+  let body = runPut $ do
+                 putI32 0
+                 putI32 1
+                 putI64 cid
+  (reqID, msg) <- packMsg (curCon cur) OP_KILL_CURSORS body
+  L.hPut h msg
+  writeIORef (curClosed cur) True
+  return ()
 
 putCol col = putByteString (pack col) >> putNull
 
