@@ -27,7 +27,7 @@ module Database.MongoDB
     (
      connect, connectOnPort, conClose,
      delete, insert, insertMany, query, remove, update,
-     find,
+     find, quickFind, quickFind',
      allDocs, allDocs', finish, nextDoc,
      Collection, FieldSelector, NumToSkip, NumToReturn, RequestID, Selector,
      Opcode(..),
@@ -178,6 +178,15 @@ insertMany c col docs = do
 see 'query' -}
 find :: Connection -> Collection -> Selector -> IO Cursor
 find c col sel = query c col [] 0 0 sel Nothing
+
+{- | Perform a query and return the result as a lazy list. Be sure to
+understand the comments about using the lazy list given for 'allDocs'. -}
+quickFind :: Connection -> Collection -> Selector -> IO [BSONObject]
+quickFind c col sel = find c col sel >>= allDocs
+
+{- | Perform a query and return the result as a strict list. -}
+quickFind' :: Connection -> Collection -> Selector -> IO [BSONObject]
+quickFind' c col sel = find c col sel >>= allDocs'
 
 query :: Connection -> Collection -> [QueryOpt] -> NumToSkip -> NumToReturn ->
          Selector -> Maybe FieldSelector -> IO Cursor
