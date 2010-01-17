@@ -12,11 +12,6 @@ MongoDB
 -------
 + support safe operations
 + auto-reconnection
-+ seemless iterator (using lazy lists?) (unsafeInterleaveIO)
-  - hdbc has a fetchRow that returns a Maybe and auto-closes their statement
-    once everything's been read
-  - hdbc has a fetchAllRows that builds up a lazy list using fetchRow (so
-    it auto-closes the statement)
 + destoy cursor (how?/when?)
 
 Misc

@@ -2,8 +2,8 @@ module Database.MongoDB
     (
      connect, connectOnPort, conClose,
      delete, insert, insertMany, query, remove, update,
-     nextDoc, finish,
      find,
+     allDocs, finish, nextDoc,
      Collection, FieldSelector, NumToSkip, NumToReturn, RequestID, Selector,
      Opcode(..),
      QueryOpt(..),
@@ -28,6 +28,7 @@ import qualified Network
 import Network.Socket hiding (connect, send, sendTo, recv, recvFrom)
 import Prelude hiding (getContents)
 import System.IO
+import System.IO.Unsafe
 import System.Random
 
 data Connection = Connection { cHandle :: Handle, cRand :: IORef [Int] }
@@ -252,6 +253,25 @@ nextDoc cur = do
            let (doc, docBytes') = getFirstDoc docBytes
            writeIORef (curDocBytes cur) docBytes'
            return $ Just doc
+
+{- | Return a lazy list of all (of the rest) of the documents in the
+cursor. This works much like hGetContents--it will lazily read the
+cursor data out of the database as the list is used. The cursor is
+automatically closed when the list has been fully read.
+
+If you manually finish the cursor before consuming off this list you
+won't get all the original documents in the cursor.
+
+If you don't consume to the end of the list, you must manually close
+the cursor or you will leak the cursor, which may also leak on the
+database side.
+-}
+allDocs :: Cursor -> IO [BSONObject]
+allDocs cur = unsafeInterleaveIO $ do
+                doc <- nextDoc cur
+                case doc of
+                  Nothing -> return []
+                  Just d -> allDocs cur >>= return . (d :)
 
 getFirstDoc docBytes = flip runGet docBytes $ do
                          doc <- get
