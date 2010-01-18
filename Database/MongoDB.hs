@@ -36,9 +36,9 @@ module Database.MongoDB
      QueryOpt(..),
      UpdateFlag(..),
      delete, insert, insertMany, query, remove, update,
-     -- * Convience database operations
-     find, quickFind, quickFind',
-     -- * Cursor operations
+     -- * Convience collection operations
+     find, findOne, quickFind, quickFind',
+     -- * Cursor
      Cursor,
      allDocs, allDocs', finish, nextDoc,
     )
@@ -258,6 +258,14 @@ insertMany c col docs = do
 -- see 'query'
 find :: Connection -> Collection -> Selector -> IO Cursor
 find c col sel = query c col [] 0 0 sel []
+
+-- | Query, but only return the first result, if any.
+findOne :: Connection -> Collection -> Selector -> IO (Maybe BsonDoc)
+findOne c col sel = do
+  cur <- find c col sel
+  el <- nextDoc cur
+  finish cur
+  return el
 
 -- | Perform a query and return the result as a lazy list. Be sure to
 -- understand the comments about using the lazy list given for
