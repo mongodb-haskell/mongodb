@@ -3,10 +3,13 @@ TODO
 
 BSON
 ----
-+ support something like toSql (convert a haskell type to bson)
-  - write convertible instances
 + on insert/update: reject keys that start with "$" or "."
 + data support for common mongo "$symbols"
++ convert from/to json
++ tie in with native regex like python does?
+  - on outgoing uncompile?
+  - on incoming automatically compile
++ more time convertibles
 
 MongoDB
 -------
@@ -19,5 +22,20 @@ Misc
 + learn more about haskelldb, anything we can learn from there
 + go through pymongo api and figure out what parts to adopt (also look
   at other languages?)
+  - database_names()
+  - collection_names()
 + support for aggricated commands like listing collections
++ kill prefix on data types "eg QO_*"?
++ javascript
++ tailable cursor support
+  - only close cursor when cursorID is 0
+  - have to create loop that sleeps and retries
+  - lazy list support
++ error handling?
++ concurrency (share connection?)
++ is there a garbage collector hook that will let us free cursors and connections?
 
+Tests?
+Documentation
+  - ref
+  - tutorial
