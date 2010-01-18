@@ -16,6 +16,7 @@ MongoDB
 + support safe operations
 + auto-reconnection
 + destoy cursor (how?/when?)
++ pymongo returns the new ObjectId(s) on insert
 
 Misc
 ----
