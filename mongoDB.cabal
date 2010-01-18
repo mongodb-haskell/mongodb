@@ -1,6 +1,16 @@
 Name:                mongoDB
 Version:             0.1
 License:             MIT
+Maintainer:          Scott Parish <srp@srparish.net>
+Author:              Scott Parish <srp@srparish.net>
+Copyright:           Copyright (c) 2010-2010 Scott Parish
+Category:            Database
+Synopsis:            A driver for MongoDB
+Description:         This driver lets you connect to MongoDB, do inserts,
+                     queries, updates, etc. Also has many convience functions
+                     inspired by HDBC such as more easily converting between
+                     the BsonValue types and native Haskell types.
+Stability:           alpha
 Build-Depends:       base,
 	             binary,
 		     bytestring,
