@@ -30,7 +30,7 @@ module Database.MongoDB.BSON
      toBsonDoc,
      BinarySubType(..),
 
-     toBson
+     fromBson, toBson
     )
 where
 import Control.Monad
@@ -38,7 +38,7 @@ import Data.Binary
 import Data.Binary.Get
 import Data.Binary.IEEE754
 import Data.Binary.Put
-import Data.ByteString.Char8
+import Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
 import qualified Data.ByteString.UTF8 as S8
@@ -47,6 +47,7 @@ import Data.Int
 import qualified Data.Map as Map
 import qualified Data.List as List
 import Data.Time.Clock.POSIX
+import Data.Typeable
 import Database.MongoDB.Util
 
 data BsonValue
@@ -67,6 +68,9 @@ data BsonValue
     | BsonMinKey
     | BsonMaxKey
     deriving (Show, Eq, Ord)
+
+instance Typeable BsonValue where
+    typeOf _ = mkTypeName "BsonValue"
 
 newtype BsonDoc = BsonDoc {
       fromBsonDoc :: Map.Map L8.ByteString BsonValue
@@ -257,8 +261,15 @@ putOutterObj bytes = do
 putDataType :: DataType -> Put
 putDataType = putI8 . fromDataType
 
+fromBson :: Convertible BsonValue a => BsonValue -> a
+fromBson = convert
+
 toBson :: Convertible a BsonValue => a -> BsonValue
 toBson = convert
+
+unsupportedError :: (Typeable a, Convertible BsonValue a) =>
+                    BsonValue -> ConvertResult a
+unsupportedError = convError "Unsupported conversion"
 
 instance Convertible Double BsonValue where
     safeConvert = return . BsonDouble
@@ -331,3 +342,87 @@ instance Convertible Int32 BsonValue where
 
 instance Convertible Int64 BsonValue where
     safeConvert i = return $ BsonInt64 i
+
+instance Convertible BsonValue Double where
+    safeConvert (BsonDouble d) = return d
+    safeConvert (BsonInt32 i) = safeConvert i
+    safeConvert (BsonInt64 i) = safeConvert i
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue Float where
+    safeConvert (BsonDouble d) = safeConvert d
+    safeConvert (BsonInt32 i) = safeConvert i
+    safeConvert (BsonInt64 i) = safeConvert i
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue String where
+    safeConvert (BsonString bs) = return $ L8.toString bs
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue L8.ByteString where
+    safeConvert (BsonString bs) = return bs
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue S8.ByteString where
+    safeConvert (BsonString bs) = return $ C8.concat $ L.toChunks bs
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue [Double] where
+    safeConvert (BsonArray a) = mapM safeConvert a
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue [Float] where
+    safeConvert (BsonArray a) = mapM safeConvert a
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue [String] where
+    safeConvert (BsonArray a) = mapM safeConvert a
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue [Bool] where
+    safeConvert (BsonArray a) = mapM safeConvert a
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue [POSIXTime] where
+    safeConvert (BsonArray a) = mapM safeConvert a
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue [Int32] where
+    safeConvert (BsonArray a) = mapM safeConvert a
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue [Int64] where
+    safeConvert (BsonArray a) = mapM safeConvert a
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue Bool where
+    safeConvert (BsonBool b) = return b
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue POSIXTime where
+    safeConvert (BsonDate t) = return t
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue Int where
+    safeConvert (BsonDouble d) = safeConvert d
+    safeConvert (BsonInt32 d) = safeConvert d
+    safeConvert (BsonInt64 d) = safeConvert d
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue Integer where
+    safeConvert (BsonDouble d) = safeConvert d
+    safeConvert (BsonInt32 d) = safeConvert d
+    safeConvert (BsonInt64 d) = safeConvert d
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue Int32 where
+    safeConvert (BsonDouble d) = safeConvert d
+    safeConvert (BsonInt32 d) = return d
+    safeConvert (BsonInt64 d) = safeConvert d
+    safeConvert v = unsupportedError v
+
+instance Convertible BsonValue Int64 where
+    safeConvert (BsonDouble d) = safeConvert d
+    safeConvert (BsonInt32 d) = safeConvert d
+    safeConvert (BsonInt64 d) = return d
+    safeConvert v = unsupportedError v
