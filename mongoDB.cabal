@@ -5,6 +5,7 @@ Build-Depends:       base,
 	             binary,
 		     bytestring,
 		     containers,
+		     convertible,
 		     data-binary-ieee754,
 		     network,
 		     random,
@@ -15,3 +16,5 @@ Exposed-modules:     Database.MongoDB,
 		     Database.MongoDB.BSON
 Other-modules:       Database.MongoDB.Util
 ghc-options:         -Wall -Werror
+extensions:          FlexibleContexts, FlexibleInstances, MultiParamTypeClasses,
+		     TypeSynonymInstances

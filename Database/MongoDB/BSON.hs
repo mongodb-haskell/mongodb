@@ -28,7 +28,9 @@ module Database.MongoDB.BSON
      BsonValue(..),
      BsonDoc(..),
      toBsonDoc,
-     BinarySubType(..)
+     BinarySubType(..),
+
+     toBson
     )
 where
 import Control.Monad
@@ -39,6 +41,8 @@ import Data.Binary.Put
 import Data.ByteString.Char8
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
+import qualified Data.ByteString.UTF8 as S8
+import Data.Convertible
 import Data.Int
 import qualified Data.Map as Map
 import qualified Data.List as List
@@ -252,3 +256,78 @@ putOutterObj bytes = do
 
 putDataType :: DataType -> Put
 putDataType = putI8 . fromDataType
+
+toBson :: Convertible a BsonValue => a -> BsonValue
+toBson = convert
+
+instance Convertible Double BsonValue where
+    safeConvert = return . BsonDouble
+
+instance Convertible Float BsonValue where
+    safeConvert = return . BsonDouble . realToFrac
+
+instance Convertible String BsonValue where
+    safeConvert = return . BsonString . L8.fromString
+
+instance Convertible L8.ByteString BsonValue where
+    safeConvert = return . BsonString
+
+instance Convertible S8.ByteString BsonValue where
+    safeConvert = return . BsonString . L.fromChunks . return
+
+instance Convertible [Double] BsonValue where
+    safeConvert ds = BsonArray `liftM` mapM safeConvert ds
+
+instance Convertible [Float] BsonValue where
+    safeConvert fs = BsonArray `liftM` mapM safeConvert fs
+
+instance Convertible [String] BsonValue where
+    safeConvert ss = BsonArray `liftM` mapM safeConvert ss
+
+instance Convertible [L8.ByteString] BsonValue where
+    safeConvert bs = BsonArray `liftM` mapM safeConvert bs
+
+instance Convertible [S8.ByteString] BsonValue where
+    safeConvert bs = BsonArray `liftM` mapM safeConvert bs
+
+instance Convertible [Bool] BsonValue where
+    safeConvert bs = BsonArray `liftM` mapM safeConvert bs
+
+instance Convertible [POSIXTime] BsonValue where
+    safeConvert ts = BsonArray `liftM` mapM safeConvert ts
+
+instance Convertible [Int] BsonValue where
+    safeConvert is = BsonArray `liftM` mapM safeConvert is
+
+instance Convertible [Integer] BsonValue where
+    safeConvert is = BsonArray `liftM` mapM safeConvert is
+
+instance Convertible [Int32] BsonValue where
+    safeConvert is = BsonArray `liftM` mapM safeConvert is
+
+instance Convertible [Int64] BsonValue where
+    safeConvert is = BsonArray `liftM` mapM safeConvert is
+
+instance Convertible POSIXTime BsonValue where
+    safeConvert = return . BsonDate
+
+instance Convertible Bool BsonValue where
+    safeConvert = return . BsonBool
+
+instance Convertible Int BsonValue where
+    safeConvert i = if i >= (fromIntegral (minBound::Int32)) &&
+                       i <= (fromIntegral (maxBound::Int32))
+                    then return $ BsonInt32 $ fromIntegral i
+                    else return $ BsonInt64 $ fromIntegral i
+
+instance Convertible Integer BsonValue where
+    safeConvert i = if i >= (fromIntegral (minBound::Int32)) &&
+                       i <= (fromIntegral (maxBound::Int32))
+                    then return $ BsonInt32 $ fromIntegral i
+                    else return $ BsonInt64 $ fromIntegral i
+
+instance Convertible Int32 BsonValue where
+    safeConvert i = return $ BsonInt32 i
+
+instance Convertible Int64 BsonValue where
+    safeConvert i = return $ BsonInt64 i
