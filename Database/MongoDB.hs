@@ -43,6 +43,7 @@ import Data.Binary.Put
 import Data.Bits
 import Data.ByteString.Char8 hiding (find)
 import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Int
 import Data.IORef
 import qualified Data.List as List
@@ -131,7 +132,7 @@ toOpcode n = throw $ MongoDBInternalError $ "Got unexpected Opcode: " ++ show n
 
 type Collection = String
 type Selector = BsonDoc
-type FieldSelector = BsonDoc
+type FieldSelector = [L8.ByteString]
 type RequestID = Int32
 type NumToSkip = Int32
 type NumToReturn = Int32
@@ -194,7 +195,7 @@ insertMany c col docs = do
 {- | Open a cursor to find documents. If you need full functionality,
 see 'query' -}
 find :: Connection -> Collection -> Selector -> IO Cursor
-find c col sel = query c col [] 0 0 sel Nothing
+find c col sel = query c col [] 0 0 sel []
 
 {- | Perform a query and return the result as a lazy list. Be sure to
 understand the comments about using the lazy list given for 'allDocs'. -}
@@ -206,7 +207,7 @@ quickFind' :: Connection -> Collection -> Selector -> IO [BsonDoc]
 quickFind' c col sel = find c col sel >>= allDocs'
 
 query :: Connection -> Collection -> [QueryOpt] -> NumToSkip -> NumToReturn ->
-         Selector -> Maybe FieldSelector -> IO Cursor
+         Selector -> FieldSelector -> IO Cursor
 query c col opts nskip ret sel fsel = do
   let h = cHandle c
 
@@ -217,8 +218,8 @@ query c col opts nskip ret sel fsel = do
                putI32 ret
                put sel
                case fsel of
-                    Nothing -> putNothing
-                    Just _ -> put fsel
+                    [] -> putNothing
+                    _ -> put $ toBsonDoc $ List.zip fsel $ repeat $ BsonInt32 1
   (reqID, msg) <- packMsg c OP_QUERY body
   L.hPut h msg
 
