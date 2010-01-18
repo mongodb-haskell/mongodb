@@ -23,7 +23,6 @@ MongoDB
   - pair mode connection
   - operations on database objects
     * getName
-    * getCollectionNames
     * getCollection
     * dropCollection
     * executeCommand

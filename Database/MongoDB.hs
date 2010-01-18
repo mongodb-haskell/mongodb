@@ -28,7 +28,10 @@ module Database.MongoDB
      -- * Connection
      Connection,
      connect, connectOnPort, conClose, disconnect,
-     -- * Basic database operations
+     -- * Database operations
+     Database,
+     collectionNames,
+     -- * Collection operations
      Collection, FieldSelector, NumToSkip, NumToReturn, Selector,
      QueryOpt(..),
      UpdateFlag(..),
@@ -52,8 +55,9 @@ import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Int
 import Data.IORef
 import qualified Data.List as List
+import Data.Maybe
 import Data.Typeable
-import Database.MongoDB.BSON
+import Database.MongoDB.BSON as BSON
 import Database.MongoDB.Util
 import qualified Network
 import Network.Socket hiding (connect, send, sendTo, recv, recvFrom)
@@ -87,6 +91,14 @@ conClose = hClose . cHandle
 -- | Alias for 'conClose'
 disconnect :: Connection -> IO ()
 disconnect = conClose
+
+-- | Return a list of collections in /Database/.
+collectionNames :: Connection -> Database -> IO [Collection]
+collectionNames c db = do
+  docs <- quickFind' c (db ++ ".system.namespaces") $ toBsonDoc []
+  let names = flip List.map docs $ \doc ->
+              fromBson $ fromJust $ BSON.lookup (L8.fromString "name") doc
+  return $ List.filter (not . List.elem '$') names
 
 -- | An Itertaor over the results of a query. Use 'nextDoc' to get each
 -- successive result document, or 'allDocs' or 'allDocs'' to get lazy or
@@ -145,6 +157,9 @@ toOpcode 2005 = OP_GET_MORE
 toOpcode 2006 = OP_DELETE
 toOpcode 2007 = OP_KILL_CURSORS
 toOpcode n = throw $ MongoDBInternalError $ "Got unexpected Opcode: " ++ show n
+
+-- | The name of a database.
+type Database = String
 
 -- | The full collection name. The full collection name is the
 -- concatenation of the database name with the collection name, using
