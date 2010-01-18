@@ -84,17 +84,27 @@ instance Typeable BsonValue where
 -- It can be constructed either from a 'Map' (eg @'BsonDoc' myMap@) or
 -- from a associative list (eg @'toBsonDoc' myAL@).
 newtype BsonDoc = BsonDoc {
-      fromBsonDoc :: Map.Map L8.ByteString BsonValue
+      bdFromBsonDoc :: Map.Map L8.ByteString BsonValue
     }
     deriving (Eq, Ord, Show)
 
--- | Construct a 'BsonDoc' out of an associative list.
-toBsonDoc :: [(L8.ByteString, BsonValue)] -> BsonDoc
-toBsonDoc = BsonDoc . Map.fromList
+class BsonDocOps a where
+    -- | Construct a BsonDoc from an associative list
+    toBsonDoc :: [(a, BsonValue)] -> BsonDoc
+    -- | Unwrap BsonDoc to be a Map
+    fromBsonDoc :: BsonDoc -> Map.Map a BsonValue
+    -- | Return the BsonValue for given key, if any.
+    lookup :: a -> BsonDoc -> Maybe BsonValue
 
--- | Return the BsonValue for given key, if any.
-lookup :: L8.ByteString -> BsonDoc -> Maybe BsonValue
-lookup k = Map.lookup k . fromBsonDoc
+instance BsonDocOps L8.ByteString where
+    toBsonDoc = BsonDoc . Map.fromList
+    fromBsonDoc = bdFromBsonDoc
+    lookup k = Map.lookup k . fromBsonDoc
+
+instance BsonDocOps String where
+    toBsonDoc = BsonDoc . Map.mapKeys L8.fromString .Map.fromList
+    fromBsonDoc = Map.mapKeys L8.toString . bdFromBsonDoc
+    lookup k = Map.lookup (L8.fromString k) . fromBsonDoc
 
 data DataType =
     Data_min_key        | -- -1
