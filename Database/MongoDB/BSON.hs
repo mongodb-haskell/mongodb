@@ -30,10 +30,14 @@ module Database.MongoDB.BSON
      BsonDoc(..),
      toBsonDoc,
      BinarySubType(..),
+     -- * BsonDoc Operations
+     lookup,
      -- * Conversion
      fromBson, toBson
     )
 where
+import Prelude hiding (lookup)
+
 import Control.Monad
 import Data.Binary
 import Data.Binary.Get
@@ -87,6 +91,10 @@ newtype BsonDoc = BsonDoc {
 -- | Construct a 'BsonDoc' out of an associative list.
 toBsonDoc :: [(L8.ByteString, BsonValue)] -> BsonDoc
 toBsonDoc = BsonDoc . Map.fromList
+
+-- | Return the BsonValue for given key, if any.
+lookup :: L8.ByteString -> BsonDoc -> Maybe BsonValue
+lookup k = Map.lookup k . fromBsonDoc
 
 data DataType =
     Data_min_key        | -- -1
