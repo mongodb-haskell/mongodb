@@ -261,11 +261,17 @@ putOutterObj bytes = do
 putDataType :: DataType -> Put
 putDataType = putI8 . fromDataType
 
-fromBson :: Convertible BsonValue a => BsonValue -> a
-fromBson = convert
+class BsonConv a b where
+    fromBson :: Convertible a b => a -> b
+    toBson :: Convertible b a => b -> a
 
-toBson :: Convertible a BsonValue => a -> BsonValue
-toBson = convert
+instance BsonConv BsonValue a where
+    fromBson = convert
+    toBson = convert
+
+instance BsonConv (Maybe BsonValue) (Maybe a) where
+    fromBson = convert
+    toBson = convert
 
 unsupportedError :: (Typeable a, Convertible BsonValue a) =>
                     BsonValue -> ConvertResult a
@@ -342,6 +348,11 @@ instance Convertible Int32 BsonValue where
 
 instance Convertible Int64 BsonValue where
     safeConvert i = return $ BsonInt64 i
+
+instance (Convertible a BsonValue) =>
+    Convertible (Maybe a) BsonValue where
+        safeConvert Nothing = return BsonNull
+        safeConvert (Just a) = safeConvert a
 
 instance Convertible BsonValue Double where
     safeConvert (BsonDouble d) = return d
@@ -426,3 +437,8 @@ instance Convertible BsonValue Int64 where
     safeConvert (BsonInt32 d) = safeConvert d
     safeConvert (BsonInt64 d) = return d
     safeConvert v = unsupportedError v
+
+instance (Convertible BsonValue a) =>
+    Convertible (Maybe BsonValue) (Maybe a) where
+        safeConvert Nothing = return Nothing
+        safeConvert (Just a) = liftM Just $ safeConvert a
