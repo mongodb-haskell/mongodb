@@ -10,13 +10,61 @@ BSON
   - on outgoing uncompile?
   - on incoming automatically compile
 + more time convertibles
++ map operations for BsonDoc
 
 MongoDB
 -------
++ support full level 0
+  - database command support ??
+  - handle query errors
+  - hint, explain, count, $where
+  - database profiling: set/get profiling level, get profiling info
+  - validate a collection in a database ??
+  - pair mode connection
+  - operations on database objects
+    * getName
+    * getCollectionNames
+    * getCollection
+    * dropCollection
+    * executeCommand
+    * dropDatabase (erase)
+  - database admin
+    * getAdmin
+    * getProfilingLevel
+    * setProfilingLevel
+    * getProfilingInfo
+    * validateCollection
+  - collection
+    * modify
+    * replace
+    * repsert
+    * getCount()
+    * getCount(query)
+  - index operations
+    * createIndex
+    * dropIndex
+    * dropIndexes
+    * getIndexInformation
+  - misc operations
+    * explain
+    * getOptions
+    * getName
+    * close
+  - cursor object
+    * hasMore
+  optional:
+  - automatic reconnection
+  - buffer pooling
+  - advanced connection management (master-server, replica pair, Option_SlaveOk)
+  - Tailable cursor support
 + support safe operations
 + auto-reconnection
-+ destoy cursor (how?/when?)
++ auto-destoy connection (how?/when?)
 + pymongo returns the new ObjectId(s) on insert
++ don't read into cursor until needed, but have cursor send getMore before
+  it is actually out of docs (so network is finished by the time we're ready
+  to consume more)
++ support a LIMITed quickFind
 
 Misc
 ----
@@ -40,3 +88,5 @@ Tests?
 Documentation
   - ref
   - tutorial
+
+GridFS
