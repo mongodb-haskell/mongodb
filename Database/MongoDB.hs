@@ -27,7 +27,7 @@ module Database.MongoDB
     (
      -- * Connection
      Connection,
-     connect, connectOnPort, conClose,
+     connect, connectOnPort, conClose, disconnect,
      -- * Basic database operations
      Collection, FieldSelector, NumToSkip, NumToReturn, Selector,
      QueryOpt(..),
@@ -83,6 +83,10 @@ connectOnPort host port = do
 -- | Close database connection
 conClose :: Connection -> IO ()
 conClose = hClose . cHandle
+
+-- | Alias for 'conClose'
+disconnect :: Connection -> IO ()
+disconnect = conClose
 
 -- | An Itertaor over the results of a query. Use 'nextDoc' to get each
 -- successive result document, or 'allDocs' or 'allDocs'' to get lazy or
