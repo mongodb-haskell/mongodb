@@ -25,11 +25,12 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 module Database.MongoDB.BSON
     (
+     -- * Types
      BsonValue(..),
      BsonDoc(..),
      toBsonDoc,
      BinarySubType(..),
-
+     -- * Conversion
      fromBson, toBson
     )
 where
@@ -50,6 +51,7 @@ import Data.Time.Clock.POSIX
 import Data.Typeable
 import Database.MongoDB.Util
 
+-- | BsonValue is the type that can be used as a key in a 'BsonDoc'.
 data BsonValue
     = BsonDouble Double
     | BsonString L8.ByteString
@@ -72,11 +74,17 @@ data BsonValue
 instance Typeable BsonValue where
     typeOf _ = mkTypeName "BsonValue"
 
+-- | BSON Document: this is the top-level (but recursive) type that
+-- all MongoDB collections work in terms of. It is a mapping between
+-- strings ('Data.ByteString.Lazu.UTF8.ByteString') and 'BsonValue's.
+-- It can be constructed either from a 'Map' (eg @'BsonDoc' myMap@) or
+-- from a associative list (eg @'toBsonDoc' myAL@).
 newtype BsonDoc = BsonDoc {
       fromBsonDoc :: Map.Map L8.ByteString BsonValue
     }
     deriving (Eq, Ord, Show)
 
+-- | Construct a 'BsonDoc' out of an associative list.
 toBsonDoc :: [(L8.ByteString, BsonValue)] -> BsonDoc
 toBsonDoc = BsonDoc . Map.fromList
 
@@ -112,7 +120,6 @@ fromDataType :: DataType -> Int
 fromDataType Data_min_key = (-1)
 fromDataType Data_max_key = 127
 fromDataType d = fromEnum d
-
 
 data BinarySubType =
     BSTUNDEFINED_1     |
@@ -262,7 +269,9 @@ putDataType :: DataType -> Put
 putDataType = putI8 . fromDataType
 
 class BsonConv a b where
+    -- | Convert a BsonValue into a native Haskell type.
     fromBson :: Convertible a b => a -> b
+    -- | Convert a native Haskell type into a BsonValue.
     toBson :: Convertible b a => b -> a
 
 instance BsonConv BsonValue a where

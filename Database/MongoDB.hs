@@ -25,14 +25,19 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 module Database.MongoDB
     (
+     -- * Connection
+     Connection,
      connect, connectOnPort, conClose,
-     delete, insert, insertMany, query, remove, update,
-     find, quickFind, quickFind',
-     allDocs, allDocs', finish, nextDoc,
-     Collection, FieldSelector, NumToSkip, NumToReturn, RequestID, Selector,
-     Opcode(..),
+     -- * Basic database operations
+     Collection, FieldSelector, NumToSkip, NumToReturn, Selector,
      QueryOpt(..),
      UpdateFlag(..),
+     delete, insert, insertMany, query, remove, update,
+     -- * Convience database operations
+     find, quickFind, quickFind',
+     -- * Cursor operations
+     Cursor,
+     allDocs, allDocs', finish, nextDoc,
     )
 where
 import Control.Exception
@@ -57,11 +62,14 @@ import System.IO
 import System.IO.Unsafe
 import System.Random
 
+-- | A handle to a database connection
 data Connection = Connection { cHandle :: Handle, cRand :: IORef [Int] }
 
+-- | Estabilish a connection to a MongoDB server
 connect :: HostName -> IO Connection
 connect = flip connectOnPort $ Network.PortNumber 27017
 
+-- | Estabilish a connection to a MongoDB server on a non-standard port
 connectOnPort :: HostName -> Network.PortID -> IO Connection
 connectOnPort host port = do
   h <- Network.connectTo host port
@@ -72,9 +80,13 @@ connectOnPort host port = do
   nsRef <- newIORef ns
   return $ Connection { cHandle = h, cRand = nsRef }
 
+-- | Close database connection
 conClose :: Connection -> IO ()
 conClose = hClose . cHandle
 
+-- | An Itertaor over the results of a query. Use 'nextDoc' to get each
+-- successive result document, or 'allDocs' or 'allDocs'' to get lazy or
+-- strict lists of results.
 data Cursor = Cursor {
       curCon :: Connection,
       curID :: IORef Int64,
@@ -130,13 +142,39 @@ toOpcode 2006 = OP_DELETE
 toOpcode 2007 = OP_KILL_CURSORS
 toOpcode n = throw $ MongoDBInternalError $ "Got unexpected Opcode: " ++ show n
 
+-- | The full collection name. The full collection name is the
+-- concatenation of the database name with the collection name, using
+-- a @.@ for the concatenation. For example, for the database @foo@
+-- and the collection @bar@, the full collection name is @foo.bar@.
 type Collection = String
+
+-- | A 'BsonDoc' representing restrictions for a query much like the
+-- /where/ part of an SQL query.
 type Selector = BsonDoc
+-- | A list of field names that limits the fields in the returned
+-- documents. The list can contains zero or more elements, each of
+-- which is the name of a field that should be returned. An empty list
+-- means that no limiting is done and all fields are returned.
 type FieldSelector = [L8.ByteString]
 type RequestID = Int32
+-- | Sets the number of documents to omit - starting from the first
+-- document in the resulting dataset - when returning the result of
+-- the query.
 type NumToSkip = Int32
+-- | This controls how many documents are returned at a time. The
+-- cursor works by requesting /NumToReturn/ documents, which are then
+-- immediately all transfered over the network; these are held locally
+-- until the those /NumToReturn/ are all consumed and then the network
+-- will be hit again for the next /NumToReturn/ documents.
+--
+-- If the value @0@ is given, the database will choose the number of
+-- documents to return.
+--
+-- Otherwise choosing a good value is very dependant on the document size
+-- and the way the cursor is being used.
 type NumToReturn = Int32
 
+-- | Options that control the behavior of a 'query' operation.
 data QueryOpt = QO_TailableCursor
                | QO_SlaveOK
                | QO_OpLogReplay
@@ -150,6 +188,7 @@ fromQueryOpts opts = List.foldl (.|.) 0 $ fmap toVal opts
           toVal QO_OpLogReplay = 8
           toVal QO_NoCursorTimeout = 16
 
+-- | Options that effect the behavior of a 'update' operation.
 data UpdateFlag = UF_Upsert
                 | UF_Multiupdate
                 deriving (Show, Enum)
@@ -158,6 +197,7 @@ fromUpdateFlags :: [UpdateFlag] -> Int32
 fromUpdateFlags flags = List.foldl (.|.) 0 $
                         flip fmap flags $ (1 `shiftL`) . fromEnum
 
+-- | Delete documents matching /Selector/ from the given /Collection/.
 delete :: Connection -> Collection -> Selector -> IO RequestID
 delete c col sel = do
   let body = runPut $ do
@@ -169,9 +209,11 @@ delete c col sel = do
   L.hPut (cHandle c) msg
   return reqID
 
+-- | An alias for 'delete'.
 remove :: Connection -> Collection -> Selector -> IO RequestID
 remove = delete
 
+-- | Insert a single document into /Collection/.
 insert :: Connection -> Collection -> BsonDoc -> IO RequestID
 insert c col doc = do
   let body = runPut $ do
@@ -182,6 +224,7 @@ insert c col doc = do
   L.hPut (cHandle c) msg
   return reqID
 
+-- | Insert a list of documents into /Collection/.
 insertMany :: Connection -> Collection -> [BsonDoc] -> IO RequestID
 insertMany c col docs = do
   let body = runPut $ do
@@ -192,20 +235,24 @@ insertMany c col docs = do
   L.hPut (cHandle c) msg
   return reqID
 
-{- | Open a cursor to find documents. If you need full functionality,
-see 'query' -}
+-- | Open a cursor to find documents. If you need full functionality,
+-- see 'query'
 find :: Connection -> Collection -> Selector -> IO Cursor
 find c col sel = query c col [] 0 0 sel []
 
-{- | Perform a query and return the result as a lazy list. Be sure to
-understand the comments about using the lazy list given for 'allDocs'. -}
+-- | Perform a query and return the result as a lazy list. Be sure to
+-- understand the comments about using the lazy list given for
+-- 'allDocs'.
 quickFind :: Connection -> Collection -> Selector -> IO [BsonDoc]
 quickFind c col sel = find c col sel >>= allDocs
 
-{- | Perform a query and return the result as a strict list. -}
+-- | Perform a query and return the result as a strict list.
 quickFind' :: Connection -> Collection -> Selector -> IO [BsonDoc]
 quickFind' c col sel = find c col sel >>= allDocs'
 
+-- | Open a cursor to find documents in /Collection/ that match
+-- /Selector/. See the documentation for each argument's type for
+-- information about how it effects the query.
 query :: Connection -> Collection -> [QueryOpt] -> NumToSkip -> NumToReturn ->
          Selector -> FieldSelector -> IO Cursor
 query c col opts nskip ret sel fsel = do
@@ -240,6 +287,7 @@ query c col opts nskip ret sel fsel = do
                curClosed = closed
              }
 
+-- | Update documents with /BsonDoc/ in /Collection/ that match /Selector/.
 update :: Connection -> Collection ->
           [UpdateFlag] -> Selector -> BsonDoc -> IO RequestID
 update c col flags sel obj = do
@@ -252,7 +300,6 @@ update c col flags sel obj = do
   (reqID, msg) <- packMsg c OP_UPDATE body
   L.hPut (cHandle c) msg
   return reqID
-
 
 data Hdr = Hdr {
       hMsgLen :: Int32,
@@ -289,8 +336,8 @@ getReply h = do
                return $ (Reply respFlags cursorID)
 
 
-{- | Return one document or Nothing if there are no more.
-Automatically closes the curosr when last document is read -}
+-- | Return one document or Nothing if there are no more.
+-- Automatically closes the curosr when last document is read
 nextDoc :: Cursor -> IO (Maybe BsonDoc)
 nextDoc cur = do
   closed <- readIORef $ curClosed cur
@@ -308,18 +355,17 @@ nextDoc cur = do
            writeIORef (curDocBytes cur) docBytes'
            return $ Just doc
 
-{- | Return a lazy list of all (of the rest) of the documents in the
-cursor. This works much like hGetContents--it will lazily read the
-cursor data out of the database as the list is used. The cursor is
-automatically closed when the list has been fully read.
-
-If you manually finish the cursor before consuming off this list you
-won't get all the original documents in the cursor.
-
-If you don't consume to the end of the list, you must manually close
-the cursor or you will leak the cursor, which may also leak on the
-database side.
--}
+-- | Return a lazy list of all (of the rest) of the documents in the
+-- cursor. This works much like hGetContents--it will lazily read the
+-- cursor data out of the database as the list is used. The cursor is
+-- automatically closed when the list has been fully read.
+--
+-- If you manually finish the cursor before consuming off this list
+-- you won't get all the original documents in the cursor.
+--
+-- If you don't consume to the end of the list, you must manually
+-- close the cursor or you will leak the cursor, which may also leak
+-- on the database side.
 allDocs :: Cursor -> IO [BsonDoc]
 allDocs cur = unsafeInterleaveIO $ do
                 doc <- nextDoc cur
@@ -327,9 +373,9 @@ allDocs cur = unsafeInterleaveIO $ do
                   Nothing -> return []
                   Just d -> allDocs cur >>= return . (d :)
 
-{- | Returns a strict list of all (of the rest) of the documents in
-the cursor. This means that all of the documents will immediately be
-read out of the database and loaded into memory. -}
+-- | Returns a strict list of all (of the rest) of the documents in
+-- the cursor. This means that all of the documents will immediately
+-- be read out of the database and loaded into memory.
 allDocs' :: Cursor -> IO [BsonDoc]
 allDocs' cur = do
   doc <- nextDoc cur
@@ -372,7 +418,8 @@ getMore cur = do
       writeIORef (curDocBytes cur) docBytes'
       return $ Just doc
 
-{- Manually close a cursor -- usually not needed. -}
+-- | Manually close a cursor -- usually not needed if you use
+-- 'allDocs', 'allDocs'', or 'nextDoc'.
 finish :: Cursor -> IO ()
 finish cur = do
   let h = cHandle $ curCon cur
