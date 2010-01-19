@@ -28,6 +28,7 @@ module Database.MongoDB
      -- * Connection
      Connection,
      connect, connectOnPort, conClose, disconnect,
+     dropDatabase,
      -- * Database
      Database, MongoDBCollectionInvalid,
      ColCreateOpt(..),
@@ -92,6 +93,12 @@ conClose = hClose . cHandle
 -- | Alias for 'conClose'
 disconnect :: Connection -> IO ()
 disconnect = conClose
+
+-- | Drop a database.
+dropDatabase :: Connection -> Database -> IO ()
+dropDatabase c db = do
+  _ <- dbCmd c db $ toBsonDoc [("dropDatabase", toBson (1::Int))]
+  return ()
 
 -- | Return a list of collections in /Database/.
 collectionNames :: Connection -> Database -> IO [Collection]

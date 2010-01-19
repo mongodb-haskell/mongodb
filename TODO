@@ -25,7 +25,6 @@ MongoDB
     * getName
     * getCollection
     * executeCommand
-    * dropDatabase (erase)
     * add_son_manipulators
     * authenticate
     * dereference (dbref)
