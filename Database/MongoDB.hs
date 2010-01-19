@@ -32,7 +32,8 @@ module Database.MongoDB
      -- * Database
      Database, MongoDBCollectionInvalid,
      ColCreateOpt(..),
-     collectionNames, createCollection, dropCollection, validateCollection,
+     collectionNames, createCollection, dropCollection,
+     runCommand, validateCollection,
      -- * Collection
      Collection, FieldSelector, FullCollection,
      NumToSkip, NumToReturn, Selector,
@@ -98,7 +99,7 @@ disconnect = conClose
 -- | Drop a database.
 dropDatabase :: Connection -> Database -> IO ()
 dropDatabase c db = do
-  _ <- dbCmd c db $ toBsonDoc [("dropDatabase", toBson (1::Int))]
+  _ <- runCommand c db $ toBsonDoc [("dropDatabase", toBson (1::Int))]
   return ()
 
 -- | Return a list of collections in /Database/.
@@ -150,14 +151,14 @@ createCollection c col opts = do
             "Collection can't start or end with '.': " ++ show col
     False -> return ()
   let cmd = ("create", toBson col') : List.map colCreateOptToBson opts
-  _ <- dbCmd c db $ toBsonDoc cmd
+  _ <- runCommand c db $ toBsonDoc cmd
   return ()
 
 -- | Drop a collection.
 dropCollection :: Connection -> FullCollection -> IO ()
 dropCollection c col = do
   let (db, col') = splitFullCol col
-  _ <- dbCmd c db $ toBsonDoc [("drop", toBson col')]
+  _ <- runCommand c db $ toBsonDoc [("drop", toBson col')]
   return ()
 
 -- | Return a string of validation info about the collection.
@@ -186,15 +187,18 @@ dropCollection c col = do
 validateCollection :: Connection -> FullCollection -> IO String
 validateCollection c col = do
   let (db, col') = splitFullCol col
-  res <- dbCmd c db $ toBsonDoc [("validate", toBson col')]
+  res <- runCommand c db $ toBsonDoc [("validate", toBson col')]
   return $ fromBson $ fromJust $ BSON.lookup "result" res
 
 splitFullCol :: FullCollection -> (Database, Collection)
 splitFullCol col = (List.takeWhile (/= '.') col,
                     List.tail $ List.dropWhile (/= '.') col)
 
-dbCmd :: Connection -> Database -> BsonDoc -> IO BsonDoc
-dbCmd c db cmd = do
+-- | Run a database command. Usually this is unneeded as driver wraps
+-- all of the commands for you (eg 'createCollection',
+-- 'dropCollection', etc).
+runCommand :: Connection -> Database -> BsonDoc -> IO BsonDoc
+runCommand c db cmd = do
   mres <- findOne c (db ++ ".$cmd") cmd
   let res = fromJust mres
   case fromBson $ fromJust $ BSON.lookup "ok" res :: Int of
@@ -358,8 +362,8 @@ count c col = countMatching c col BSON.empty
 countMatching :: Connection -> FullCollection -> Selector -> IO Int64
 countMatching c col sel = do
   let (db, col') = splitFullCol col
-  res <- dbCmd c db $ toBsonDoc [("count", toBson col'),
-                                 ("query", BsonObject sel)]
+  res <- runCommand c db $ toBsonDoc [("count", toBson col'),
+                                      ("query", BsonObject sel)]
   return $ fromBson $ fromJust $ BSON.lookup "n" res
 
 -- | Delete documents matching /Selector/ from the given /FullCollection/.
