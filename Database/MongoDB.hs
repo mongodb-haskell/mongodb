@@ -28,10 +28,11 @@ module Database.MongoDB
      -- * Connection
      Connection,
      connect, connectOnPort, conClose, disconnect,
-     -- * Database operations
-     Database,
-     collectionNames,
-     -- * Collection operations
+     -- * Database
+     Database, MongoDBCollectionInvalid,
+     ColCreateOpt(..),
+     collectionNames, createCollection,
+     -- * Collection
      Collection, FieldSelector, NumToSkip, NumToReturn, Selector,
      QueryOpt(..),
      UpdateFlag(..),
@@ -95,10 +96,65 @@ disconnect = conClose
 -- | Return a list of collections in /Database/.
 collectionNames :: Connection -> Database -> IO [Collection]
 collectionNames c db = do
-  docs <- quickFind' c (db ++ ".system.namespaces") $ toBsonDoc []
+  docs <- quickFind' c (db ++ ".system.namespaces") BSON.empty
   let names = flip List.map docs $ \doc ->
-              fromBson $ fromJust $ BSON.lookup (L8.fromString "name") doc
-  return $ List.filter (not . List.elem '$') names
+              fromBson $ fromJust $ BSON.lookup "name" doc
+  return $ List.filter (List.notElem '$') names
+
+data ColCreateOpt = CCOSize Int64  -- ^ Desired initial size for the
+                                   -- collection (in bytes). must be
+                                   -- less than or equal to
+                                   -- 10000000000. For capped
+                                   -- collections this size is the max
+                                   -- size of the collection.
+                  | CCOCapped Bool -- ^ If 'True', this is a capped collection.
+                  | CCOMax Int64   -- ^ Maximum number of objects if capped.
+                     deriving (Show, Eq)
+
+colCreateOptToBson :: ColCreateOpt -> (String, BsonValue)
+colCreateOptToBson (CCOSize sz) = ("size", toBson sz)
+colCreateOptToBson (CCOCapped b) = ("capped", toBson b)
+colCreateOptToBson (CCOMax m) = ("max", toBson m)
+
+-- | Create a new collection in this database.
+--
+-- Normally collection creation is automatic. This function should
+-- only be needed if you want to specify 'ColCreateOpt's on creation.
+-- 'MongoDBCollectionInvalid' is thrown if the collection already
+-- exists.
+createCollection :: Connection -> Collection -> [ColCreateOpt] -> IO ()
+createCollection c col opts = do
+  let db = List.takeWhile (/= '.') col
+  let col' = List.tail $ List.dropWhile (/= '.') col
+  dbcols <- collectionNames c db
+  case col `List.elem` dbcols of
+    True -> throwColInvalid $ "Collection already exists: " ++ show col
+    False -> return ()
+  case ".." `List.elem` (List.group col) of
+    True -> throwColInvalid $ "Collection can't contain \"..\": " ++ show col
+    False -> return ()
+  case '$' `List.elem` col &&
+       not ("oplog.$mail" `List.isPrefixOf` col' ||
+            "$cmd" `List.isPrefixOf` col') of
+    True -> throwColInvalid $ "Collection can't contain '$': " ++ show col
+    False -> return ()
+  case List.head col == '.' || List.last col == '.' of
+    True -> throwColInvalid $
+            "Collection can't start or end with '.': " ++ show col
+    False -> return ()
+  let cmd = ("create", toBson col') : List.map colCreateOptToBson opts
+  _ <- dbCmd c db $ toBsonDoc cmd
+  return ()
+
+dbCmd :: Connection -> Database -> BsonDoc -> IO BsonDoc
+dbCmd c db cmd = do
+  mres <- findOne c (db ++ ".$cmd") cmd
+  let res = fromJust mres
+  case fromBson $ fromJust $ BSON.lookup "ok" res :: Int of
+    1 -> return ()
+    _ -> throwOpFailure $ "command \"" ++ show cmd ++ "\" failed: " ++
+         (fromBson $ fromJust $ BSON.lookup "errmsg" res)
+  return res
 
 -- | An Itertaor over the results of a query. Use 'nextDoc' to get each
 -- successive result document, or 'allDocs' or 'allDocs'' to get lazy or
@@ -134,6 +190,34 @@ instance Typeable MongoDBInternalError where
     typeOf _ = mkTyConApp mongoDBInternalError []
 
 instance Exception MongoDBInternalError
+
+data MongoDBCollectionInvalid = MongoDBCollectionInvalid String
+                                deriving (Eq, Show, Read)
+
+mongoDBCollectionInvalid :: TyCon
+mongoDBCollectionInvalid = mkTyCon "Database.MongoDB.MongoDBcollectionInvalid"
+
+instance Typeable MongoDBCollectionInvalid where
+    typeOf _ = mkTyConApp mongoDBCollectionInvalid []
+
+instance Exception MongoDBCollectionInvalid
+
+throwColInvalid :: String -> a
+throwColInvalid s = throw $ MongoDBCollectionInvalid s
+
+data MongoDBOperationFailure = MongoDBOperationFailure String
+                                deriving (Eq, Show, Read)
+
+mongoDBOperationFailure :: TyCon
+mongoDBOperationFailure = mkTyCon "Database.MongoDB.MongoDBoperationFailure"
+
+instance Typeable MongoDBOperationFailure where
+    typeOf _ = mkTyConApp mongoDBOperationFailure []
+
+instance Exception MongoDBOperationFailure
+
+throwOpFailure :: String -> a
+throwOpFailure s = throw $ MongoDBOperationFailure s
 
 fromOpcode :: Opcode -> Int32
 fromOpcode OP_REPLY        =    1
