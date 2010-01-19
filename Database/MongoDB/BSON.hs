@@ -31,7 +31,7 @@ module Database.MongoDB.BSON
      toBsonDoc,
      BinarySubType(..),
      -- * BsonDoc Operations
-     lookup,
+     empty, lookup,
      -- * Conversion
      fromBson, toBson
     )
@@ -43,7 +43,7 @@ import Data.Binary
 import Data.Binary.Get
 import Data.Binary.IEEE754
 import Data.Binary.Put
-import Data.ByteString.Char8 as C8
+import Data.ByteString.Char8 as C8 hiding (empty)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
 import qualified Data.ByteString.UTF8 as S8
@@ -95,6 +95,10 @@ class BsonDocOps a where
     fromBsonDoc :: BsonDoc -> Map.Map a BsonValue
     -- | Return the BsonValue for given key, if any.
     lookup :: a -> BsonDoc -> Maybe BsonValue
+
+-- | An empty BsonDoc
+empty :: BsonDoc
+empty = BsonDoc Map.empty
 
 instance BsonDocOps L8.ByteString where
     toBsonDoc = BsonDoc . Map.fromList
