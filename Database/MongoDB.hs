@@ -262,7 +262,7 @@ find c col sel = query c col [] 0 0 sel []
 -- | Query, but only return the first result, if any.
 findOne :: Connection -> Collection -> Selector -> IO (Maybe BsonDoc)
 findOne c col sel = do
-  cur <- find c col sel
+  cur <- query c col [] 0 (-1) sel []
   el <- nextDoc cur
   finish cur
   return el
