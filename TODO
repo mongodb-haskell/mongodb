@@ -17,9 +17,8 @@ MongoDB
 + support full level 0
   - database command support ??
   - handle query errors
-  - hint, explain, count, $where
+  - hint, explain, $where
   - database profiling: set/get profiling level, get profiling info
-  - validate a collection in a database ??
   - pair mode connection
   - operations on database objects
     * getName
@@ -33,6 +32,7 @@ MongoDB
     * last_status
     * logout
     * reset_error_history
+    * eval
   - database admin
     * getAdmin
     * getProfilingLevel
@@ -42,8 +42,10 @@ MongoDB
     * modify
     * replace
     * repsert
+    * rename
   - index operations
     * createIndex
+    * ensureIndex
     * dropIndex
     * dropIndexes
     * getIndexInformation
@@ -52,6 +54,9 @@ MongoDB
     * getOptions
     * getName
     * close
+    * group
+    * distinct
+    * map reduce
   - cursor object
     * hasMore
 
