@@ -34,7 +34,8 @@ module Database.MongoDB
      ColCreateOpt(..),
      collectionNames, createCollection, dropCollection, validateCollection,
      -- * Collection
-     Collection, FieldSelector, NumToSkip, NumToReturn, Selector,
+     Collection, FieldSelector, FullCollection,
+     NumToSkip, NumToReturn, Selector,
      QueryOpt(..),
      UpdateFlag(..),
      count, countMatching, delete, insert, insertMany, query, remove, update,
@@ -101,7 +102,7 @@ dropDatabase c db = do
   return ()
 
 -- | Return a list of collections in /Database/.
-collectionNames :: Connection -> Database -> IO [Collection]
+collectionNames :: Connection -> Database -> IO [FullCollection]
 collectionNames c db = do
   docs <- quickFind' c (db ++ ".system.namespaces") BSON.empty
   let names = flip List.map docs $ \doc ->
@@ -129,10 +130,9 @@ colCreateOptToBson (CCOMax m) = ("max", toBson m)
 -- only be needed if you want to specify 'ColCreateOpt's on creation.
 -- 'MongoDBCollectionInvalid' is thrown if the collection already
 -- exists.
-createCollection :: Connection -> Collection -> [ColCreateOpt] -> IO ()
+createCollection :: Connection -> FullCollection -> [ColCreateOpt] -> IO ()
 createCollection c col opts = do
-  let db = dbFromCol col
-      col' = colMinusDB col
+  let (db, col') = splitFullCol col
   dbcols <- collectionNames c db
   case col `List.elem` dbcols of
     True -> throwColInvalid $ "Collection already exists: " ++ show col
@@ -154,10 +154,9 @@ createCollection c col opts = do
   return ()
 
 -- | Drop a collection.
-dropCollection :: Connection -> Collection -> IO ()
+dropCollection :: Connection -> FullCollection -> IO ()
 dropCollection c col = do
-  let db = dbFromCol col
-      col' = colMinusDB col
+  let (db, col') = splitFullCol col
   _ <- dbCmd c db $ toBsonDoc [("drop", toBson col')]
   return ()
 
@@ -184,18 +183,15 @@ dropCollection c col = do
 -- >  deleted: n: 4 size: 588
 -- >  nIndexes:1
 -- >    test.foo.bar.$_id_ keys:5
-validateCollection :: Connection -> Collection -> IO String
+validateCollection :: Connection -> FullCollection -> IO String
 validateCollection c col = do
-  let db = dbFromCol col
-      col' = colMinusDB col
+  let (db, col') = splitFullCol col
   res <- dbCmd c db $ toBsonDoc [("validate", toBson col')]
   return $ fromBson $ fromJust $ BSON.lookup "result" res
 
-dbFromCol :: Collection -> Database
-dbFromCol = List.takeWhile (/= '.')
-
-colMinusDB :: Collection -> Collection
-colMinusDB = List.tail . List.dropWhile (/= '.')
+splitFullCol :: FullCollection -> (Database, Collection)
+splitFullCol col = (List.takeWhile (/= '.') col,
+                    List.tail $ List.dropWhile (/= '.') col)
 
 dbCmd :: Connection -> Database -> BsonDoc -> IO BsonDoc
 dbCmd c db cmd = do
@@ -214,7 +210,7 @@ data Cursor = Cursor {
       curCon :: Connection,
       curID :: IORef Int64,
       curNumToRet :: Int32,
-      curCol :: Collection,
+      curCol :: FullCollection,
       curDocBytes :: IORef L.ByteString,
       curClosed :: IORef Bool
     }
@@ -300,6 +296,9 @@ type Database = String
 -- concatenation of the database name with the collection name, using
 -- a @.@ for the concatenation. For example, for the database @foo@
 -- and the collection @bar@, the full collection name is @foo.bar@.
+type FullCollection = String
+
+-- | The same as 'FullCollection' but without the 'Database' prefix.
 type Collection = String
 
 -- | A 'BsonDoc' representing restrictions for a query much like the
@@ -351,21 +350,20 @@ fromUpdateFlags :: [UpdateFlag] -> Int32
 fromUpdateFlags flags = List.foldl (.|.) 0 $
                         flip fmap flags $ (1 `shiftL`) . fromEnum
 
--- | Return the number of documents in /Collection/.
-count :: Connection -> Collection -> IO Int64
+-- | Return the number of documents in /FullCollection/.
+count :: Connection -> FullCollection -> IO Int64
 count c col = countMatching c col BSON.empty
 
--- | Return the number of documents in /Collection/ matching /Selector/
-countMatching :: Connection -> Collection -> Selector -> IO Int64
+-- | Return the number of documents in /FullCollection/ matching /Selector/
+countMatching :: Connection -> FullCollection -> Selector -> IO Int64
 countMatching c col sel = do
-  let db = dbFromCol col
-      col' = colMinusDB col
+  let (db, col') = splitFullCol col
   res <- dbCmd c db $ toBsonDoc [("count", toBson col'),
                                  ("query", BsonObject sel)]
   return $ fromBson $ fromJust $ BSON.lookup "n" res
 
--- | Delete documents matching /Selector/ from the given /Collection/.
-delete :: Connection -> Collection -> Selector -> IO RequestID
+-- | Delete documents matching /Selector/ from the given /FullCollection/.
+delete :: Connection -> FullCollection -> Selector -> IO RequestID
 delete c col sel = do
   let body = runPut $ do
                      putI32 0
@@ -377,11 +375,11 @@ delete c col sel = do
   return reqID
 
 -- | An alias for 'delete'.
-remove :: Connection -> Collection -> Selector -> IO RequestID
+remove :: Connection -> FullCollection -> Selector -> IO RequestID
 remove = delete
 
--- | Insert a single document into /Collection/.
-insert :: Connection -> Collection -> BsonDoc -> IO RequestID
+-- | Insert a single document into /FullCollection/.
+insert :: Connection -> FullCollection -> BsonDoc -> IO RequestID
 insert c col doc = do
   let body = runPut $ do
                      putI32 0
@@ -391,8 +389,8 @@ insert c col doc = do
   L.hPut (cHandle c) msg
   return reqID
 
--- | Insert a list of documents into /Collection/.
-insertMany :: Connection -> Collection -> [BsonDoc] -> IO RequestID
+-- | Insert a list of documents into /FullCollection/.
+insertMany :: Connection -> FullCollection -> [BsonDoc] -> IO RequestID
 insertMany c col docs = do
   let body = runPut $ do
                putI32 0
@@ -404,11 +402,11 @@ insertMany c col docs = do
 
 -- | Open a cursor to find documents. If you need full functionality,
 -- see 'query'
-find :: Connection -> Collection -> Selector -> IO Cursor
+find :: Connection -> FullCollection -> Selector -> IO Cursor
 find c col sel = query c col [] 0 0 sel []
 
 -- | Query, but only return the first result, if any.
-findOne :: Connection -> Collection -> Selector -> IO (Maybe BsonDoc)
+findOne :: Connection -> FullCollection -> Selector -> IO (Maybe BsonDoc)
 findOne c col sel = do
   cur <- query c col [] 0 (-1) sel []
   el <- nextDoc cur
@@ -418,18 +416,18 @@ findOne c col sel = do
 -- | Perform a query and return the result as a lazy list. Be sure to
 -- understand the comments about using the lazy list given for
 -- 'allDocs'.
-quickFind :: Connection -> Collection -> Selector -> IO [BsonDoc]
+quickFind :: Connection -> FullCollection -> Selector -> IO [BsonDoc]
 quickFind c col sel = find c col sel >>= allDocs
 
 -- | Perform a query and return the result as a strict list.
-quickFind' :: Connection -> Collection -> Selector -> IO [BsonDoc]
+quickFind' :: Connection -> FullCollection -> Selector -> IO [BsonDoc]
 quickFind' c col sel = find c col sel >>= allDocs'
 
--- | Open a cursor to find documents in /Collection/ that match
+-- | Open a cursor to find documents in /FullCollection/ that match
 -- /Selector/. See the documentation for each argument's type for
 -- information about how it effects the query.
-query :: Connection -> Collection -> [QueryOpt] -> NumToSkip -> NumToReturn ->
-         Selector -> FieldSelector -> IO Cursor
+query :: Connection -> FullCollection -> [QueryOpt] ->
+         NumToSkip -> NumToReturn -> Selector -> FieldSelector -> IO Cursor
 query c col opts nskip ret sel fsel = do
   let h = cHandle c
 
@@ -462,8 +460,8 @@ query c col opts nskip ret sel fsel = do
                curClosed = closed
              }
 
--- | Update documents with /BsonDoc/ in /Collection/ that match /Selector/.
-update :: Connection -> Collection ->
+-- | Update documents with /BsonDoc/ in /FullCollection/ that match /Selector/.
+update :: Connection -> FullCollection ->
           [UpdateFlag] -> Selector -> BsonDoc -> IO RequestID
 update c col flags sel obj = do
   let body = runPut $ do
