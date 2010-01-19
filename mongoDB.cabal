@@ -11,7 +11,7 @@ Description:         This driver lets you connect to MongoDB, do inserts,
                      inspired by HDBC such as more easily converting between
                      the BsonValue types and native Haskell types.
 Stability:           alpha
-Build-Depends:       base,
+Build-Depends:       base < 5,
 	             binary,
 		     bytestring,
 		     containers,
@@ -25,6 +25,7 @@ Build-Type:          Simple
 Exposed-modules:     Database.MongoDB,
 		     Database.MongoDB.BSON
 Other-modules:       Database.MongoDB.Util
-ghc-options:         -Wall -Werror
+ghc-options:         -Wall
 extensions:          FlexibleContexts, FlexibleInstances, MultiParamTypeClasses,
 		     TypeSynonymInstances
+cabal-version:       >= 1.4
