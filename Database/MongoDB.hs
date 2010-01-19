@@ -31,7 +31,7 @@ module Database.MongoDB
      -- * Database
      Database, MongoDBCollectionInvalid,
      ColCreateOpt(..),
-     collectionNames, createCollection,
+     collectionNames, createCollection, dropCollection,
      -- * Collection
      Collection, FieldSelector, NumToSkip, NumToReturn, Selector,
      QueryOpt(..),
@@ -124,8 +124,8 @@ colCreateOptToBson (CCOMax m) = ("max", toBson m)
 -- exists.
 createCollection :: Connection -> Collection -> [ColCreateOpt] -> IO ()
 createCollection c col opts = do
-  let db = List.takeWhile (/= '.') col
-  let col' = List.tail $ List.dropWhile (/= '.') col
+  let db = dbFromCol col
+      col' = colMinusDB col
   dbcols <- collectionNames c db
   case col `List.elem` dbcols of
     True -> throwColInvalid $ "Collection already exists: " ++ show col
@@ -145,6 +145,19 @@ createCollection c col opts = do
   let cmd = ("create", toBson col') : List.map colCreateOptToBson opts
   _ <- dbCmd c db $ toBsonDoc cmd
   return ()
+
+dropCollection :: Connection -> Collection -> IO ()
+dropCollection c col = do
+  let db = dbFromCol col
+      col' = colMinusDB col
+  _ <- dbCmd c db $ toBsonDoc [("drop", toBson col')]
+  return ()
+
+dbFromCol :: Collection -> Database
+dbFromCol = List.takeWhile (/= '.')
+
+colMinusDB :: Collection -> Collection
+colMinusDB = List.tail . List.dropWhile (/= '.')
 
 dbCmd :: Connection -> Database -> BsonDoc -> IO BsonDoc
 dbCmd c db cmd = do

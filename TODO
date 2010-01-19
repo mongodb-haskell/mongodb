@@ -24,7 +24,6 @@ MongoDB
   - operations on database objects
     * getName
     * getCollection
-    * dropCollection
     * executeCommand
     * dropDatabase (erase)
   - database admin
