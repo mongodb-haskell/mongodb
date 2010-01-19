@@ -10,7 +10,7 @@ BSON
   - on outgoing uncompile?
   - on incoming automatically compile
 + more time convertibles
-+ map operations for BsonDoc
++ map operations for BsonDoc (or should it be applicative?)
 
 MongoDB
 -------
@@ -26,6 +26,14 @@ MongoDB
     * getCollection
     * executeCommand
     * dropDatabase (erase)
+    * add_son_manipulators
+    * authenticate
+    * dereference (dbref)
+    * error
+    * eval
+    * last_status
+    * logout
+    * reset_error_history
   - database admin
     * getAdmin
     * getProfilingLevel
@@ -50,6 +58,9 @@ MongoDB
     * close
   - cursor object
     * hasMore
+
+  orderby (sort)
+
   optional:
   - automatic reconnection
   - buffer pooling
