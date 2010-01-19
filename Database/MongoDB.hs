@@ -32,7 +32,7 @@ module Database.MongoDB
      -- * Database
      Database, MongoDBCollectionInvalid,
      ColCreateOpt(..),
-     collectionNames, createCollection, dropCollection,
+     collectionNames, createCollection, dropCollection, validateCollection,
      -- * Collection
      Collection, FieldSelector, NumToSkip, NumToReturn, Selector,
      QueryOpt(..),
@@ -159,6 +159,13 @@ dropCollection c col = do
       col' = colMinusDB col
   _ <- dbCmd c db $ toBsonDoc [("drop", toBson col')]
   return ()
+
+validateCollection :: Connection -> Collection -> IO String
+validateCollection c col = do
+  let db = dbFromCol col
+      col' = colMinusDB col
+  res <- dbCmd c db $ toBsonDoc [("validate", toBson col')]
+  return $ fromBson $ fromJust $ BSON.lookup "result" res
 
 dbFromCol :: Collection -> Database
 dbFromCol = List.takeWhile (/= '.')
