@@ -37,7 +37,7 @@ module Database.MongoDB
      Collection, FieldSelector, NumToSkip, NumToReturn, Selector,
      QueryOpt(..),
      UpdateFlag(..),
-     delete, insert, insertMany, query, remove, update,
+     count, countMatching, delete, insert, insertMany, query, remove, update,
      -- * Convience collection operations
      find, findOne, quickFind, quickFind',
      -- * Cursor
@@ -51,7 +51,7 @@ import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
 import Data.Bits
-import Data.ByteString.Char8 hiding (find)
+import Data.ByteString.Char8 hiding (count, find)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Int
@@ -326,6 +326,19 @@ data UpdateFlag = UF_Upsert
 fromUpdateFlags :: [UpdateFlag] -> Int32
 fromUpdateFlags flags = List.foldl (.|.) 0 $
                         flip fmap flags $ (1 `shiftL`) . fromEnum
+
+-- | Return the number of documents in /Collection/.
+count :: Connection -> Collection -> IO Int64
+count c col = countMatching c col BSON.empty
+
+-- | Return the number of documents in /Collection/ matching /Selector/
+countMatching :: Connection -> Collection -> Selector -> IO Int64
+countMatching c col sel = do
+  let db = dbFromCol col
+      col' = colMinusDB col
+  res <- dbCmd c db $ toBsonDoc [("count", toBson col'),
+                                 ("query", BsonObject sel)]
+  return $ fromBson $ fromJust $ BSON.lookup "n" res
 
 -- | Delete documents matching /Selector/ from the given /Collection/.
 delete :: Connection -> Collection -> Selector -> IO RequestID

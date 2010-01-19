@@ -42,8 +42,6 @@ MongoDB
     * modify
     * replace
     * repsert
-    * getCount()
-    * getCount(query)
   - index operations
     * createIndex
     * dropIndex
