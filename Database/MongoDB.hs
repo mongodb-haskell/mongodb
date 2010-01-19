@@ -153,6 +153,7 @@ createCollection c col opts = do
   _ <- dbCmd c db $ toBsonDoc cmd
   return ()
 
+-- | Drop a collection.
 dropCollection :: Connection -> Collection -> IO ()
 dropCollection c col = do
   let db = dbFromCol col
@@ -160,6 +161,29 @@ dropCollection c col = do
   _ <- dbCmd c db $ toBsonDoc [("drop", toBson col')]
   return ()
 
+-- | Return a string of validation info about the collection.
+--
+-- Example output (note this probably can/will change with different
+-- versions of the server):
+--
+-- > validate
+-- >  details: 0x7fe5cc2c1da4 ofs:e7da4
+-- >  firstExtent:0:24100 ns:test.foo.bar
+-- >  lastExtent:0:24100 ns:test.foo.bar
+-- >  # extents:1
+-- >  datasize?:180 nrecords?:5 lastExtentSize:1024
+-- >  padding:1
+-- >  first extent:
+-- >    loc:0:24100 xnext:null xprev:null
+-- >    nsdiag:test.foo.bar
+-- >    size:1024 firstRecord:0:241e4 lastRecord:0:24280
+-- >  5 objects found, nobj:5
+-- >  260 bytes data w/headers
+-- >  180 bytes data wout/headers
+-- >  deletedList: 0100100000000000000
+-- >  deleted: n: 4 size: 588
+-- >  nIndexes:1
+-- >    test.foo.bar.$_id_ keys:5
 validateCollection :: Connection -> Collection -> IO String
 validateCollection c col = do
   let db = dbFromCol col
