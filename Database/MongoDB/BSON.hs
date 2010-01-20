@@ -409,6 +409,21 @@ instance Convertible BsonValue S8.ByteString where
     safeConvert (BsonString bs) = return $ C8.concat $ L.toChunks bs
     safeConvert v = unsupportedError v
 
+instance Convertible BsonDoc BsonValue where
+    safeConvert = return . BsonObject
+
+instance Convertible [(String, BsonValue)] BsonValue where
+    safeConvert = return . BsonObject . toBsonDoc
+
+instance Convertible [(L8.ByteString, BsonValue)] BsonValue where
+    safeConvert = return . BsonObject . toBsonDoc
+
+instance Convertible (Map.Map String BsonValue) BsonValue where
+    safeConvert = return . BsonObject . BsonDoc . Map.mapKeys L8.fromString
+
+instance Convertible (Map.Map L8.ByteString BsonValue) BsonValue where
+    safeConvert = return . BsonObject . BsonDoc
+
 instance Convertible BsonValue [Double] where
     safeConvert (BsonArray a) = mapM safeConvert a
     safeConvert v = unsupportedError v
