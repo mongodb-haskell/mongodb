@@ -629,6 +629,8 @@ fromDirection Descending = (-1)
 -- | Should this index guarantee uniqueness?
 type Unique = Bool
 
+-- | Create a new index on /FullCollection/ on the list of /Key/ /
+--   /Direction/ pairs.
 createIndex :: Connection -> FullCollection ->
                [(Key, Direction)] -> Unique -> IO String
 createIndex c col keys uniq = do
