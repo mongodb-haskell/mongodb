@@ -45,6 +45,10 @@ module Database.MongoDB
      -- * Cursor
      Cursor,
      allDocs, allDocs', finish, nextDoc,
+     -- * Index
+     Key, Unique,
+     Direction(..),
+     createIndex,
     )
 where
 import Control.Exception
@@ -363,7 +367,7 @@ countMatching :: Connection -> FullCollection -> Selector -> IO Int64
 countMatching c col sel = do
   let (db, col') = splitFullCol col
   res <- runCommand c db $ toBsonDoc [("count", toBson col'),
-                                      ("query", BsonObject sel)]
+                                      ("query", toBson sel)]
   return $ fromBson $ fromJust $ BSON.lookup "n" res
 
 -- | Delete documents matching /Selector/ from the given /FullCollection/.
@@ -609,6 +613,40 @@ finish cur = do
   L.hPut h msg
   writeIORef (curClosed cur) True
   return ()
+
+-- | The field key to index on.
+type Key = String
+
+-- | Direction to index.
+data Direction = Ascending
+               | Descending
+                 deriving (Show, Eq)
+
+fromDirection :: Direction -> Int
+fromDirection Ascending  = 1
+fromDirection Descending = (-1)
+
+-- | Should this index guarantee uniqueness?
+type Unique = Bool
+
+createIndex :: Connection -> FullCollection ->
+               [(Key, Direction)] -> Unique -> IO String
+createIndex c col keys uniq = do
+  let (db, _col') = splitFullCol col
+      name = indexName keys
+      keysDoc = flip fmap keys $
+                \(k, d) -> (k, toBson $ fromDirection d :: BsonValue)
+  _ <- insert c (db ++ ".system.indexes") $
+       toBsonDoc [("name",   toBson name),
+                  ("ns",     toBson col),
+                  ("key",    toBson keysDoc),
+                  ("unique", toBson uniq)]
+  return name
+
+indexName :: [(Key, Direction)] -> String
+indexName = List.concat . List.intersperse "_" . fmap partName
+    where partName (k, Ascending)  = k ++ "_1"
+          partName (k, Descending) = k ++ "_-1"
 
 putCol :: Collection -> Put
 putCol col = putByteString (pack col) >> putNull

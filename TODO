@@ -44,7 +44,6 @@ MongoDB
     * repsert
     * rename
   - index operations
-    * createIndex
     * ensureIndex
     * dropIndex
     * dropIndexes
@@ -100,3 +99,5 @@ Documentation
   - tutorial
 
 GridFS
+
+what's this about index caching?
