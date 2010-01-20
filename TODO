@@ -45,8 +45,6 @@ MongoDB
     * rename
   - index operations
     * ensureIndex
-    * dropIndex
-    * dropIndexes
     * getIndexInformation
   - misc operations
     * explain
