@@ -48,7 +48,7 @@ module Database.MongoDB
      -- * Index
      Key, Unique,
      Direction(..),
-     createIndex,
+     createIndex, dropIndex,
     )
 where
 import Control.Exception
@@ -644,6 +644,15 @@ createIndex c col keys uniq = do
                   ("key",    toBson keysDoc),
                   ("unique", toBson uniq)]
   return name
+
+-- | Drop the specified index on the given /FullCollection/.
+dropIndex :: Connection -> FullCollection -> [(Key, Direction)] -> IO ()
+dropIndex c col keys = do
+  let (db, col') = splitFullCol col
+      name = indexName keys
+  _ <- runCommand c db $ toBsonDoc [("deleteIndexes", toBson col'),
+                                    ("index", toBson name)]
+  return ()
 
 indexName :: [(Key, Direction)] -> String
 indexName = List.concat . List.intersperse "_" . fmap partName
