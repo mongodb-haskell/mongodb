@@ -57,7 +57,7 @@ import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
 import Data.Bits
-import Data.ByteString.Char8 hiding (count, find)
+import Data.ByteString.Internal (c2w)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Int
@@ -109,10 +109,10 @@ dropDatabase c db = do
 -- | Return a list of collections in /Database/.
 collectionNames :: Connection -> Database -> IO [FullCollection]
 collectionNames c db = do
-  docs <- quickFind' c (db ++ ".system.namespaces") BSON.empty
+  docs <- quickFind' c (L.append db $ s2L ".system.namespaces") empty
   let names = flip List.map docs $ \doc ->
               fromBson $ fromJust $ BSON.lookup "name" doc
-  return $ List.filter (List.notElem '$') names
+  return $ List.filter (L.notElem $ c2w '$') names
 
 data ColCreateOpt = CCOSize Int64  -- ^ Desired initial size for the
                                    -- collection (in bytes). must be
@@ -142,15 +142,15 @@ createCollection c col opts = do
   case col `List.elem` dbcols of
     True -> throwColInvalid $ "Collection already exists: " ++ show col
     False -> return ()
-  case ".." `List.elem` (List.group col) of
+  case s2L ".." `List.elem` (L.group col) of
     True -> throwColInvalid $ "Collection can't contain \"..\": " ++ show col
     False -> return ()
-  case '$' `List.elem` col &&
-       not ("oplog.$mail" `List.isPrefixOf` col' ||
-            "$cmd" `List.isPrefixOf` col') of
+  case (c2w '$') `L.elem` col &&
+       not (s2L "oplog.$mail" `L.isPrefixOf` col' ||
+            s2L "$cmd" `L.isPrefixOf` col') of
     True -> throwColInvalid $ "Collection can't contain '$': " ++ show col
     False -> return ()
-  case List.head col == '.' || List.last col == '.' of
+  case L.head col == (c2w '.') || L.last col == (c2w '.') of
     True -> throwColInvalid $
             "Collection can't start or end with '.': " ++ show col
     False -> return ()
@@ -195,15 +195,15 @@ validateCollection c col = do
   return $ fromBson $ fromJust $ BSON.lookup "result" res
 
 splitFullCol :: FullCollection -> (Database, Collection)
-splitFullCol col = (List.takeWhile (/= '.') col,
-                    List.tail $ List.dropWhile (/= '.') col)
+splitFullCol col = (L.takeWhile (c2w '.' /=) col,
+                    L.tail $ L.dropWhile (c2w '.' /=) col)
 
 -- | Run a database command. Usually this is unneeded as driver wraps
 -- all of the commands for you (eg 'createCollection',
 -- 'dropCollection', etc).
 runCommand :: Connection -> Database -> BsonDoc -> IO BsonDoc
 runCommand c db cmd = do
-  mres <- findOne c (db ++ ".$cmd") cmd
+  mres <- findOne c (L.append db $ s2L ".$cmd") cmd
   let res = fromJust mres
   case fromBson $ fromJust $ BSON.lookup "ok" res :: Int of
     1 -> return ()
@@ -298,16 +298,16 @@ toOpcode 2007 = OP_KILL_CURSORS
 toOpcode n = throw $ MongoDBInternalError $ "Got unexpected Opcode: " ++ show n
 
 -- | The name of a database.
-type Database = String
+type Database = L8.ByteString
 
 -- | The full collection name. The full collection name is the
 -- concatenation of the database name with the collection name, using
 -- a @.@ for the concatenation. For example, for the database @foo@
 -- and the collection @bar@, the full collection name is @foo.bar@.
-type FullCollection = String
+type FullCollection = L8.ByteString
 
 -- | The same as 'FullCollection' but without the 'Database' prefix.
-type Collection = String
+type Collection = L8.ByteString
 
 -- | A 'BsonDoc' representing restrictions for a query much like the
 -- /where/ part of an SQL query.
@@ -360,7 +360,7 @@ fromUpdateFlags flags = List.foldl (.|.) 0 $
 
 -- | Return the number of documents in /FullCollection/.
 count :: Connection -> FullCollection -> IO Int64
-count c col = countMatching c col BSON.empty
+count c col = countMatching c col empty
 
 -- | Return the number of documents in /FullCollection/ matching /Selector/
 countMatching :: Connection -> FullCollection -> Selector -> IO Int64
@@ -616,7 +616,7 @@ finish cur = do
   return ()
 
 -- | The field key to index on.
-type Key = String
+type Key = L8.ByteString
 
 -- | Direction to index.
 data Direction = Ascending
@@ -633,13 +633,13 @@ type Unique = Bool
 -- | Create a new index on /FullCollection/ on the list of /Key/ /
 --   /Direction/ pairs.
 createIndex :: Connection -> FullCollection ->
-               [(Key, Direction)] -> Unique -> IO String
+               [(Key, Direction)] -> Unique -> IO L8.ByteString
 createIndex c col keys uniq = do
   let (db, _col') = splitFullCol col
       name = indexName keys
       keysDoc = flip fmap keys $
                 \(k, d) -> (k, toBson $ fromDirection d :: BsonValue)
-  _ <- insert c (db ++ ".system.indexes") $
+  _ <- insert c (L.append db $ s2L ".system.indexes") $
        toBsonDoc [("name",   toBson name),
                   ("ns",     toBson col),
                   ("key",    toBson keysDoc),
@@ -664,13 +664,13 @@ dropIndexes c col = do
   return ()
 
 
-indexName :: [(Key, Direction)] -> String
-indexName = List.concat . List.intersperse "_" . fmap partName
-    where partName (k, Ascending)  = k ++ "_1"
-          partName (k, Descending) = k ++ "_-1"
+indexName :: [(Key, Direction)] -> L8.ByteString
+indexName = L.intercalate (s2L "_") . List.map partName
+    where partName (k, Ascending)  = L.append k $ s2L "_1"
+          partName (k, Descending) = L.append k $ s2L "_-1"
 
 putCol :: Collection -> Put
-putCol col = putByteString (pack col) >> putNull
+putCol col = putLazyByteString col >> putNull
 
 packMsg :: Connection -> Opcode -> L.ByteString -> IO (RequestID, L.ByteString)
 packMsg c op body = do
@@ -687,3 +687,6 @@ randNum :: Connection -> IO Int32
 randNum Connection { cRand = nsRef } = atomicModifyIORef nsRef $ \ns ->
                                        (List.tail ns,
                                         fromIntegral $ List.head ns)
+
+s2L :: String -> L8.ByteString
+s2L = L8.fromString
