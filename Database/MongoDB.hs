@@ -377,7 +377,7 @@ delete c col sel = do
                      putI32 0
                      putCol col
                      putI32 0
-                     put sel
+                     putBsonDoc sel
   (reqID, msg) <- packMsg c OP_DELETE body
   L.hPut (cHandle c) msg
   return reqID
@@ -392,7 +392,7 @@ insert c col doc = do
   let body = runPut $ do
                      putI32 0
                      putCol col
-                     put doc
+                     putBsonDoc doc
   (reqID, msg) <- packMsg c OP_INSERT body
   L.hPut (cHandle c) msg
   return reqID
@@ -403,7 +403,7 @@ insertMany c col docs = do
   let body = runPut $ do
                putI32 0
                putCol col
-               forM_ docs put
+               forM_ docs putBsonDoc
   (reqID, msg) <- packMsg c OP_INSERT body
   L.hPut (cHandle c) msg
   return reqID
@@ -444,10 +444,11 @@ query c col opts nskip ret sel fsel = do
                putCol col
                putI32 nskip
                putI32 ret
-               put sel
+               putBsonDoc sel
                case fsel of
                     [] -> putNothing
-                    _ -> put $ toBsonDoc $ List.zip fsel $ repeat $ BsonInt32 1
+                    _ -> putBsonDoc $ toBsonDoc $ List.zip fsel $
+                         repeat $ BsonInt32 1
   (reqID, msg) <- packMsg c OP_QUERY body
   L.hPut h msg
 
@@ -476,8 +477,8 @@ update c col flags sel obj = do
                putI32 0
                putCol col
                putI32 $ fromUpdateFlags flags
-               put sel
-               put obj
+               putBsonDoc sel
+               putBsonDoc obj
   (reqID, msg) <- packMsg c OP_UPDATE body
   L.hPut (cHandle c) msg
   return reqID
@@ -566,7 +567,7 @@ allDocs' cur = do
 
 getFirstDoc :: L.ByteString -> (BsonDoc, L.ByteString)
 getFirstDoc docBytes = flip runGet docBytes $ do
-                         doc <- get
+                         doc <- getBsonDoc
                          docBytes' <- getRemainingLazyByteString
                          return (doc, docBytes')
 

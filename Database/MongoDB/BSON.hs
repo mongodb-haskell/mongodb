@@ -27,13 +27,15 @@ module Database.MongoDB.BSON
     (
      -- * Types
      BsonValue(..),
-     BsonDoc(..),
-     toBsonDoc,
+     BsonDoc,
      BinarySubType(..),
      -- * BsonDoc Operations
      empty, lookup,
-     -- * Conversion
-     fromBson, toBson
+     -- * Type Conversion
+     fromBson, toBson,
+     fromBsonDoc, toBsonDoc,
+     -- * Binary encoding/decoding
+     getBsonDoc, putBsonDoc,
     )
 where
 import Prelude hiding (lookup)
@@ -83,35 +85,29 @@ instance Typeable BsonValue where
 -- strings ('Data.ByteString.Lazu.UTF8.ByteString') and 'BsonValue's.
 -- It can be constructed either from a 'Map' (eg @'BsonDoc' myMap@) or
 -- from a associative list (eg @'toBsonDoc' myAL@).
-newtype BsonDoc = BsonDoc {
-      bdFromBsonDoc :: Map.Map L8.ByteString BsonValue
-    }
-    deriving (Eq, Ord, Show)
-
-instance Typeable BsonDoc where
-    typeOf _ = mkTypeName "BsonDoc"
+type BsonDoc = Map.Map L8.ByteString BsonValue
 
 class BsonDocOps a where
     -- | Construct a BsonDoc from an associative list
     toBsonDoc :: [(a, BsonValue)] -> BsonDoc
     -- | Unwrap BsonDoc to be a Map
-    fromBsonDoc :: BsonDoc -> Map.Map a BsonValue
+    fromBsonDoc :: BsonDoc -> [(a, BsonValue)]
     -- | Return the BsonValue for given key, if any.
     lookup :: a -> BsonDoc -> Maybe BsonValue
 
 -- | An empty BsonDoc
 empty :: BsonDoc
-empty = BsonDoc Map.empty
+empty = Map.empty
 
 instance BsonDocOps L8.ByteString where
-    toBsonDoc = BsonDoc . Map.fromList
-    fromBsonDoc = bdFromBsonDoc
-    lookup k = Map.lookup k . fromBsonDoc
+    toBsonDoc = Map.fromList
+    fromBsonDoc = Map.toList
+    lookup k = Map.lookup k
 
 instance BsonDocOps String where
-    toBsonDoc = BsonDoc . Map.mapKeys L8.fromString .Map.fromList
-    fromBsonDoc = Map.mapKeys L8.toString . bdFromBsonDoc
-    lookup k = Map.lookup (L8.fromString k) . fromBsonDoc
+    toBsonDoc = Map.mapKeys L8.fromString .Map.fromList
+    fromBsonDoc = Map.toList . Map.mapKeys L8.toString
+    lookup k = Map.lookup (L8.fromString k)
 
 data DataType =
     Data_min_key        | -- -1
@@ -164,9 +160,11 @@ fromBinarySubType :: BinarySubType -> Int
 fromBinarySubType BSTUserDefined = 0x80
 fromBinarySubType d = fromEnum d
 
-instance Binary BsonDoc where
-    get = liftM snd getDoc
-    put = putObj
+getBsonDoc :: Get BsonDoc
+getBsonDoc = liftM snd getDoc
+
+putBsonDoc :: BsonDoc -> Put
+putBsonDoc = putObj
 
 getVal :: DataType -> Get (Integer, BsonValue)
 getVal Data_number = getFloat64le >>= return . (,) 8 . BsonDouble
@@ -207,25 +205,24 @@ getVal Data_long = getI64 >>= return . (,) 8 . BsonInt64
 getVal Data_min_key = return (0, BsonMinKey)
 getVal Data_max_key = return (0, BsonMaxKey)
 
-getInnerObj :: Int32 -> Get (Map.Map L8.ByteString BsonValue)
-            -> Get (Map.Map L8.ByteString BsonValue)
-getInnerObj 1 obj = obj
+getInnerObj :: Int32 -> BsonDoc -> Get BsonDoc
+getInnerObj 1 obj = return obj
 getInnerObj bytesLeft obj = do
   typ <- getDataType
   (keySz, key) <- getS
   (valSz, val) <- getVal typ
   getInnerObj (bytesLeft - 1 - fromIntegral keySz - fromIntegral valSz) $
-              liftM (Map.insert key val) obj
+              (Map.insert key val) obj
 
-getRawObj :: Get (Integer, Map.Map L8.ByteString BsonValue)
+getRawObj :: Get (Integer, BsonDoc)
 getRawObj = do
   bytes <- getI32
-  obj <- getInnerObj (bytes - 4) $ return Map.empty
+  obj <- getInnerObj (bytes - 4) empty
   getNull
   return (fromIntegral bytes, obj)
 
 getDoc :: Get (Integer, BsonDoc)
-getDoc = getRawObj >>= \(len, obj) ->  return (len, BsonDoc obj)
+getDoc = getRawObj
 
 getDataType :: Get DataType
 getDataType = liftM toDataType getI8
@@ -280,7 +277,7 @@ putVal BsonMaxKey       = putNothing
 
 putObj :: BsonDoc -> Put
 putObj obj   = putOutterObj bs
-    where bs = runPut $ forM_ (Map.toList (fromBsonDoc obj)) $ \(k, v) ->
+    where bs = runPut $ forM_ (fromBsonDoc obj) $ \(k, v) ->
                putType v >> putS k >> putVal v
 
 putOutterObj :: L.ByteString -> Put
@@ -344,17 +341,14 @@ instance Convertible [S8.ByteString] BsonValue where
 instance Convertible BsonDoc BsonValue where
     safeConvert = return . BsonObject
 
-instance Convertible [(String, BsonValue)] BsonValue where
-    safeConvert = return . BsonObject . toBsonDoc
+instance Convertible (Map.Map String BsonValue) BsonValue where
+    safeConvert = return . BsonObject . Map.mapKeys L8.fromString
 
 instance Convertible [(L8.ByteString, BsonValue)] BsonValue where
     safeConvert = return . BsonObject . toBsonDoc
 
-instance Convertible (Map.Map String BsonValue) BsonValue where
-    safeConvert = return . BsonObject . BsonDoc . Map.mapKeys L8.fromString
-
-instance Convertible (Map.Map L8.ByteString BsonValue) BsonValue where
-    safeConvert = return . BsonObject . BsonDoc
+instance Convertible [(String, BsonValue)] BsonValue where
+    safeConvert = return . BsonObject . toBsonDoc
 
 instance Convertible [Bool] BsonValue where
     safeConvert bs = BsonArray `liftM` mapM safeConvert bs
@@ -431,20 +425,16 @@ instance Convertible BsonValue BsonDoc where
     safeConvert (BsonObject o) = return o
     safeConvert v = unsupportedError v
 
-instance Convertible BsonValue (Map.Map L8.ByteString BsonValue) where
-    safeConvert (BsonObject o) = return $ fromBsonDoc $ o
-    safeConvert v = unsupportedError v
-
 instance Convertible BsonValue (Map.Map String BsonValue) where
-    safeConvert (BsonObject o) = return $ fromBsonDoc $ o
+    safeConvert (BsonObject o) = return $ Map.mapKeys L8.toString o
     safeConvert v = unsupportedError v
 
 instance Convertible BsonValue [(String, BsonValue)] where
-    safeConvert (BsonObject o) = return $ Map.toList $ fromBsonDoc o
+    safeConvert (BsonObject o) = return $ fromBsonDoc o
     safeConvert v = unsupportedError v
 
 instance Convertible BsonValue [(L8.ByteString, BsonValue)] where
-    safeConvert (BsonObject o) = return $ Map.toList $ fromBsonDoc o
+    safeConvert (BsonObject o) = return $ fromBsonDoc o
     safeConvert v = unsupportedError v
 
 instance Convertible BsonValue [Double] where
