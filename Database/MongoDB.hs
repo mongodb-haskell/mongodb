@@ -48,7 +48,7 @@ module Database.MongoDB
      -- * Index
      Key, Unique,
      Direction(..),
-     createIndex, dropIndex, dropIndexes,
+     createIndex, dropIndex, dropIndexes, indexInformation,
     )
 where
 import Control.Exception
@@ -663,6 +663,24 @@ dropIndexes c col = do
                                     ("index", toBson "*")]
   return ()
 
+-- | Return a BsonDoc describing the existing indexes on /FullCollection/.
+--
+-- With the current server versions (1.2) this will return documents
+-- such as:
+--
+-- > {"key": {"lastname": -1, "firstname": 1},
+-- >  "name": "lastname_-1_firstname_1",
+-- >  "ns": "mydb.people",
+-- >  "unique": true}
+--
+-- Which is a single key that indexes on @lastname@ (descending) and
+-- then @firstname@ (ascending) on the collection @people@ of the
+-- database @mydb@ with a uniqueness requirement.
+indexInformation :: Connection -> FullCollection -> IO [BsonDoc]
+indexInformation c col = do
+  let (db, _col') = splitFullCol col
+  quickFind' c (L.append db $ s2L ".system.indexes") $
+             toBsonDoc [("ns", toBson col)]
 
 indexName :: [(Key, Direction)] -> L8.ByteString
 indexName = L.intercalate (s2L "_") . List.map partName
