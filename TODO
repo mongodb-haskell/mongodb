@@ -20,10 +20,11 @@ MongoDB
   - hint, explain, $where
   - database profiling: set/get profiling level, get profiling info
   - pair mode connection
+  - connection operations
+    * server info
   - operations on database objects
     * getName
     * getCollection
-    * executeCommand
     * add_son_manipulators
     * authenticate
     * dereference (dbref)
@@ -44,7 +45,7 @@ MongoDB
     * repsert
     * rename
   - index operations
-    * ensureIndex
+    * ensureIndex / index existance caching
   - misc operations
     * explain
     * getOptions
@@ -97,4 +98,9 @@ Documentation
 
 GridFS
 
-what's this about index caching?
+
+pretty printer
+deep "lookup" function (other deep Map functions?)
+how to make bytestrings less painful
+custom Show/Read instance that looks more like json
+make sure NULLs aren't in created table names
