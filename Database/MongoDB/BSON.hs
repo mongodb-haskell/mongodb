@@ -88,6 +88,9 @@ newtype BsonDoc = BsonDoc {
     }
     deriving (Eq, Ord, Show)
 
+instance Typeable BsonDoc where
+    typeOf _ = mkTypeName "BsonDoc"
+
 class BsonDocOps a where
     -- | Construct a BsonDoc from an associative list
     toBsonDoc :: [(a, BsonValue)] -> BsonDoc
@@ -338,6 +341,21 @@ instance Convertible [L8.ByteString] BsonValue where
 instance Convertible [S8.ByteString] BsonValue where
     safeConvert bs = BsonArray `liftM` mapM safeConvert bs
 
+instance Convertible BsonDoc BsonValue where
+    safeConvert = return . BsonObject
+
+instance Convertible [(String, BsonValue)] BsonValue where
+    safeConvert = return . BsonObject . toBsonDoc
+
+instance Convertible [(L8.ByteString, BsonValue)] BsonValue where
+    safeConvert = return . BsonObject . toBsonDoc
+
+instance Convertible (Map.Map String BsonValue) BsonValue where
+    safeConvert = return . BsonObject . BsonDoc . Map.mapKeys L8.fromString
+
+instance Convertible (Map.Map L8.ByteString BsonValue) BsonValue where
+    safeConvert = return . BsonObject . BsonDoc
+
 instance Convertible [Bool] BsonValue where
     safeConvert bs = BsonArray `liftM` mapM safeConvert bs
 
@@ -409,20 +427,25 @@ instance Convertible BsonValue S8.ByteString where
     safeConvert (BsonString bs) = return $ C8.concat $ L.toChunks bs
     safeConvert v = unsupportedError v
 
-instance Convertible BsonDoc BsonValue where
-    safeConvert = return . BsonObject
+instance Convertible BsonValue BsonDoc where
+    safeConvert (BsonObject o) = return o
+    safeConvert v = unsupportedError v
 
-instance Convertible [(String, BsonValue)] BsonValue where
-    safeConvert = return . BsonObject . toBsonDoc
+instance Convertible BsonValue (Map.Map L8.ByteString BsonValue) where
+    safeConvert (BsonObject o) = return $ fromBsonDoc $ o
+    safeConvert v = unsupportedError v
 
-instance Convertible [(L8.ByteString, BsonValue)] BsonValue where
-    safeConvert = return . BsonObject . toBsonDoc
+instance Convertible BsonValue (Map.Map String BsonValue) where
+    safeConvert (BsonObject o) = return $ fromBsonDoc $ o
+    safeConvert v = unsupportedError v
 
-instance Convertible (Map.Map String BsonValue) BsonValue where
-    safeConvert = return . BsonObject . BsonDoc . Map.mapKeys L8.fromString
+instance Convertible BsonValue [(String, BsonValue)] where
+    safeConvert (BsonObject o) = return $ Map.toList $ fromBsonDoc o
+    safeConvert v = unsupportedError v
 
-instance Convertible (Map.Map L8.ByteString BsonValue) BsonValue where
-    safeConvert = return . BsonObject . BsonDoc
+instance Convertible BsonValue [(L8.ByteString, BsonValue)] where
+    safeConvert (BsonObject o) = return $ Map.toList $ fromBsonDoc o
+    safeConvert v = unsupportedError v
 
 instance Convertible BsonValue [Double] where
     safeConvert (BsonArray a) = mapM safeConvert a
