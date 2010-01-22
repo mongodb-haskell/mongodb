@@ -29,6 +29,7 @@ module Database.MongoDB
      Connection,
      connect, connectOnPort, conClose, disconnect, dropDatabase,
      serverInfo,
+     databasesInfo, databaseNames,
      -- * Database
      Database, MongoDBCollectionInvalid,
      ColCreateOpt(..),
@@ -63,6 +64,7 @@ import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Int
 import Data.IORef
 import qualified Data.List as List
+import qualified Data.Map as Map
 import Data.Maybe
 import Data.Typeable
 import Database.MongoDB.BSON as BSON
@@ -95,6 +97,19 @@ connectOnPort host port = do
 -- | Close database connection
 conClose :: Connection -> IO ()
 conClose = hClose . cHandle
+
+-- | Information about the databases on the server.
+databasesInfo :: Connection -> IO BsonDoc
+databasesInfo c = do
+    runCommand c (s2L "admin") $ toBsonDoc [("listDatabases", toBson (1::Int))]
+
+-- | Return a list of database names on the server.
+databaseNames :: Connection -> IO [Database]
+databaseNames c = do
+    info <- databasesInfo c
+    let (BsonArray dbs) = fromJust $ Map.lookup (s2L "databases") info
+        names = catMaybes $ List.map (Map.lookup (s2L "name") . fromBson) dbs
+    return $ List.map fromBson (names::[BsonValue])
 
 -- | Alias for 'conClose'
 disconnect :: Connection -> IO ()
