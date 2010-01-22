@@ -33,7 +33,7 @@ module Database.MongoDB
      Database, MongoDBCollectionInvalid,
      ColCreateOpt(..),
      collectionNames, createCollection, dropCollection,
-     runCommand, validateCollection,
+     renameCollection, runCommand, validateCollection,
      -- * Collection
      Collection, FieldSelector, FullCollection,
      NumToSkip, NumToReturn, Selector,
@@ -137,22 +137,10 @@ colCreateOptToBson (CCOMax m) = ("max", toBson m)
 -- exists.
 createCollection :: Connection -> FullCollection -> [ColCreateOpt] -> IO ()
 createCollection c col opts = do
-  let (db, col') = splitFullCol col
+  (db, col') <- validateCollectionName col
   dbcols <- collectionNames c db
   case col `List.elem` dbcols of
     True -> throwColInvalid $ "Collection already exists: " ++ show col
-    False -> return ()
-  case s2L ".." `List.elem` (L.group col) of
-    True -> throwColInvalid $ "Collection can't contain \"..\": " ++ show col
-    False -> return ()
-  case (c2w '$') `L.elem` col &&
-       not (s2L "oplog.$mail" `L.isPrefixOf` col' ||
-            s2L "$cmd" `L.isPrefixOf` col') of
-    True -> throwColInvalid $ "Collection can't contain '$': " ++ show col
-    False -> return ()
-  case L.head col == (c2w '.') || L.last col == (c2w '.') of
-    True -> throwColInvalid $
-            "Collection can't start or end with '.': " ++ show col
     False -> return ()
   let cmd = ("create", toBson col') : List.map colCreateOptToBson opts
   _ <- runCommand c db $ toBsonDoc cmd
@@ -163,6 +151,16 @@ dropCollection :: Connection -> FullCollection -> IO ()
 dropCollection c col = do
   let (db, col') = splitFullCol col
   _ <- runCommand c db $ toBsonDoc [("drop", toBson col')]
+  return ()
+
+-- | Rename a collection--first /FullCollection/ argument is the
+-- existing name, the second is the new name. At the moment this command
+-- can also be used to move a collection between databases.
+renameCollection :: Connection -> FullCollection -> FullCollection -> IO ()
+renameCollection c col newName = do
+  _ <- validateCollectionName col
+  _ <- runCommand c (s2L "admin") $ toBsonDoc [("renameCollection", toBson col),
+                                               ("to", toBson newName)]
   return ()
 
 -- | Return a string of validation info about the collection.
@@ -708,3 +706,20 @@ randNum Connection { cRand = nsRef } = atomicModifyIORef nsRef $ \ns ->
 
 s2L :: String -> L8.ByteString
 s2L = L8.fromString
+
+validateCollectionName :: FullCollection -> IO (Database, Collection)
+validateCollectionName col = do
+  let (db, col') = splitFullCol col
+  case s2L ".." `List.elem` (L.group col) of
+    True -> throwColInvalid $ "Collection can't contain \"..\": " ++ show col
+    False -> return ()
+  case (c2w '$') `L.elem` col &&
+       not (s2L "oplog.$mail" `L.isPrefixOf` col' ||
+            s2L "$cmd" `L.isPrefixOf` col') of
+    True -> throwColInvalid $ "Collection can't contain '$': " ++ show col
+    False -> return ()
+  case L.head col == (c2w '.') || L.last col == (c2w '.') of
+    True -> throwColInvalid $
+            "Collection can't start or end with '.': " ++ show col
+    False -> return ()
+  return (db, col')

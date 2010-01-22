@@ -43,7 +43,6 @@ MongoDB
     * modify
     * replace
     * repsert
-    * rename
   - index operations
     * ensureIndex / index existance caching
   - misc operations
