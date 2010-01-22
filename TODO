@@ -20,8 +20,6 @@ MongoDB
   - hint, explain, $where
   - database profiling: set/get profiling level, get profiling info
   - pair mode connection
-  - connection operations
-    * server info
   - operations on database objects
     * getName
     * getCollection

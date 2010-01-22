@@ -27,8 +27,8 @@ module Database.MongoDB
     (
      -- * Connection
      Connection,
-     connect, connectOnPort, conClose, disconnect,
-     dropDatabase,
+     connect, connectOnPort, conClose, disconnect, dropDatabase,
+     serverInfo,
      -- * Database
      Database, MongoDBCollectionInvalid,
      ColCreateOpt(..),
@@ -105,6 +105,11 @@ dropDatabase :: Connection -> Database -> IO ()
 dropDatabase c db = do
   _ <- runCommand c db $ toBsonDoc [("dropDatabase", toBson (1::Int))]
   return ()
+
+-- | Get information about the MongoDB server we're connected to.
+serverInfo :: Connection -> IO BsonDoc
+serverInfo c = do
+  runCommand c (s2L "admin") $ toBsonDoc [("buildinfo", toBson (1::Int))]
 
 -- | Return a list of collections in /Database/.
 collectionNames :: Connection -> Database -> IO [FullCollection]
