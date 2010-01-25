@@ -92,7 +92,7 @@ connectOnPort host port = do
   let ns = randomRs (fromIntegral (minBound :: Int32),
                      fromIntegral (maxBound :: Int32)) r
   nsRef <- newIORef ns
-  return $ Connection { cHandle = h, cRand = nsRef }
+  return Connection { cHandle = h, cRand = nsRef }
 
 -- | Close database connection
 conClose :: Connection -> IO ()
@@ -100,7 +100,7 @@ conClose = hClose . cHandle
 
 -- | Information about the databases on the server.
 databasesInfo :: Connection -> IO BsonDoc
-databasesInfo c = do
+databasesInfo c =
     runCommand c (s2L "admin") $ toBsonDoc [("listDatabases", toBson (1::Int))]
 
 -- | Return a list of database names on the server.
@@ -108,7 +108,7 @@ databaseNames :: Connection -> IO [Database]
 databaseNames c = do
     info <- databasesInfo c
     let (BsonArray dbs) = fromJust $ Map.lookup (s2L "databases") info
-        names = catMaybes $ List.map (Map.lookup (s2L "name") . fromBson) dbs
+        names = mapMaybe (Map.lookup (s2L "name") . fromBson) dbs
     return $ List.map fromBson (names::[BsonValue])
 
 -- | Alias for 'conClose'
@@ -123,15 +123,14 @@ dropDatabase c db = do
 
 -- | Get information about the MongoDB server we're connected to.
 serverInfo :: Connection -> IO BsonDoc
-serverInfo c = do
+serverInfo c =
   runCommand c (s2L "admin") $ toBsonDoc [("buildinfo", toBson (1::Int))]
 
 -- | Return a list of collections in /Database/.
 collectionNames :: Connection -> Database -> IO [FullCollection]
 collectionNames c db = do
   docs <- quickFind' c (L.append db $ s2L ".system.namespaces") empty
-  let names = flip List.map docs $ \doc ->
-              fromBson $ fromJust $ BSON.lookup "name" doc
+  let names = flip List.map docs $ fromBson . fromJust . BSON.lookup "name"
   return $ List.filter (L.notElem $ c2w '$') names
 
 data ColCreateOpt = CCOSize Int64  -- ^ Desired initial size for the
@@ -159,9 +158,8 @@ createCollection :: Connection -> FullCollection -> [ColCreateOpt] -> IO ()
 createCollection c col opts = do
   (db, col') <- validateCollectionName col
   dbcols <- collectionNames c db
-  case col `List.elem` dbcols of
-    True -> throwColInvalid $ "Collection already exists: " ++ show col
-    False -> return ()
+  when (col `List.elem` dbcols) $
+       throwColInvalid $ "Collection already exists: " ++ show col
   let cmd = ("create", toBson col') : List.map colCreateOptToBson opts
   _ <- runCommand c db $ toBsonDoc cmd
   return ()
@@ -223,10 +221,9 @@ runCommand :: Connection -> Database -> BsonDoc -> IO BsonDoc
 runCommand c db cmd = do
   mres <- findOne c (L.append db $ s2L ".$cmd") cmd
   let res = fromJust mres
-  case fromBson $ fromJust $ BSON.lookup "ok" res :: Int of
-    1 -> return ()
-    _ -> throwOpFailure $ "command \"" ++ show cmd ++ "\" failed: " ++
-         (fromBson $ fromJust $ BSON.lookup "errmsg" res)
+  when (1 /= (fromBson $ fromJust $ BSON.lookup "ok" res :: Int)) $
+       throwOpFailure $ "command \"" ++ show cmd ++ "\" failed: " ++
+                      fromBson (fromJust $ BSON.lookup "errmsg" res)
   return res
 
 -- | An Itertaor over the results of a query. Use 'nextDoc' to get each
@@ -242,15 +239,15 @@ data Cursor = Cursor {
     }
 
 data Opcode
-    = OP_REPLY          -- 1     Reply to a client request. responseTo is set
-    | OP_MSG            -- 1000	 generic msg command followed by a string
-    | OP_UPDATE         -- 2001  update document
-    | OP_INSERT	        -- 2002	 insert new document
-    | OP_GET_BY_OID	-- 2003	 is this used?
-    | OP_QUERY	        -- 2004	 query a collection
-    | OP_GET_MORE	-- 2005	 Get more data from a query. See Cursors
-    | OP_DELETE	        -- 2006	 Delete documents
-    | OP_KILL_CURSORS	-- 2007	 Tell database client is done with a cursor
+    = OPReply          -- 1    Reply to a client request. responseTo is set
+    | OPMsg            -- 1000 generic msg command followed by a string
+    | OPUpdate         -- 2001 update document
+    | OPInsert         -- 2002 insert new document
+    | OPGetByOid       -- 2003 is this used?
+    | OPQuery	       -- 2004 query a collection
+    | OPGetMore        -- 2005 Get more data from a query. See Cursors
+    | OPDelete         -- 2006 Delete documents
+    | OPKillCursors    -- 2007 Tell database client is done with a cursor
     deriving (Show, Eq)
 
 data MongoDBInternalError = MongoDBInternalError String
@@ -276,7 +273,7 @@ instance Typeable MongoDBCollectionInvalid where
 instance Exception MongoDBCollectionInvalid
 
 throwColInvalid :: String -> a
-throwColInvalid s = throw $ MongoDBCollectionInvalid s
+throwColInvalid = throw . MongoDBCollectionInvalid
 
 data MongoDBOperationFailure = MongoDBOperationFailure String
                                 deriving (Eq, Show, Read)
@@ -290,29 +287,29 @@ instance Typeable MongoDBOperationFailure where
 instance Exception MongoDBOperationFailure
 
 throwOpFailure :: String -> a
-throwOpFailure s = throw $ MongoDBOperationFailure s
+throwOpFailure = throw . MongoDBOperationFailure
 
 fromOpcode :: Opcode -> Int32
-fromOpcode OP_REPLY        =    1
-fromOpcode OP_MSG          = 1000
-fromOpcode OP_UPDATE       = 2001
-fromOpcode OP_INSERT       = 2002
-fromOpcode OP_GET_BY_OID   = 2003
-fromOpcode OP_QUERY        = 2004
-fromOpcode OP_GET_MORE     = 2005
-fromOpcode OP_DELETE       = 2006
-fromOpcode OP_KILL_CURSORS = 2007
+fromOpcode OPReply        =    1
+fromOpcode OPMsg          = 1000
+fromOpcode OPUpdate       = 2001
+fromOpcode OPInsert       = 2002
+fromOpcode OPGetByOid   = 2003
+fromOpcode OPQuery        = 2004
+fromOpcode OPGetMore      = 2005
+fromOpcode OPDelete       = 2006
+fromOpcode OPKillCursors  = 2007
 
 toOpcode :: Int32 -> Opcode
-toOpcode    1 = OP_REPLY
-toOpcode 1000 = OP_MSG
-toOpcode 2001 = OP_UPDATE
-toOpcode 2002 = OP_INSERT
-toOpcode 2003 = OP_GET_BY_OID
-toOpcode 2004 = OP_QUERY
-toOpcode 2005 = OP_GET_MORE
-toOpcode 2006 = OP_DELETE
-toOpcode 2007 = OP_KILL_CURSORS
+toOpcode    1 = OPReply
+toOpcode 1000 = OPMsg
+toOpcode 2001 = OPUpdate
+toOpcode 2002 = OPInsert
+toOpcode 2003 = OPGetByOid
+toOpcode 2004 = OPQuery
+toOpcode 2005 = OPGetMore
+toOpcode 2006 = OPDelete
+toOpcode 2007 = OPKillCursors
 toOpcode n = throw $ MongoDBInternalError $ "Got unexpected Opcode: " ++ show n
 
 -- | The name of a database.
@@ -354,22 +351,22 @@ type NumToSkip = Int32
 type NumToReturn = Int32
 
 -- | Options that control the behavior of a 'query' operation.
-data QueryOpt = QO_TailableCursor
-               | QO_SlaveOK
-               | QO_OpLogReplay
-               | QO_NoCursorTimeout
-               deriving (Show)
+data QueryOpt = QOTailableCursor
+              | QOSlaveOK
+              | QOOpLogReplay
+              | QONoCursorTimeout
+                deriving (Show)
 
 fromQueryOpts :: [QueryOpt] -> Int32
 fromQueryOpts opts = List.foldl (.|.) 0 $ fmap toVal opts
-    where toVal QO_TailableCursor = 2
-          toVal QO_SlaveOK = 4
-          toVal QO_OpLogReplay = 8
-          toVal QO_NoCursorTimeout = 16
+    where toVal QOTailableCursor = 2
+          toVal QOSlaveOK = 4
+          toVal QOOpLogReplay = 8
+          toVal QONoCursorTimeout = 16
 
 -- | Options that effect the behavior of a 'update' operation.
-data UpdateFlag = UF_Upsert
-                | UF_Multiupdate
+data UpdateFlag = UFUpsert
+                | UFMultiupdate
                 deriving (Show, Enum)
 
 fromUpdateFlags :: [UpdateFlag] -> Int32
@@ -396,7 +393,7 @@ delete c col sel = do
                      putCol col
                      putI32 0
                      putBsonDoc sel
-  (reqID, msg) <- packMsg c OP_DELETE body
+  (reqID, msg) <- packMsg c OPDelete body
   L.hPut (cHandle c) msg
   return reqID
 
@@ -411,7 +408,7 @@ insert c col doc = do
                      putI32 0
                      putCol col
                      putBsonDoc doc
-  (reqID, msg) <- packMsg c OP_INSERT body
+  (reqID, msg) <- packMsg c OPInsert body
   L.hPut (cHandle c) msg
   return reqID
 
@@ -422,7 +419,7 @@ insertMany c col docs = do
                putI32 0
                putCol col
                forM_ docs putBsonDoc
-  (reqID, msg) <- packMsg c OP_INSERT body
+  (reqID, msg) <- packMsg c OPInsert body
   L.hPut (cHandle c) msg
   return reqID
 
@@ -467,18 +464,18 @@ query c col opts nskip ret sel fsel = do
                     [] -> putNothing
                     _ -> putBsonDoc $ toBsonDoc $ List.zip fsel $
                          repeat $ BsonInt32 1
-  (reqID, msg) <- packMsg c OP_QUERY body
+  (reqID, msg) <- packMsg c OPQuery body
   L.hPut h msg
 
   hdr <- getHeader h
-  assert (OP_REPLY == hOp hdr) $ return ()
+  assert (OPReply == hOp hdr) $ return ()
   assert (hRespTo hdr == reqID) $ return ()
   reply <- getReply h
   assert (rRespFlags reply == 0) $ return ()
-  docBytes <- (L.hGet h $ fromIntegral $ hMsgLen hdr - 16 - 20) >>= newIORef
+  docBytes <- L.hGet h (fromIntegral $ hMsgLen hdr - 16 - 20) >>= newIORef
   closed <- newIORef False
   cid <- newIORef $ rCursorID reply
-  return $ Cursor {
+  return Cursor {
                curCon = c,
                curID = cid,
                curNumToRet = ret,
@@ -497,7 +494,7 @@ update c col flags sel obj = do
                putI32 $ fromUpdateFlags flags
                putBsonDoc sel
                putBsonDoc obj
-  (reqID, msg) <- packMsg c OP_UPDATE body
+  (reqID, msg) <- packMsg c OPUpdate body
   L.hPut (cHandle c) msg
   return reqID
 
@@ -533,7 +530,7 @@ getReply h = do
                cursorID <- getI64
                skip 4 -- startFrom <- getI32
                skip 4 -- numReturned <- getI32
-               return $ (Reply respFlags cursorID)
+               return $ Reply respFlags cursorID
 
 
 -- | Return one document or Nothing if there are no more.
@@ -541,9 +538,9 @@ getReply h = do
 nextDoc :: Cursor -> IO (Maybe BsonDoc)
 nextDoc cur = do
   closed <- readIORef $ curClosed cur
-  case closed of
-    True -> return Nothing
-    False -> do
+  if closed
+    then return Nothing
+    else do
       docBytes <- readIORef $ curDocBytes cur
       cid <- readIORef $ curID cur
       case L.length docBytes of
@@ -571,7 +568,7 @@ allDocs cur = unsafeInterleaveIO $ do
                 doc <- nextDoc cur
                 case doc of
                   Nothing -> return []
-                  Just d -> allDocs cur >>= return . (d :)
+                  Just d -> liftM (d :) (allDocs cur)
 
 -- | Returns a strict list of all (of the rest) of the documents in
 -- the cursor. This means that all of the documents will immediately
@@ -581,7 +578,7 @@ allDocs' cur = do
   doc <- nextDoc cur
   case doc of
     Nothing -> return []
-    Just d -> allDocs' cur >>= return . (d :)
+    Just d -> liftM (d :) (allDocs' cur)
 
 getFirstDoc :: L.ByteString -> (BsonDoc, L.ByteString)
 getFirstDoc docBytes = flip runGet docBytes $ do
@@ -599,11 +596,11 @@ getMore cur = do
                 putCol $ curCol cur
                 putI32 $ curNumToRet cur
                 putI64 cid
-  (reqID, msg) <- packMsg (curCon cur) OP_GET_MORE body
+  (reqID, msg) <- packMsg (curCon cur) OPGetMore body
   L.hPut h msg
 
   hdr <- getHeader h
-  assert (OP_REPLY == hOp hdr) $ return ()
+  assert (OPReply == hOp hdr) $ return ()
   assert (hRespTo hdr == reqID) $ return ()
   reply <- getReply h
   assert (rRespFlags reply == 0) $ return ()
@@ -628,7 +625,7 @@ finish cur = do
                  putI32 0
                  putI32 1
                  putI64 cid
-  (_reqID, msg) <- packMsg (curCon cur) OP_KILL_CURSORS body
+  (_reqID, msg) <- packMsg (curCon cur) OPKillCursors body
   L.hPut h msg
   writeIORef (curClosed cur) True
   return ()
@@ -643,7 +640,7 @@ data Direction = Ascending
 
 fromDirection :: Direction -> Int
 fromDirection Ascending  = 1
-fromDirection Descending = (-1)
+fromDirection Descending = - 1
 
 -- | Should this index guarantee uniqueness?
 type Unique = Bool
@@ -730,16 +727,12 @@ s2L = L8.fromString
 validateCollectionName :: FullCollection -> IO (Database, Collection)
 validateCollectionName col = do
   let (db, col') = splitFullCol col
-  case s2L ".." `List.elem` (L.group col) of
-    True -> throwColInvalid $ "Collection can't contain \"..\": " ++ show col
-    False -> return ()
-  case (c2w '$') `L.elem` col &&
-       not (s2L "oplog.$mail" `L.isPrefixOf` col' ||
-            s2L "$cmd" `L.isPrefixOf` col') of
-    True -> throwColInvalid $ "Collection can't contain '$': " ++ show col
-    False -> return ()
-  case L.head col == (c2w '.') || L.last col == (c2w '.') of
-    True -> throwColInvalid $
-            "Collection can't start or end with '.': " ++ show col
-    False -> return ()
+  when (s2L ".." `List.elem` L.group col) $
+       throwColInvalid $ "Collection can't contain \"..\": " ++ show col
+  when (c2w '$' `L.elem` col &&
+        not (s2L "oplog.$mail" `L.isPrefixOf` col' ||
+             s2L "$cmd" `L.isPrefixOf` col')) $
+       throwColInvalid $ "Collection can't contain '$': " ++ show col
+  when (L.head col == c2w '.' || L.last col == c2w '.') $
+       throwColInvalid $ "Collection can't start or end with '.': " ++ show col
   return (db, col')

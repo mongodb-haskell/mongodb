@@ -102,52 +102,52 @@ empty = Map.empty
 instance BsonDocOps L8.ByteString where
     toBsonDoc = Map.fromList
     fromBsonDoc = Map.toList
-    lookup k = Map.lookup k
+    lookup = Map.lookup
 
 instance BsonDocOps String where
     toBsonDoc = Map.mapKeys L8.fromString .Map.fromList
     fromBsonDoc = Map.toList . Map.mapKeys L8.toString
-    lookup k = Map.lookup (L8.fromString k)
+    lookup = Map.lookup . L8.fromString
 
 data DataType =
-    Data_min_key        | -- -1
-    Data_number         | -- 1
-    Data_string         | -- 2
-    Data_object	        | -- 3
-    Data_array          | -- 4
-    Data_binary         | -- 5
-    Data_undefined      | -- 6
-    Data_oid            | -- 7
-    Data_boolean        | -- 8
-    Data_date           | -- 9
-    Data_null           | -- 10
-    Data_regex          | -- 11
-    Data_ref            | -- 12
-    Data_code           | -- 13
-    Data_symbol	        | -- 14
-    Data_code_w_scope   | -- 15
-    Data_int            | -- 16
-    Data_timestamp      | -- 17
-    Data_long           | -- 18
-    Data_max_key          -- 127
+    DataMinKey     | -- -1
+    DataNumber     | -- 1
+    DataString     | -- 2
+    DataObject	   | -- 3
+    DataArray      | -- 4
+    DataBinary     | -- 5
+    DataUndefined  | -- 6
+    DataOid        | -- 7
+    DataBoolean    | -- 8
+    DataDate       | -- 9
+    DataNull       | -- 10
+    DataRegex      | -- 11
+    DataRef        | -- 12
+    DataCode       | -- 13
+    DataSymbol	   | -- 14
+    DataCodeWScope | -- 15
+    DataInt        | -- 16
+    DataTimestamp  | -- 17
+    DataLong       | -- 18
+    DataMaxKey       -- 127
     deriving (Show, Read, Enum, Eq, Ord)
 
 toDataType :: Int -> DataType
-toDataType (-1) = Data_min_key
-toDataType 127 = Data_max_key
+toDataType (-1) = DataMinKey
+toDataType 127 = DataMaxKey
 toDataType d = toEnum d
 
 fromDataType :: DataType -> Int
-fromDataType Data_min_key = (-1)
-fromDataType Data_max_key = 127
+fromDataType DataMinKey = - 1
+fromDataType DataMaxKey = 127
 fromDataType d = fromEnum d
 
 data BinarySubType =
-    BSTUNDEFINED_1     |
+    BSTUNDEFINED1      |
     BSTFunction        | -- 1
     BSTByteArray       | -- 2
     BSTUUID            | -- 3
-    BSTUNDEFINED_2     |
+    BSTUNDEFINED2      |
     BSTMD5             | -- 5
     BSTUserDefined
     deriving (Show, Read, Enum, Eq, Ord)
@@ -167,43 +167,41 @@ putBsonDoc :: BsonDoc -> Put
 putBsonDoc = putObj
 
 getVal :: DataType -> Get (Integer, BsonValue)
-getVal Data_number = getFloat64le >>= return . (,) 8 . BsonDouble
-getVal Data_string = do
+getVal DataNumber = liftM ((,) 8 . BsonDouble) getFloat64le
+getVal DataString = do
   sLen1 <- getI32
   (_sLen2, s) <- getS
   return (fromIntegral $ 4 + sLen1, BsonString s)
-getVal Data_object = getDoc >>= \(len, obj) -> return (len, BsonObject obj)
-getVal Data_array = do
+getVal DataObject = getDoc >>= \(len, obj) -> return (len, BsonObject obj)
+getVal DataArray = do
   (len, arr) <- getRawObj
   let arr2 = Map.fold (:) [] arr -- reverse and remove key
   return (len, BsonArray arr2)
-getVal Data_binary = do
+getVal DataBinary = do
   skip 4
   st   <- getI8
   len2 <- getI32
   bs   <- getLazyByteString $ fromIntegral len2
   return (4 + 1 + 4 + fromIntegral len2, BsonBinary (toBinarySubType st) bs)
-getVal Data_undefined = return (1, BsonUndefined)
-getVal Data_oid = getLazyByteString 12 >>= return . (,) 12 . BsonObjectId
-getVal Data_boolean =
-    getI8 >>= return . (,) (1::Integer) . BsonBool . (/= (0::Int))
-getVal Data_date =
-    getI64 >>= return . (,) 8 . BsonDate . flip (/) 1000 . realToFrac
-getVal Data_null = return (1, BsonNull)
-getVal Data_regex = fail "Data_code not yet supported" -- TODO
-getVal Data_ref = fail "Data_ref is deprecated"
-getVal Data_code = fail "Data_code not yet supported" -- TODO
-getVal Data_symbol = do
+getVal DataUndefined = return (1, BsonUndefined)
+getVal DataOid = liftM ((,) 12 . BsonObjectId) $ getLazyByteString 12
+getVal DataBoolean = liftM ((,) (1::Integer) . BsonBool . (/= (0::Int))) getI8
+getVal DataDate = liftM ((,) 8 . BsonDate . flip (/) 1000 . realToFrac) getI64
+getVal DataNull = return (1, BsonNull)
+getVal DataRegex = fail "DataCode not yet supported" -- TODO
+getVal DataRef = fail "DataRef is deprecated"
+getVal DataCode = fail "DataCode not yet supported" -- TODO
+getVal DataSymbol = do
   sLen1 <- getI32
   (_sLen2, s) <- getS
   return (fromIntegral $ 4 + sLen1, BsonString s)
-getVal Data_code_w_scope = fail "Data_code_w_scope not yet supported" -- TODO
-getVal Data_int = getI32 >>= return . (,) 4 . BsonInt32 . fromIntegral
-getVal Data_timestamp = fail "Data_timestamp not yet supported" -- TODO
+getVal DataCodeWScope = fail "DataCodeWScope not yet supported" -- TODO
+getVal DataInt = liftM ((,) 4 . BsonInt32 . fromIntegral) getI32
+getVal DataTimestamp = fail "DataTimestamp not yet supported" -- TODO
 
-getVal Data_long = getI64 >>= return . (,) 8 . BsonInt64
-getVal Data_min_key = return (0, BsonMinKey)
-getVal Data_max_key = return (0, BsonMaxKey)
+getVal DataLong = liftM ((,) 8 . BsonInt64) getI64
+getVal DataMinKey = return (0, BsonMinKey)
+getVal DataMaxKey = return (0, BsonMaxKey)
 
 getInnerObj :: Int32 -> BsonDoc -> Get BsonDoc
 getInnerObj 1 obj = return obj
@@ -212,7 +210,7 @@ getInnerObj bytesLeft obj = do
   (keySz, key) <- getS
   (valSz, val) <- getVal typ
   getInnerObj (bytesLeft - 1 - fromIntegral keySz - fromIntegral valSz) $
-              (Map.insert key val) obj
+              Map.insert key val obj
 
 getRawObj :: Get (Integer, BsonDoc)
 getRawObj = do
@@ -228,26 +226,26 @@ getDataType :: Get DataType
 getDataType = liftM toDataType getI8
 
 putType :: BsonValue -> Put
-putType BsonDouble{}   = putDataType Data_number
-putType BsonString{}   = putDataType Data_string
-putType BsonObject{}   = putDataType Data_object
-putType BsonArray{}    = putDataType Data_array
-putType BsonBinary{}   = putDataType Data_binary
-putType BsonUndefined  = putDataType Data_undefined
-putType BsonObjectId{} = putDataType Data_oid
-putType BsonBool{}     = putDataType Data_boolean
-putType BsonDate{}     = putDataType Data_date
-putType BsonNull       = putDataType Data_null
-putType BsonRegex{}    = putDataType Data_regex
--- putType = putDataType Data_ref
--- putType = putDataType Data_code
-putType BsonSymbol{}   = putDataType Data_symbol
--- putType = putDataType Data_code_w_scope
-putType BsonInt32 {}   = putDataType Data_int
-putType BsonInt64 {}   = putDataType Data_long
--- putType = putDataType Data_timestamp
-putType BsonMinKey     = putDataType Data_min_key
-putType BsonMaxKey     = putDataType Data_max_key
+putType BsonDouble{}   = putDataType DataNumber
+putType BsonString{}   = putDataType DataString
+putType BsonObject{}   = putDataType DataObject
+putType BsonArray{}    = putDataType DataArray
+putType BsonBinary{}   = putDataType DataBinary
+putType BsonUndefined  = putDataType DataUndefined
+putType BsonObjectId{} = putDataType DataOid
+putType BsonBool{}     = putDataType DataBoolean
+putType BsonDate{}     = putDataType DataDate
+putType BsonNull       = putDataType DataNull
+putType BsonRegex{}    = putDataType DataRegex
+-- putType = putDataType DataRef
+-- putType = putDataType DataCode
+putType BsonSymbol{}   = putDataType DataSymbol
+-- putType = putDataType DataCodeWScope
+putType BsonInt32 {}   = putDataType DataInt
+putType BsonInt64 {}   = putDataType DataLong
+-- putType = putDataType DataTimestamp
+putType BsonMinKey     = putDataType DataMinKey
+putType BsonMaxKey     = putDataType DataMaxKey
 
 putVal :: BsonValue -> Put
 putVal (BsonDouble d)   = putFloat64le d
@@ -255,7 +253,7 @@ putVal (BsonString s)   = putI32 (fromIntegral $ 1 + L8.length s) >> putS s
 putVal (BsonObject o)   = putObj o
 putVal (BsonArray es)   = putOutterObj bs
     where bs = runPut $ forM_ (List.zip [(0::Int) .. ] es) $ \(i, e) ->
-               putType e >> (putS $ L8.fromString $ show i) >> putVal e
+               putType e >> putS (L8.fromString $ show i) >> putVal e
 putVal (BsonBinary t bs)= do putI32 $ fromIntegral $ 4 + L.length bs
                              putI8 $ fromBinarySubType t
                              putI32 $ fromIntegral $ L.length bs
@@ -375,22 +373,22 @@ instance Convertible Bool BsonValue where
     safeConvert = return . BsonBool
 
 instance Convertible Int BsonValue where
-    safeConvert i = if i >= (fromIntegral (minBound::Int32)) &&
-                       i <= (fromIntegral (maxBound::Int32))
+    safeConvert i = if i >= fromIntegral (minBound::Int32) &&
+                       i <= fromIntegral (maxBound::Int32)
                     then return $ BsonInt32 $ fromIntegral i
                     else return $ BsonInt64 $ fromIntegral i
 
 instance Convertible Integer BsonValue where
-    safeConvert i = if i >= (fromIntegral (minBound::Int32)) &&
-                       i <= (fromIntegral (maxBound::Int32))
+    safeConvert i = if i >= fromIntegral (minBound::Int32) &&
+                       i <= fromIntegral (maxBound::Int32)
                     then return $ BsonInt32 $ fromIntegral i
                     else return $ BsonInt64 $ fromIntegral i
 
 instance Convertible Int32 BsonValue where
-    safeConvert i = return $ BsonInt32 i
+    safeConvert = return . BsonInt32
 
 instance Convertible Int64 BsonValue where
-    safeConvert i = return $ BsonInt64 i
+    safeConvert = return . BsonInt64
 
 instance (Convertible a BsonValue) =>
     Convertible (Maybe a) BsonValue where
