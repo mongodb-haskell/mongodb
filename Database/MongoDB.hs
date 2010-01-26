@@ -130,7 +130,7 @@ serverInfo c =
 --
 -- Force a clean exit, flushing and closing all data files.
 -- Note that it will wait until all ongoing operations are complete.
-serverShutdown:: Connection -> IO BsonDoc
+serverShutdown :: Connection -> IO BsonDoc
 serverShutdown c =
   runCommand c (s2L "admin") $ toBsonDoc [("shutdown", toBson (1::Int))]
 
