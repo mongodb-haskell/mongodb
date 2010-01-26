@@ -41,7 +41,7 @@ module Database.MongoDB
      QueryOpt(..),
      UpdateFlag(..),
      count, countMatching, delete, insert, insertMany, query, remove, update,
-     -- * Convience collection operations
+     -- * Convenience collection operations
      find, findOne, quickFind, quickFind',
      -- * Cursor
      Cursor,
@@ -79,11 +79,11 @@ import System.Random
 -- | A handle to a database connection
 data Connection = Connection { cHandle :: Handle, cRand :: IORef [Int] }
 
--- | Estabilish a connection to a MongoDB server
+-- | Establish a connection to a MongoDB server
 connect :: HostName -> IO Connection
 connect = flip connectOnPort $ Network.PortNumber 27017
 
--- | Estabilish a connection to a MongoDB server on a non-standard port
+-- | Establish a connection to a MongoDB server on a non-standard port
 connectOnPort :: HostName -> Network.PortID -> IO Connection
 connectOnPort host port = do
   h <- Network.connectTo host port
@@ -226,7 +226,7 @@ runCommand c db cmd = do
                       fromBson (fromJust $ BSON.lookup "errmsg" res)
   return res
 
--- | An Itertaor over the results of a query. Use 'nextDoc' to get each
+-- | An Iterator over the results of a query. Use 'nextDoc' to get each
 -- successive result document, or 'allDocs' or 'allDocs'' to get lazy or
 -- strict lists of results.
 data Cursor = Cursor {
@@ -534,7 +534,7 @@ getReply h = do
 
 
 -- | Return one document or Nothing if there are no more.
--- Automatically closes the curosr when last document is read
+-- Automatically closes the cursor when last document is read
 nextDoc :: Cursor -> IO (Maybe BsonDoc)
 nextDoc cur = do
   closed <- readIORef $ curClosed cur
