@@ -28,7 +28,7 @@ module Database.MongoDB
      -- * Connection
      Connection,
      connect, connectOnPort, conClose, disconnect, dropDatabase,
-     serverInfo,
+     serverInfo, serverShutdown,
      databasesInfo, databaseNames,
      -- * Database
      Database, MongoDBCollectionInvalid,
@@ -125,6 +125,14 @@ dropDatabase c db = do
 serverInfo :: Connection -> IO BsonDoc
 serverInfo c =
   runCommand c (s2L "admin") $ toBsonDoc [("buildinfo", toBson (1::Int))]
+
+-- | Shut down the MongoDB server.
+--
+-- Force a clean exit, flushing and closing all data files.
+-- Note that it will wait until all ongoing operations are complete.
+serverShutdown:: Connection -> IO BsonDoc
+serverShutdown c =
+  runCommand c (s2L "admin") $ toBsonDoc [("shutdown", toBson (1::Int))]
 
 -- | Return a list of collections in /Database/.
 collectionNames :: Connection -> Database -> IO [FullCollection]
