@@ -28,7 +28,7 @@ module Database.MongoDB
      -- * Connection
      Connection,
      connect, connectOnPort, conClose, disconnect, dropDatabase,
-     coonnectCluster, setTarget,
+     connectCluster, setTarget,
      serverInfo, serverShutdown,
      databasesInfo, databaseNames,
      -- * Database
@@ -43,7 +43,7 @@ module Database.MongoDB
      QueryOpt(..),
      UpdateFlag(..),
      count, countMatching, delete, insert, insertMany, query, remove, update,
-     save, modify, replace, repsert, 
+     save, 
      -- * Convenience collection operations
      find, findOne, quickFind, quickFind',
      -- * Cursor
@@ -96,7 +96,7 @@ connectCluster xs = do
   connectAll c xs $ Network.PortNumber 27017
 
 connectAll :: Connection -> [HostName] -> Network.PortID -> IO Connection
-connectAll c [] p = return c
+connectAll c [] _ = return c
 connectAll c (host:xs) port = do
   h <- Network.connectTo host port
   hSetBuffering h NoBuffering
@@ -122,8 +122,8 @@ getHandle c = do
   i <- readIORef $ cIndex c
   return $ (cHandles c) !! i
 
-write :: Connection -> L.ByteString -> IO ()
-write c msg = getHandle c >>= flip L.hPut msg
+cPut :: Connection -> L.ByteString -> IO ()
+cPut c msg = getHandle c >>= flip L.hPut msg
  
 -- | Close database connection
 conClose :: Connection -> IO ()
@@ -144,7 +144,7 @@ databasesInfo c =
 databaseNames :: Connection -> IO [Database]
 databaseNames c = do
     info <- databasesInfo c
-    let (BsonArray dbs) = fromJust $ Map.lookup (s2L "databases") info
+    let (BsonArray dbs) = fromLookup $ Map.lookup (s2L "databases") info
         names = mapMaybe (Map.lookup (s2L "name") . fromBson) dbs
     return $ List.map fromBson (names::[BsonValue])
 
@@ -175,7 +175,7 @@ serverShutdown c =
 collectionNames :: Connection -> Database -> IO [FullCollection]
 collectionNames c db = do
   docs <- quickFind' c (L.append db $ s2L ".system.namespaces") empty
-  let names = flip List.map docs $ fromBson . fromJust . BSON.lookup "name"
+  let names = flip List.map docs $ fromBson . fromLookup . BSON.lookup "name"
   return $ List.filter (L.notElem $ c2w '$') names
 
 data ColCreateOpt = CCOSize Int64  -- ^ Desired initial size for the
@@ -253,7 +253,7 @@ validateCollection :: Connection -> FullCollection -> IO String
 validateCollection c col = do
   let (db, col') = splitFullCol col
   res <- runCommand c db $ toBsonDoc [("validate", toBson col')]
-  return $ fromBson $ fromJust $ BSON.lookup "result" res
+  return $ fromBson $ fromLookup $ BSON.lookup "result" res
 
 splitFullCol :: FullCollection -> (Database, Collection)
 splitFullCol col = (L.takeWhile (c2w '.' /=) col,
@@ -265,10 +265,10 @@ splitFullCol col = (L.takeWhile (c2w '.' /=) col,
 runCommand :: Connection -> Database -> BsonDoc -> IO BsonDoc
 runCommand c db cmd = do
   mres <- findOne c (L.append db $ s2L ".$cmd") cmd
-  let res = fromJust mres
-  when (1 /= (fromBson $ fromJust $ BSON.lookup "ok" res :: Int)) $
+  let res = fromLookup mres
+  when (1 /= (fromBson $ fromLookup $ BSON.lookup "ok" res :: Int)) $
        throwOpFailure $ "command \"" ++ show cmd ++ "\" failed: " ++
-                      fromBson (fromJust $ BSON.lookup "errmsg" res)
+                      fromBson (fromLookup $ BSON.lookup "errmsg" res)
   return res
 
 -- | An Iterator over the results of a query. Use 'nextDoc' to get each
@@ -428,7 +428,7 @@ countMatching c col sel = do
   let (db, col') = splitFullCol col
   res <- runCommand c db $ toBsonDoc [("count", toBson col'),
                                       ("query", toBson sel)]
-  return $ fromBson $ fromJust $ BSON.lookup "n" res
+  return $ fromBson $ fromLookup $ BSON.lookup "n" res
 
 -- | Delete documents matching /Selector/ from the given /FullCollection/.
 delete :: Connection -> FullCollection -> Selector -> IO RequestID
@@ -439,7 +439,7 @@ delete c col sel = do
                      putI32 0
                      putBsonDoc sel
   (reqID, msg) <- packMsg c OPDelete body
-  write c msg
+  cPut c msg
   return reqID
 
 -- | An alias for 'delete'.
@@ -454,7 +454,7 @@ insert c col doc = do
                      putCol col
                      putBsonDoc doc
   (reqID, msg) <- packMsg c OPInsert body
-  write c msg
+  cPut c msg
   return reqID
 
 -- | Insert a list of documents into /FullCollection/.
@@ -465,7 +465,7 @@ insertMany c col docs = do
                putCol col
                forM_ docs putBsonDoc
   (reqID, msg) <- packMsg c OPInsert body
-  write c msg
+  cPut c msg
   return reqID
 
 -- | Open a cursor to find documents. If you need full functionality,
@@ -539,7 +539,7 @@ update c col flags sel obj = do
                putBsonDoc sel
                putBsonDoc obj
   (reqID, msg) <- packMsg c OPUpdate body
-  write c msg
+  cPut c msg
   return reqID
 
 login :: Connection -> Database -> String -> String -> IO BsonDoc 
