@@ -46,6 +46,8 @@ module Database.MongoDB
      save, 
      -- * Convenience collection operations
      find, findOne, quickFind, quickFind',
+     -- * Query Helpers
+     whereClause,
      -- * Cursor
      Cursor,
      allDocs, allDocs', finish, nextDoc,
@@ -82,7 +84,9 @@ import System.IO.Unsafe
 import System.Random
 
 -- | A list of handles to database connections
-data Connection = Connection { cHandles :: [Handle], cIndex :: IORef Int, cRand :: IORef [Int] }
+data Connection = Connection { cHandles :: [Handle]
+                              ,cIndex :: IORef Int
+                              ,cRand :: IORef [Int] }
 
 -- | Establish a connection to a MongoDB server
 connect :: HostName -> IO Connection
@@ -542,33 +546,48 @@ update c col flags sel obj = do
   cPut c msg
   return reqID
 
+-- | log into the mongodb /Database/ attached to the /Connection/
 login :: Connection -> Database -> String -> String -> IO BsonDoc 
 login c db user pass = do
   doc <- runCommand c db (toBsonDoc [("getnonce", toBson (1 :: Int))])
   let nonce = fromBson $ fromLookup $ BSON.lookup "nonce" doc :: String
-      digest = md5sum $ pack $ nonce ++ user ++ ( md5sum $ pack (user ++ ":mongo:" ++ pass)) 
+      digest = md5sum $ pack $ nonce ++ user ++ 
+                 ( md5sum $ pack (user ++ ":mongo:" ++ pass)) 
       request = toBsonDoc [("authenticate", toBson (1 :: Int)), 
                            ("user", toBson user), 
                            ("nonce", toBson nonce), 
                            ("key", toBson digest)]
       in runCommand c db request
 
-addUser :: Connection -> String -> String -> String -> IO BsonDoc
+-- | create a new user in the current /Database/
+addUser :: Connection -> Database -> String -> String -> IO BsonDoc
 addUser c db user pass = do
   let userDoc = toBsonDoc [(s2L"user", toBson user)]
-      fdb = s2L (db ++ ".system.users")  
+      fdb = L.append db (s2L ".system.users")  
   doc <- liftM (maybe userDoc id) (findOne c fdb userDoc)
-  let doc' = Map.insert (s2L "pwd") (toBson ( md5sum $ pack (user ++ ":mongo:" ++ pass))) doc
+  let doc' = Map.insert (s2L "pwd") 
+               (toBson ( md5sum $ pack (user ++ ":mongo:" ++ pass))) doc
   _ <- save c fdb doc'
   return doc'
 
-
+-- | Conveniently stores the /BsonDoc/ to the /FullCollection/ 
+-- | if there is an _id present in the /BsonDoc/ then it already has 
+-- | a place in the DB, so we update it using the _id, otherwise
+-- | we insert it
 save :: Connection -> FullCollection -> BsonDoc -> IO RequestID
 save c fc doc =
   case Map.lookup (s2L "_id") doc of 
     Nothing -> insert c fc doc
     Just obj -> update c fc [UFUpsert] (toBsonDoc [("_id", obj)]) doc
-  
+
+-- | Use this in the place of the query portion of a select type query
+-- | This uses javascript and a scope supplied by a /BsonDoc/ to evaluate 
+-- | documents in the database for retrieval. 
+-- | Example: 
+-- | > findOne conn mycoll $ whereClause "this.name == (name1 + name2)" 
+-- | >     (toBsonDoc [("name1", toBson "mar"), ("name2", toBson "tha")])
+whereClause :: String -> BsonDoc -> BsonDoc
+whereClause qry scope = toBsonDoc [("$where", (BsonCodeWScope (s2L qry) scope))]
 
 data Hdr = Hdr {
       hMsgLen :: Int32,

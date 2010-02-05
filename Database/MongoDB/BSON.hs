@@ -73,6 +73,7 @@ data BsonValue
     | BsonSymbol L8.ByteString
     | BsonInt32 Int32
     | BsonInt64 Int64
+    | BsonCodeWScope L8.ByteString BsonDoc
     | BsonMinKey
     | BsonMaxKey
     deriving (Show, Eq, Ord)
@@ -195,7 +196,11 @@ getVal DataSymbol = do
   sLen1 <- getI32
   (_sLen2, s) <- getS
   return (fromIntegral $ 4 + sLen1, BsonString s)
-getVal DataCodeWScope = fail "DataCodeWScope not yet supported" -- TODO
+getVal DataCodeWScope = do
+  sLen1 <- getI32
+  (_, qry) <- getS
+  (_, scope) <- getDoc
+  return (fromIntegral sLen1, BsonCodeWScope qry scope)
 getVal DataInt = liftM ((,) 4 . BsonInt32 . fromIntegral) getI32
 getVal DataTimestamp = fail "DataTimestamp not yet supported" -- TODO
 
@@ -240,7 +245,7 @@ putType BsonRegex{}    = putDataType DataRegex
 -- putType = putDataType DataRef
 -- putType = putDataType DataCode
 putType BsonSymbol{}   = putDataType DataSymbol
--- putType = putDataType DataCodeWScope
+putType BsonCodeWScope{} = putDataType DataCodeWScope
 putType BsonInt32 {}   = putDataType DataInt
 putType BsonInt64 {}   = putDataType DataLong
 -- putType = putDataType DataTimestamp
@@ -249,7 +254,7 @@ putType BsonMaxKey     = putDataType DataMaxKey
 
 putVal :: BsonValue -> Put
 putVal (BsonDouble d)   = putFloat64le d
-putVal (BsonString s)   = putI32 (fromIntegral $ 1 + L8.length s) >> putS s
+putVal (BsonString s)   = putStrSz s
 putVal (BsonObject o)   = putObj o
 putVal (BsonArray es)   = putOutterObj bs
     where bs = runPut $ forM_ (List.zip [(0::Int) .. ] es) $ \(i, e) ->
@@ -270,6 +275,9 @@ putVal (BsonRegex r opt)= do putS r
 putVal (BsonSymbol s)   = putI32 (fromIntegral $ 1 + L8.length s) >> putS s
 putVal (BsonInt32 i)    = putI32 i
 putVal (BsonInt64 i)    = putI64 i
+putVal (BsonCodeWScope q s) =
+  let bytes = runPut (putStrSz q >> putObj s)
+    in (putI32 $ (+4) $ fromIntegral $ L.length bytes) >> putLazyByteString bytes
 putVal BsonMinKey       = putNothing
 putVal BsonMaxKey       = putNothing
 
