@@ -43,7 +43,7 @@ module Database.MongoDB
      QueryOpt(..),
      UpdateFlag(..),
      count, countMatching, delete, insert, insertMany, query, remove, update,
-     save, 
+     save,
      -- * Convenience collection operations
      find, findOne, quickFind, quickFind',
      -- * Query Helpers
@@ -95,8 +95,8 @@ connect = flip connectOnPort $ Network.PortNumber 27017
 -- | Establish connections to a list of MongoDB servers
 connectCluster :: [HostName] -> IO Connection
 connectCluster [] = throwOpFailure "No hostnames in list"
-connectCluster xs = do 
-  c <- newConnection 
+connectCluster xs = do
+  c <- newConnection
   connectAll c xs $ Network.PortNumber 27017
 
 connectAll :: Connection -> [HostName] -> Network.PortID -> IO Connection
@@ -108,12 +108,12 @@ connectAll c (host:xs) port = do
 
 -- | Establish a connection to a MongoDB server on a non-standard port
 connectOnPort :: HostName -> Network.PortID -> IO Connection
-connectOnPort host port = do 
-  c <- newConnection 
+connectOnPort host port = do
+  c <- newConnection
   connectAll c [host] port
 
 newConnection :: IO Connection
-newConnection = do 
+newConnection = do
   r <- newStdGen
   let ns = randomRs (fromIntegral (minBound :: Int32),
                      fromIntegral (maxBound :: Int32)) r
@@ -122,19 +122,19 @@ newConnection = do
   return $ Connection [] nsIdx nsRef
 
 getHandle :: Connection -> IO Handle
-getHandle c = do 
+getHandle c = do
   i <- readIORef $ cIndex c
   return $ (cHandles c) !! i
 
 cPut :: Connection -> L.ByteString -> IO ()
 cPut c msg = getHandle c >>= flip L.hPut msg
- 
+
 -- | Close database connection
 conClose :: Connection -> IO ()
 conClose c = sequence_ $ map hClose $ cHandles c
 
 setTarget :: Connection -> Int -> IO ()
-setTarget c i = 
+setTarget c i =
   if i > length (cHandles c)
     then throwOpFailure "Target index higher than length of list"
     else writeIORef (cIndex c) i >> return ()
@@ -546,15 +546,15 @@ update c col flags sel obj = do
   return reqID
 
 -- | log into the mongodb /Database/ attached to the /Connection/
-login :: Connection -> Database -> String -> String -> IO BsonDoc 
+login :: Connection -> Database -> String -> String -> IO BsonDoc
 login c db user pass = do
   doc <- runCommand c db (toBsonDoc [("getnonce", toBson (1 :: Int))])
   let nonce = fromBson $ fromLookup $ BSON.lookup "nonce" doc :: String
-      digest = md5sum $ pack $ nonce ++ user ++ 
-                 ( md5sum $ pack (user ++ ":mongo:" ++ pass)) 
-      request = toBsonDoc [("authenticate", toBson (1 :: Int)), 
-                           ("user", toBson user), 
-                           ("nonce", toBson nonce), 
+      digest = md5sum $ pack $ nonce ++ user ++
+                 ( md5sum $ pack (user ++ ":mongo:" ++ pass))
+      request = toBsonDoc [("authenticate", toBson (1 :: Int)),
+                           ("user", toBson user),
+                           ("nonce", toBson nonce),
                            ("key", toBson digest)]
       in runCommand c db request
 
@@ -562,28 +562,28 @@ login c db user pass = do
 addUser :: Connection -> Database -> String -> String -> IO BsonDoc
 addUser c db user pass = do
   let userDoc = toBsonDoc [(s2L"user", toBson user)]
-      fdb = L.append db (s2L ".system.users")  
+      fdb = L.append db (s2L ".system.users")
   doc <- liftM (maybe userDoc id) (findOne c fdb userDoc)
-  let doc' = Map.insert (s2L "pwd") 
+  let doc' = Map.insert (s2L "pwd")
                (toBson ( md5sum $ pack (user ++ ":mongo:" ++ pass))) doc
   _ <- save c fdb doc'
   return doc'
 
--- | Conveniently stores the /BsonDoc/ to the /FullCollection/ 
--- | if there is an _id present in the /BsonDoc/ then it already has 
+-- | Conveniently stores the /BsonDoc/ to the /FullCollection/
+-- | if there is an _id present in the /BsonDoc/ then it already has
 -- | a place in the DB, so we update it using the _id, otherwise
 -- | we insert it
 save :: Connection -> FullCollection -> BsonDoc -> IO RequestID
 save c fc doc =
-  case Map.lookup (s2L "_id") doc of 
+  case Map.lookup (s2L "_id") doc of
     Nothing -> insert c fc doc
     Just obj -> update c fc [UFUpsert] (toBsonDoc [("_id", obj)]) doc
 
 -- | Use this in the place of the query portion of a select type query
--- | This uses javascript and a scope supplied by a /BsonDoc/ to evaluate 
--- | documents in the database for retrieval. 
--- | Example: 
--- | > findOne conn mycoll $ whereClause "this.name == (name1 + name2)" 
+-- | This uses javascript and a scope supplied by a /BsonDoc/ to evaluate
+-- | documents in the database for retrieval.
+-- | Example:
+-- | > findOne conn mycoll $ whereClause "this.name == (name1 + name2)"
 -- | >     (toBsonDoc [("name1", toBson "mar"), ("name2", toBson "tha")])
 whereClause :: String -> BsonDoc -> BsonDoc
 whereClause qry scope = toBsonDoc [("$where", (BsonCodeWScope (s2L qry) scope))]
@@ -830,5 +830,5 @@ validateCollectionName col = do
 
 fromLookup :: (Maybe a) -> a
 fromLookup (Just m) = m
-fromLookup Nothing = throwColInvalid "cannot find key"  
+fromLookup Nothing = throwColInvalid "cannot find key"
 

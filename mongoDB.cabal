@@ -22,7 +22,7 @@ Build-Depends:       base < 5,
 		     random,
 		     time,
 		     utf8-string,
-         nano-md5
+                     nano-md5
 Build-Type:          Simple
 Exposed-modules:     Database.MongoDB,
 		     Database.MongoDB.BSON
