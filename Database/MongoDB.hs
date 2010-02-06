@@ -32,7 +32,7 @@ module Database.MongoDB
      serverInfo, serverShutdown,
      databasesInfo, databaseNames,
      -- * Database
-     Database, MongoDBCollectionInvalid,
+     Database, MongoDBCollectionInvalid, Password, Username,
      ColCreateOpt(..),
      collectionNames, createCollection, dropCollection,
      renameCollection, runCommand, validateCollection,
@@ -399,6 +399,9 @@ type NumToSkip = Int32
 -- and the way the cursor is being used.
 type NumToReturn = Int32
 
+type Username = String
+type Password = String
+
 -- | Options that control the behavior of a 'query' operation.
 data QueryOpt = QOTailableCursor
               | QOSlaveOK
@@ -546,7 +549,7 @@ update c col flags sel obj = do
   return reqID
 
 -- | log into the mongodb /Database/ attached to the /Connection/
-login :: Connection -> Database -> String -> String -> IO BsonDoc
+login :: Connection -> Database -> Username -> Password -> IO BsonDoc
 login c db user pass = do
   doc <- runCommand c db (toBsonDoc [("getnonce", toBson (1 :: Int))])
   let nonce = fromBson $ fromLookup $ BSON.lookup "nonce" doc :: String
@@ -559,7 +562,7 @@ login c db user pass = do
       in runCommand c db request
 
 -- | create a new user in the current /Database/
-addUser :: Connection -> Database -> String -> String -> IO BsonDoc
+addUser :: Connection -> Database -> Username -> Password -> IO BsonDoc
 addUser c db user pass = do
   let userDoc = toBsonDoc [(s2L"user", toBson user)]
       fdb = L.append db (s2L ".system.users")
