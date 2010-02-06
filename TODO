@@ -15,7 +15,6 @@ BSON
 MongoDB
 -------
 + support full level 0
-  - database command support ??
   - handle query errors
   - hint, explain, $where
   - database profiling: set/get profiling level, get profiling info
@@ -24,7 +23,6 @@ MongoDB
     * getName
     * getCollection
     * add_son_manipulators
-    * authenticate
     * dereference (dbref)
     * error
     * eval
