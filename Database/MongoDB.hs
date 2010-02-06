@@ -107,7 +107,7 @@ connectAll c [] = return c
 connectAll c ((host, port) : xs) = do
   h <- Network.connectTo host port
   hSetBuffering h NoBuffering
-  connectAll (c {cHandles = h:(cHandles c)}) xs
+  connectAll (c {cHandles = h : cHandles c}) xs
 
 -- | Establish a connection to a MongoDB server on a non-standard port
 connectOnPort :: HostName -> Network.PortID -> IO Connection
@@ -127,14 +127,14 @@ newConnection = do
 getHandle :: Connection -> IO Handle
 getHandle c = do
   i <- readIORef $ cIndex c
-  return $ (cHandles c) !! i
+  return $ cHandles c !! i
 
 cPut :: Connection -> L.ByteString -> IO ()
 cPut c msg = getHandle c >>= flip L.hPut msg
 
 -- | Close database connection
 conClose :: Connection -> IO ()
-conClose c = sequence_ $ map hClose $ cHandles c
+conClose c = mapM_ hClose $ cHandles c
 
 setTarget :: Connection -> Int -> IO ()
 setTarget c i =
@@ -557,7 +557,7 @@ login c db user pass = do
   doc <- runCommand c db (toBsonDoc [("getnonce", toBson (1 :: Int))])
   let nonce = fromBson $ fromLookup $ BSON.lookup "nonce" doc :: String
       digest = md5sum $ pack $ nonce ++ user ++
-                 ( md5sum $ pack (user ++ ":mongo:" ++ pass))
+                       md5sum (pack (user ++ ":mongo:" ++ pass))
       request = toBsonDoc [("authenticate", toBson (1 :: Int)),
                            ("user", toBson user),
                            ("nonce", toBson nonce),
@@ -567,11 +567,11 @@ login c db user pass = do
 -- | create a new user in the current /Database/
 addUser :: Connection -> Database -> Username -> Password -> IO BsonDoc
 addUser c db user pass = do
-  let userDoc = toBsonDoc [(s2L"user", toBson user)]
+  let userDoc = toBsonDoc [(s2L "user", toBson user)]
       fdb = L.append db (s2L ".system.users")
-  doc <- liftM (maybe userDoc id) (findOne c fdb userDoc)
-  let doc' = Map.insert (s2L "pwd")
-               (toBson ( md5sum $ pack (user ++ ":mongo:" ++ pass))) doc
+  doc <- findOne c fdb userDoc
+  let pwd = md5sum $ pack (user ++ ":mongo:" ++ pass)
+      doc' = Map.insert (s2L "pwd") (toBson pwd) (fromMaybe userDoc doc)
   _ <- save c fdb doc'
   return doc'
 
@@ -594,7 +594,7 @@ save c fc doc =
 -- > findOne conn mycoll $ whereClause "this.name == (name1 + name2)"
 -- >     (toBsonDoc [("name1", toBson "mar"), ("name2", toBson "tha")])
 whereClause :: String -> BsonDoc -> BsonDoc
-whereClause qry scope = toBsonDoc [("$where", (BsonCodeWScope (s2L qry) scope))]
+whereClause qry scope = toBsonDoc [("$where", BsonCodeWScope (s2L qry) scope)]
 
 data Hdr = Hdr {
       hMsgLen :: Int32,
@@ -836,7 +836,6 @@ validateCollectionName col = do
        throwColInvalid $ "Collection can't start or end with '.': " ++ show col
   return (db, col')
 
-fromLookup :: (Maybe a) -> a
+fromLookup :: Maybe a -> a
 fromLookup (Just m) = m
 fromLookup Nothing = throwColInvalid "cannot find key"
-

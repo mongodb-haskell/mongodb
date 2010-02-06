@@ -277,7 +277,7 @@ putVal (BsonInt32 i)    = putI32 i
 putVal (BsonInt64 i)    = putI64 i
 putVal (BsonCodeWScope q s) =
   let bytes = runPut (putStrSz q >> putObj s)
-    in (putI32 $ (+4) $ fromIntegral $ L.length bytes) >> putLazyByteString bytes
+    in putI32 ((+4) $ fromIntegral $ L.length bytes) >> putLazyByteString bytes
 putVal BsonMinKey       = putNothing
 putVal BsonMaxKey       = putNothing
 
