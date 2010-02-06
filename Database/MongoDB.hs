@@ -28,7 +28,7 @@ module Database.MongoDB
      -- * Connection
      Connection,
      connect, connectOnPort, conClose, disconnect, dropDatabase,
-     connectCluster, setTarget,
+     connectCluster, connectClusterOnPort, setTarget,
      serverInfo, serverShutdown,
      databasesInfo, databaseNames,
      -- * Database
@@ -94,23 +94,26 @@ connect = flip connectOnPort $ Network.PortNumber 27017
 
 -- | Establish connections to a list of MongoDB servers
 connectCluster :: [HostName] -> IO Connection
-connectCluster [] = throwOpFailure "No hostnames in list"
-connectCluster xs = do
-  c <- newConnection
-  connectAll c xs $ Network.PortNumber 27017
+connectCluster xs =
+    connectClusterOnPort $ fmap (flip (,) $ Network.PortNumber 27017) xs
 
-connectAll :: Connection -> [HostName] -> Network.PortID -> IO Connection
-connectAll c [] _ = return c
-connectAll c (host:xs) port = do
+-- | Establish connections to a list of MongoDB servers specifying each port.
+connectClusterOnPort :: [(HostName, Network.PortID)] -> IO Connection
+connectClusterOnPort [] = throwOpFailure "No hostnames in list"
+connectClusterOnPort xs = newConnection >>= flip connectAll xs
+
+connectAll :: Connection -> [(HostName, Network.PortID)] -> IO Connection
+connectAll c [] = return c
+connectAll c ((host, port) : xs) = do
   h <- Network.connectTo host port
   hSetBuffering h NoBuffering
-  connectAll (c {cHandles = h:(cHandles c)}) xs port
+  connectAll (c {cHandles = h:(cHandles c)}) xs
 
 -- | Establish a connection to a MongoDB server on a non-standard port
 connectOnPort :: HostName -> Network.PortID -> IO Connection
 connectOnPort host port = do
   c <- newConnection
-  connectAll c [host] port
+  connectAll c [(host, port)]
 
 newConnection :: IO Connection
 newConnection = do
