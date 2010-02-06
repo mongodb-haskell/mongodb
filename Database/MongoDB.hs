@@ -440,8 +440,7 @@ find c col sel = query c col [] 0 0 sel []
 findOne :: Connection -> FullCollection -> Selector -> IO (Maybe BsonDoc)
 findOne c col sel = do
   cur <- query c col [] 0 (-1) sel []
-  el <- nextDoc cur
-  return el
+  nextDoc cur
 
 -- | Perform a query and return the result as a lazy list. Be sure to
 -- understand the comments about using the lazy list given for
@@ -628,9 +627,7 @@ finish :: Cursor -> IO ()
 finish cur = do
   let h = cHandle $ curCon cur
   cid <- readIORef $ curID cur
-  if cid == 0
-    then return ()
-    else do
+  unless (cid == 0) $ do
       let body = runPut $ do
                    putI32 0
                    putI32 1
@@ -638,7 +635,7 @@ finish cur = do
       (_reqID, msg) <- packMsg (curCon cur) OPKillCursors body
       L.hPut h msg
       writeIORef (curClosed cur) True
-      return ()
+  return ()
 
 -- | The field key to index on.
 type Key = L8.ByteString
