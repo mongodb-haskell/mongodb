@@ -26,7 +26,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 module Database.MongoDB.Util
     (
      putI8, putI32, putI64, putNothing, putNull, putS,
-     getI8, getI32, getI64, getC, getS, getNull,
+     getI8, getI32, getI64, getC, getS, getNull, putStrSz,
     )
 where
 import Control.Exception (assert)
@@ -75,3 +75,6 @@ putNull = putI8 (0::Int)
 
 putS :: L8.ByteString -> Put
 putS s = putLazyByteString s >> putNull
+
+putStrSz :: L.ByteString -> Put
+putStrSz s = putI32 (fromIntegral $ 1 + L8.length s) >> putS s

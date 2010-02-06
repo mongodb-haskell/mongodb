@@ -28,6 +28,7 @@ module Database.MongoDB
      -- * Connection
      Connection,
      connect, connectOnPort, conClose, disconnect, dropDatabase,
+     connectCluster, setTarget,
      serverInfo, serverShutdown,
      databasesInfo, databaseNames,
      -- * Database
@@ -35,14 +36,18 @@ module Database.MongoDB
      ColCreateOpt(..),
      collectionNames, createCollection, dropCollection,
      renameCollection, runCommand, validateCollection,
+     login, addUser,
      -- * Collection
      Collection, FieldSelector, FullCollection,
      NumToSkip, NumToReturn, Selector,
      QueryOpt(..),
      UpdateFlag(..),
      count, countMatching, delete, insert, insertMany, query, remove, update,
+     save, 
      -- * Convenience collection operations
      find, findOne, quickFind, quickFind',
+     -- * Query Helpers
+     whereClause,
      -- * Cursor
      Cursor,
      allDocs, allDocs', finish, nextDoc,
@@ -54,10 +59,11 @@ module Database.MongoDB
 where
 import Control.Exception
 import Control.Monad
-import Data.Binary
+import Data.Binary()
 import Data.Binary.Get
 import Data.Binary.Put
 import Data.Bits
+import Data.ByteString.Char8 (pack)
 import Data.ByteString.Internal (c2w)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
@@ -67,6 +73,7 @@ import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Maybe
 import Data.Typeable
+import Data.Digest.OpenSSL.MD5
 import Database.MongoDB.BSON as BSON
 import Database.MongoDB.Util
 import qualified Network
@@ -76,27 +83,61 @@ import System.IO
 import System.IO.Unsafe
 import System.Random
 
--- | A handle to a database connection
-data Connection = Connection { cHandle :: Handle, cRand :: IORef [Int] }
+-- | A list of handles to database connections
+data Connection = Connection { cHandles :: [Handle]
+                              ,cIndex :: IORef Int
+                              ,cRand :: IORef [Int] }
 
 -- | Establish a connection to a MongoDB server
 connect :: HostName -> IO Connection
 connect = flip connectOnPort $ Network.PortNumber 27017
 
--- | Establish a connection to a MongoDB server on a non-standard port
-connectOnPort :: HostName -> Network.PortID -> IO Connection
-connectOnPort host port = do
+-- | Establish connections to a list of MongoDB servers
+connectCluster :: [HostName] -> IO Connection
+connectCluster [] = throwOpFailure "No hostnames in list"
+connectCluster xs = do 
+  c <- newConnection 
+  connectAll c xs $ Network.PortNumber 27017
+
+connectAll :: Connection -> [HostName] -> Network.PortID -> IO Connection
+connectAll c [] _ = return c
+connectAll c (host:xs) port = do
   h <- Network.connectTo host port
   hSetBuffering h NoBuffering
+  connectAll (c {cHandles = h:(cHandles c)}) xs port
+
+-- | Establish a connection to a MongoDB server on a non-standard port
+connectOnPort :: HostName -> Network.PortID -> IO Connection
+connectOnPort host port = do 
+  c <- newConnection 
+  connectAll c [host] port
+
+newConnection :: IO Connection
+newConnection = do 
   r <- newStdGen
   let ns = randomRs (fromIntegral (minBound :: Int32),
                      fromIntegral (maxBound :: Int32)) r
   nsRef <- newIORef ns
-  return Connection { cHandle = h, cRand = nsRef }
+  nsIdx <- newIORef 0
+  return $ Connection [] nsIdx nsRef
 
+getHandle :: Connection -> IO Handle
+getHandle c = do 
+  i <- readIORef $ cIndex c
+  return $ (cHandles c) !! i
+
+cPut :: Connection -> L.ByteString -> IO ()
+cPut c msg = getHandle c >>= flip L.hPut msg
+ 
 -- | Close database connection
 conClose :: Connection -> IO ()
-conClose = hClose . cHandle
+conClose c = sequence_ $ map hClose $ cHandles c
+
+setTarget :: Connection -> Int -> IO ()
+setTarget c i = 
+  if i > length (cHandles c)
+    then throwOpFailure "Target index higher than length of list"
+    else writeIORef (cIndex c) i >> return ()
 
 -- | Information about the databases on the server.
 databasesInfo :: Connection -> IO BsonDoc
@@ -107,7 +148,7 @@ databasesInfo c =
 databaseNames :: Connection -> IO [Database]
 databaseNames c = do
     info <- databasesInfo c
-    let (BsonArray dbs) = fromJust $ Map.lookup (s2L "databases") info
+    let (BsonArray dbs) = fromLookup $ Map.lookup (s2L "databases") info
         names = mapMaybe (Map.lookup (s2L "name") . fromBson) dbs
     return $ List.map fromBson (names::[BsonValue])
 
@@ -138,7 +179,7 @@ serverShutdown c =
 collectionNames :: Connection -> Database -> IO [FullCollection]
 collectionNames c db = do
   docs <- quickFind' c (L.append db $ s2L ".system.namespaces") empty
-  let names = flip List.map docs $ fromBson . fromJust . BSON.lookup "name"
+  let names = flip List.map docs $ fromBson . fromLookup . BSON.lookup "name"
   return $ List.filter (L.notElem $ c2w '$') names
 
 data ColCreateOpt = CCOSize Int64  -- ^ Desired initial size for the
@@ -216,7 +257,7 @@ validateCollection :: Connection -> FullCollection -> IO String
 validateCollection c col = do
   let (db, col') = splitFullCol col
   res <- runCommand c db $ toBsonDoc [("validate", toBson col')]
-  return $ fromBson $ fromJust $ BSON.lookup "result" res
+  return $ fromBson $ fromLookup $ BSON.lookup "result" res
 
 splitFullCol :: FullCollection -> (Database, Collection)
 splitFullCol col = (L.takeWhile (c2w '.' /=) col,
@@ -228,10 +269,10 @@ splitFullCol col = (L.takeWhile (c2w '.' /=) col,
 runCommand :: Connection -> Database -> BsonDoc -> IO BsonDoc
 runCommand c db cmd = do
   mres <- findOne c (L.append db $ s2L ".$cmd") cmd
-  let res = fromJust mres
-  when (1 /= (fromBson $ fromJust $ BSON.lookup "ok" res :: Int)) $
+  let res = fromLookup mres
+  when (1 /= (fromBson $ fromLookup $ BSON.lookup "ok" res :: Int)) $
        throwOpFailure $ "command \"" ++ show cmd ++ "\" failed: " ++
-                      fromBson (fromJust $ BSON.lookup "errmsg" res)
+                      fromBson (fromLookup $ BSON.lookup "errmsg" res)
   return res
 
 -- | An Iterator over the results of a query. Use 'nextDoc' to get each
@@ -391,7 +432,7 @@ countMatching c col sel = do
   let (db, col') = splitFullCol col
   res <- runCommand c db $ toBsonDoc [("count", toBson col'),
                                       ("query", toBson sel)]
-  return $ fromBson $ fromJust $ BSON.lookup "n" res
+  return $ fromBson $ fromLookup $ BSON.lookup "n" res
 
 -- | Delete documents matching /Selector/ from the given /FullCollection/.
 delete :: Connection -> FullCollection -> Selector -> IO RequestID
@@ -402,7 +443,7 @@ delete c col sel = do
                      putI32 0
                      putBsonDoc sel
   (reqID, msg) <- packMsg c OPDelete body
-  L.hPut (cHandle c) msg
+  cPut c msg
   return reqID
 
 -- | An alias for 'delete'.
@@ -417,7 +458,7 @@ insert c col doc = do
                      putCol col
                      putBsonDoc doc
   (reqID, msg) <- packMsg c OPInsert body
-  L.hPut (cHandle c) msg
+  cPut c msg
   return reqID
 
 -- | Insert a list of documents into /FullCollection/.
@@ -428,7 +469,7 @@ insertMany c col docs = do
                putCol col
                forM_ docs putBsonDoc
   (reqID, msg) <- packMsg c OPInsert body
-  L.hPut (cHandle c) msg
+  cPut c msg
   return reqID
 
 -- | Open a cursor to find documents. If you need full functionality,
@@ -458,7 +499,7 @@ quickFind' c col sel = find c col sel >>= allDocs'
 query :: Connection -> FullCollection -> [QueryOpt] ->
          NumToSkip -> NumToReturn -> Selector -> FieldSelector -> IO Cursor
 query c col opts nskip ret sel fsel = do
-  let h = cHandle c
+  h <- getHandle c
 
   let body = runPut $ do
                putI32 $ fromQueryOpts opts
@@ -501,8 +542,51 @@ update c col flags sel obj = do
                putBsonDoc sel
                putBsonDoc obj
   (reqID, msg) <- packMsg c OPUpdate body
-  L.hPut (cHandle c) msg
+  cPut c msg
   return reqID
+
+-- | log into the mongodb /Database/ attached to the /Connection/
+login :: Connection -> Database -> String -> String -> IO BsonDoc 
+login c db user pass = do
+  doc <- runCommand c db (toBsonDoc [("getnonce", toBson (1 :: Int))])
+  let nonce = fromBson $ fromLookup $ BSON.lookup "nonce" doc :: String
+      digest = md5sum $ pack $ nonce ++ user ++ 
+                 ( md5sum $ pack (user ++ ":mongo:" ++ pass)) 
+      request = toBsonDoc [("authenticate", toBson (1 :: Int)), 
+                           ("user", toBson user), 
+                           ("nonce", toBson nonce), 
+                           ("key", toBson digest)]
+      in runCommand c db request
+
+-- | create a new user in the current /Database/
+addUser :: Connection -> Database -> String -> String -> IO BsonDoc
+addUser c db user pass = do
+  let userDoc = toBsonDoc [(s2L"user", toBson user)]
+      fdb = L.append db (s2L ".system.users")  
+  doc <- liftM (maybe userDoc id) (findOne c fdb userDoc)
+  let doc' = Map.insert (s2L "pwd") 
+               (toBson ( md5sum $ pack (user ++ ":mongo:" ++ pass))) doc
+  _ <- save c fdb doc'
+  return doc'
+
+-- | Conveniently stores the /BsonDoc/ to the /FullCollection/ 
+-- | if there is an _id present in the /BsonDoc/ then it already has 
+-- | a place in the DB, so we update it using the _id, otherwise
+-- | we insert it
+save :: Connection -> FullCollection -> BsonDoc -> IO RequestID
+save c fc doc =
+  case Map.lookup (s2L "_id") doc of 
+    Nothing -> insert c fc doc
+    Just obj -> update c fc [UFUpsert] (toBsonDoc [("_id", obj)]) doc
+
+-- | Use this in the place of the query portion of a select type query
+-- | This uses javascript and a scope supplied by a /BsonDoc/ to evaluate 
+-- | documents in the database for retrieval. 
+-- | Example: 
+-- | > findOne conn mycoll $ whereClause "this.name == (name1 + name2)" 
+-- | >     (toBsonDoc [("name1", toBson "mar"), ("name2", toBson "tha")])
+whereClause :: String -> BsonDoc -> BsonDoc
+whereClause qry scope = toBsonDoc [("$where", (BsonCodeWScope (s2L qry) scope))]
 
 data Hdr = Hdr {
       hMsgLen :: Int32,
@@ -594,7 +678,7 @@ getFirstDoc docBytes = flip runGet docBytes $ do
 
 getMore :: Cursor -> IO (Maybe BsonDoc)
 getMore cur = do
-  let h = cHandle $ curCon cur
+  h <- getHandle $ curCon cur
 
   cid <- readIORef $ curID cur
   let body = runPut $ do
@@ -625,7 +709,7 @@ getMore cur = do
 -- 'allDocs', 'allDocs'', or 'nextDoc'.
 finish :: Cursor -> IO ()
 finish cur = do
-  let h = cHandle $ curCon cur
+  h <- getHandle $ curCon cur
   cid <- readIORef $ curID cur
   unless (cid == 0) $ do
       let body = runPut $ do
@@ -743,3 +827,8 @@ validateCollectionName col = do
   when (L.head col == c2w '.' || L.last col == c2w '.') $
        throwColInvalid $ "Collection can't start or end with '.': " ++ show col
   return (db, col')
+
+fromLookup :: (Maybe a) -> a
+fromLookup (Just m) = m
+fromLookup Nothing = throwColInvalid "cannot find key"  
+
