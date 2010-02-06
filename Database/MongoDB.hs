@@ -570,9 +570,9 @@ addUser c db user pass = do
   return doc'
 
 -- | Conveniently stores the /BsonDoc/ to the /FullCollection/
--- | if there is an _id present in the /BsonDoc/ then it already has
--- | a place in the DB, so we update it using the _id, otherwise
--- | we insert it
+-- if there is an _id present in the /BsonDoc/ then it already has
+-- a place in the DB, so we update it using the _id, otherwise
+-- we insert it
 save :: Connection -> FullCollection -> BsonDoc -> IO RequestID
 save c fc doc =
   case Map.lookup (s2L "_id") doc of
@@ -580,11 +580,13 @@ save c fc doc =
     Just obj -> update c fc [UFUpsert] (toBsonDoc [("_id", obj)]) doc
 
 -- | Use this in the place of the query portion of a select type query
--- | This uses javascript and a scope supplied by a /BsonDoc/ to evaluate
--- | documents in the database for retrieval.
--- | Example:
--- | > findOne conn mycoll $ whereClause "this.name == (name1 + name2)"
--- | >     (toBsonDoc [("name1", toBson "mar"), ("name2", toBson "tha")])
+-- This uses javascript and a scope supplied by a /BsonDoc/ to evaluate
+-- documents in the database for retrieval.
+--
+-- Example:
+--
+-- > findOne conn mycoll $ whereClause "this.name == (name1 + name2)"
+-- >     (toBsonDoc [("name1", toBson "mar"), ("name2", toBson "tha")])
 whereClause :: String -> BsonDoc -> BsonDoc
 whereClause qry scope = toBsonDoc [("$where", (BsonCodeWScope (s2L qry) scope))]
 
