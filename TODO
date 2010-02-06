@@ -29,7 +29,6 @@ MongoDB
     * last_status
     * logout
     * reset_error_history
-    * eval
   - database admin
     * getAdmin
     * getProfilingLevel

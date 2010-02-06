@@ -36,7 +36,7 @@ module Database.MongoDB
      ColCreateOpt(..),
      collectionNames, createCollection, dropCollection,
      renameCollection, runCommand, validateCollection,
-     authenticate, login, addUser,
+     auth, addUser, login, logout,
      -- * Collection
      Collection, FieldSelector, FullCollection,
      NumToSkip, NumToReturn, Selector,
@@ -564,8 +564,12 @@ login c db user pass = do
                            ("key", toBson digest)]
       in runCommand c db request
 
-authenticate :: Connection -> Database -> Username -> Password -> IO BsonDoc
-authenticate = login
+auth :: Connection -> Database -> Username -> Password -> IO BsonDoc
+auth = login
+
+logout :: Connection -> Database -> IO ()
+logout c db =
+    runCommand c db (toBsonDoc [(s2L "logout", BsonInt32 1)]) >> return ()
 
 -- | create a new user in the current /Database/
 addUser :: Connection -> Database -> Username -> Password -> IO BsonDoc
