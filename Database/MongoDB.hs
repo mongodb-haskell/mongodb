@@ -504,9 +504,7 @@ find c col sel = query c col [] 0 0 sel []
 
 -- | Query, but only return the first result, if any.
 findOne :: Connection -> FullCollection -> Selector -> IO (Maybe BsonDoc)
-findOne c col sel = do
-  cur <- query c col [] 0 (-1) sel []
-  nextDoc cur
+findOne c col sel = query c col [] 0 (-1) sel [] >>= nextDoc
 
 -- | Perform a query and return the result as a lazy list. Be sure to
 -- understand the comments about using the lazy list given for
