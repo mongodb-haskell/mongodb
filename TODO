@@ -19,6 +19,9 @@ MongoDB
   - hint, explain, $where
   - database profiling: set/get profiling level, get profiling info
   - pair mode connection
+    - allow connecting only to slave
+    - handle defunct servers
+    - connection fail over
   - operations on database objects
     * getName
     * getCollection
@@ -27,7 +30,6 @@ MongoDB
     * error
     * eval
     * last_status
-    * logout
     * reset_error_history
   - database admin
     * getAdmin

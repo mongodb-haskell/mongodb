@@ -28,7 +28,7 @@ module Database.MongoDB
      -- * Connection
      Connection,
      connect, connectOnPort, conClose, disconnect, dropDatabase,
-     connectCluster, connectClusterOnPort, setTarget,
+     connectCluster, connectClusterOnPort,
      serverInfo, serverShutdown,
      databasesInfo, databaseNames,
      -- * Database
@@ -84,9 +84,10 @@ import System.IO.Unsafe
 import System.Random
 
 -- | A list of handles to database connections
-data Connection = Connection { cHandles :: [Handle]
-                              ,cIndex :: IORef Int
-                              ,cRand :: IORef [Int] }
+data Connection = Connection {
+      cHandle :: IORef Handle,
+      cRand :: IORef [Int]
+    }
 
 -- | Establish a connection to a MongoDB server
 connect :: HostName -> IO Connection
@@ -100,47 +101,44 @@ connectCluster xs =
 -- | Establish connections to a list of MongoDB servers specifying each port.
 connectClusterOnPort :: [(HostName, Network.PortID)] -> IO Connection
 connectClusterOnPort [] = throwOpFailure "No hostnames in list"
-connectClusterOnPort xs = newConnection >>= flip connectAll xs
-
-connectAll :: Connection -> [(HostName, Network.PortID)] -> IO Connection
-connectAll c [] = return c
-connectAll c ((host, port) : xs) = do
-  h <- Network.connectTo host port
-  hSetBuffering h NoBuffering
-  connectAll (c {cHandles = h : cHandles c}) xs
+connectClusterOnPort servers = newConnection servers
 
 -- | Establish a connection to a MongoDB server on a non-standard port
 connectOnPort :: HostName -> Network.PortID -> IO Connection
-connectOnPort host port = do
-  c <- newConnection
-  connectAll c [(host, port)]
+connectOnPort host port = newConnection [(host, port)]
 
-newConnection :: IO Connection
-newConnection = do
+newConnection :: [(HostName, Network.PortID)] -> IO Connection
+newConnection servers = do
   r <- newStdGen
   let ns = randomRs (fromIntegral (minBound :: Int32),
                      fromIntegral (maxBound :: Int32)) r
   nsRef <- newIORef ns
-  nsIdx <- newIORef 0
-  return $ Connection [] nsIdx nsRef
+  hRef <- openHandle (head servers) >>= newIORef
+  let c = Connection hRef nsRef
+  res <- isMaster c
+  if fromBson (fromLookup $ BSON.lookup "ismaster" res) == (1::Int)
+    then return c
+    else case BSON.lookup "remote" res of
+           Nothing -> throwConFailure "Couldn't find master to connect to"
+           Just server -> do
+             hRef' <- openHandle (splitHostPort $ fromBson server) >>= newIORef
+             return $ c {cHandle = hRef'}
+
+openHandle :: (HostName, Network.PortID) -> IO Handle
+openHandle (host, port) = do
+  h <- Network.connectTo host port
+  hSetBuffering h NoBuffering
+  return h
 
 getHandle :: Connection -> IO Handle
-getHandle c = do
-  i <- readIORef $ cIndex c
-  return $ cHandles c !! i
+getHandle c = readIORef $ cHandle c
 
 cPut :: Connection -> L.ByteString -> IO ()
 cPut c msg = getHandle c >>= flip L.hPut msg
 
 -- | Close database connection
 conClose :: Connection -> IO ()
-conClose c = mapM_ hClose $ cHandles c
-
-setTarget :: Connection -> Int -> IO ()
-setTarget c i =
-  if i > length (cHandles c)
-    then throwOpFailure "Target index higher than length of list"
-    else writeIORef (cIndex c) i >> return ()
+conClose c = readIORef (cHandle c) >>= hClose
 
 -- | Information about the databases on the server.
 databasesInfo :: Connection -> IO BsonDoc
@@ -164,6 +162,9 @@ dropDatabase :: Connection -> Database -> IO ()
 dropDatabase c db = do
   _ <- runCommand c db $ toBsonDoc [("dropDatabase", toBson (1::Int))]
   return ()
+
+isMaster :: Connection -> IO BsonDoc
+isMaster c = runCommand c (s2L "admin") $ toBsonDoc [("ismaster", BsonInt32 1)]
 
 -- | Get information about the MongoDB server we're connected to.
 serverInfo :: Connection -> IO BsonDoc
@@ -266,6 +267,10 @@ splitFullCol :: FullCollection -> (Database, Collection)
 splitFullCol col = (L.takeWhile (c2w '.' /=) col,
                     L.tail $ L.dropWhile (c2w '.' /=) col)
 
+splitHostPort :: String -> (HostName, Network.PortID)
+splitHostPort hp = (List.takeWhile (':' /=) hp,
+                    Network.Service $ List.tail $ List.dropWhile (':' /=) hp)
+
 -- | Run a database command. Usually this is unneeded as driver wraps
 -- all of the commands for you (eg 'createCollection',
 -- 'dropCollection', etc).
@@ -340,6 +345,20 @@ instance Exception MongoDBOperationFailure
 
 throwOpFailure :: String -> a
 throwOpFailure = throw . MongoDBOperationFailure
+
+data MongoDBConnectionFailure = MongoDBConnectionFailure String
+                                deriving (Eq, Show, Read)
+
+mongoDBConnectionFailure :: TyCon
+mongoDBConnectionFailure = mkTyCon "Database.MongoDB.MongoDBconnectionFailure"
+
+instance Typeable MongoDBConnectionFailure where
+    typeOf _ = mkTyConApp mongoDBConnectionFailure []
+
+instance Exception MongoDBConnectionFailure
+
+throwConFailure :: String -> a
+throwConFailure = throw . MongoDBConnectionFailure
 
 fromOpcode :: Opcode -> Int32
 fromOpcode OPReply        =    1
