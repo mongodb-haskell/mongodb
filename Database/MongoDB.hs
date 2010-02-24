@@ -398,16 +398,20 @@ type Collection = L8.ByteString
 -- | A 'BsonDoc' representing restrictions for a query much like the
 -- /where/ part of an SQL query.
 type Selector = BsonDoc
+
 -- | A list of field names that limits the fields in the returned
 -- documents. The list can contains zero or more elements, each of
 -- which is the name of a field that should be returned. An empty list
 -- means that no limiting is done and all fields are returned.
 type FieldSelector = [L8.ByteString]
+
 type RequestID = Int32
+
 -- | Sets the number of documents to omit - starting from the first
 -- document in the resulting dataset - when returning the result of
 -- the query.
 type NumToSkip = Int32
+
 -- | This controls how many documents are returned at a time. The
 -- cursor works by requesting /NumToReturn/ documents, which are then
 -- immediately all transfered over the network; these are held locally
