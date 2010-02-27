@@ -19,7 +19,6 @@ MongoDB
   - hint, explain, $where
   - database profiling: set/get profiling level, get profiling info
   - pair mode connection
-    - allow connecting only to slave
     - handle defunct servers
     - connection fail over
   - operations on database objects
@@ -58,7 +57,7 @@ MongoDB
   optional:
   - automatic reconnection
   - buffer pooling
-  - advanced connection management (master-server, replica pair, Option_SlaveOk)
+  - advanced connection management (master-server, replica pair)
   - Tailable cursor support
 + support safe operations
 + auto-reconnection

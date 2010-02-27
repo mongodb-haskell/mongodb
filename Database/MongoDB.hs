@@ -26,7 +26,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 module Database.MongoDB
     (
      -- * Connection
-     Connection,
+     Connection, ConnectOpt(..),
      connect, connectOnPort, conClose, disconnect, dropDatabase,
      connectCluster, connectClusterOnPort,
      serverInfo, serverShutdown,
@@ -89,26 +89,31 @@ data Connection = Connection {
       cRand :: IORef [Int]
     }
 
+data ConnectOpt
+    = SlaveOK -- ^ It's fine to connect to the slave
+    deriving (Show, Eq)
+
 -- | Establish a connection to a MongoDB server
-connect :: HostName -> IO Connection
-connect = flip connectOnPort $ Network.PortNumber 27017
+connect :: HostName -> [ConnectOpt] -> IO Connection
+connect = flip connectOnPort (Network.PortNumber 27017)
 
 -- | Establish connections to a list of MongoDB servers
-connectCluster :: [HostName] -> IO Connection
+connectCluster :: [HostName] -> [ConnectOpt] -> IO Connection
 connectCluster xs =
-    connectClusterOnPort $ fmap (flip (,) $ Network.PortNumber 27017) xs
+    connectClusterOnPort (fmap (flip (,) $ Network.PortNumber 27017) xs)
 
 -- | Establish connections to a list of MongoDB servers specifying each port.
-connectClusterOnPort :: [(HostName, Network.PortID)] -> IO Connection
-connectClusterOnPort [] = throwOpFailure "No hostnames in list"
-connectClusterOnPort servers = newConnection servers
+connectClusterOnPort :: [(HostName, Network.PortID)] -> [ConnectOpt]
+                     -> IO Connection
+connectClusterOnPort [] _ = throwOpFailure "No hostnames in list"
+connectClusterOnPort servers opts = newConnection servers opts
 
 -- | Establish a connection to a MongoDB server on a non-standard port
-connectOnPort :: HostName -> Network.PortID -> IO Connection
+connectOnPort :: HostName -> Network.PortID -> [ConnectOpt] -> IO Connection
 connectOnPort host port = newConnection [(host, port)]
 
-newConnection :: [(HostName, Network.PortID)] -> IO Connection
-newConnection servers = do
+newConnection :: [(HostName, Network.PortID)] -> [ConnectOpt] -> IO Connection
+newConnection servers opts = do
   r <- newStdGen
   let ns = randomRs (fromIntegral (minBound :: Int32),
                      fromIntegral (maxBound :: Int32)) r
@@ -116,7 +121,8 @@ newConnection servers = do
   hRef <- openHandle (head servers) >>= newIORef
   let c = Connection hRef nsRef
   res <- isMaster c
-  if fromBson (fromLookup $ BSON.lookup "ismaster" res) == (1::Int)
+  if fromBson (fromLookup $ BSON.lookup "ismaster" res) == (1::Int) ||
+     isJust (List.elemIndex SlaveOK opts)
     then return c
     else case BSON.lookup "remote" res of
            Nothing -> throwConFailure "Couldn't find master to connect to"
@@ -268,8 +274,11 @@ splitFullCol col = (L.takeWhile (c2w '.' /=) col,
                     L.tail $ L.dropWhile (c2w '.' /=) col)
 
 splitHostPort :: String -> (HostName, Network.PortID)
-splitHostPort hp = (List.takeWhile (':' /=) hp,
-                    Network.Service $ List.tail $ List.dropWhile (':' /=) hp)
+splitHostPort hp = (host, port)
+    where host = List.takeWhile (':' /=) hp
+          port = case List.dropWhile (':' /=) hp of
+                   "" -> Network.PortNumber 27017
+                   pstr -> Network.Service $ List.tail pstr
 
 -- | Run a database command. Usually this is unneeded as driver wraps
 -- all of the commands for you (eg 'createCollection',
