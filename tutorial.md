@@ -56,12 +56,19 @@ Making A Connection
 -------------------
 Open up a connection to your DB instance, using the standard port:
 
-> con <- connect "127.0.0.1" 
+> con <- connect "127.0.0.1" []
 
 or for a non-standard port
 
-> import Network 
-> con <- connectOnPort "127.0.0.1" (Network.PortNumber 666)
+> import Network
+> con <- connectOnPort "127.0.0.1" (Network.PortNumber 666) []
+
+By default mongoDB will try to find the master and connect to it and
+will throw an exception if a master can not be found to connect
+to. You can force mongoDB to connect to the slave by adding SlaveOK as
+a connection option, eg:
+
+> con <- connect "127.0.0.1" [SlaveOK]
 
 Getting the Databases
 ------------------
