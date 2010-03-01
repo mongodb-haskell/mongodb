@@ -19,7 +19,7 @@ Installing Haskell Bindings
 ---------------------------
 
 From Source:
- 
+
 > $ git clone git://github.com/srp/mongoDB.git
 
 > $ cd mongoDB
@@ -44,7 +44,7 @@ Start a MongoDB instance for us to play with:
 
 Start up a haskell repl:
 
-> $ ghci 
+> $ ghci
 
 Now We'll need to bring in the MongoDB/BSON bindings:
 
@@ -52,7 +52,7 @@ Now We'll need to bring in the MongoDB/BSON bindings:
 
 > import Database.MongoDB.BSON
 
-Making A Connection 
+Making A Connection
 -------------------
 Open up a connection to your DB instance, using the standard port:
 
@@ -68,7 +68,7 @@ Getting the Databases
 
 > dbs <- databaseNames con
 > let testdb = head dbs
- 
+
 
 Getting the Collections
 -----------------------
@@ -84,7 +84,7 @@ BSON representation in Haskell
 Inserting a Document
 -------------------
 
-> insert con testcol (toBsonDoc [("author", toBson "Mike"), ("text", toBson "My first Blog post!"), ("tags", toBson ["mongodb", "python","pymongo"])]) 
+> insert con testcol (toBsonDoc [("author", toBson "Mike"), ("text", toBson "My first Blog post!"), ("tags", toBson ["mongodb", "python","pymongo"])])
 
 
 Getting a single document with findOne
