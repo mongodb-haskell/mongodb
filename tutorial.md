@@ -106,7 +106,11 @@ Querying for More Than One Document
 
 > allDocs cursor
 
- See nextDoc to modify cursor incrementally one at a time. 
+You can combine these into one line:
+
+> docs <- allDocs =<< find con curcol (toBsonDoc [("author", toBson "Mike")])
+
+See nextDoc to modify cursor incrementally one at a time.
 
  * Note: allDocs automatically closes the cursor when done, through nextDoc.
 
