@@ -61,7 +61,7 @@ import Database.MongoDB.Util
 data BsonValue
     = BsonDouble Double
     | BsonString L8.ByteString
-    | BsonObject BsonDoc
+    | BsonDoc BsonDoc
     | BsonArray [BsonValue]
     | BsonUndefined
     | BsonBinary BinarySubType L.ByteString
@@ -114,7 +114,7 @@ data DataType =
     DataMinKey     | -- -1
     DataNumber     | -- 1
     DataString     | -- 2
-    DataObject	   | -- 3
+    DataDoc	   | -- 3
     DataArray      | -- 4
     DataBinary     | -- 5
     DataUndefined  | -- 6
@@ -173,7 +173,7 @@ getVal DataString = do
   sLen1 <- getI32
   (_sLen2, s) <- getS
   return (fromIntegral $ 4 + sLen1, BsonString s)
-getVal DataObject = getDoc >>= \(len, obj) -> return (len, BsonObject obj)
+getVal DataDoc = getDoc >>= \(len, obj) -> return (len, BsonDoc obj)
 getVal DataArray = do
   (len, arr) <- getRawObj
   let arr2 = Map.fold (:) [] arr -- reverse and remove key
@@ -233,7 +233,7 @@ getDataType = liftM toDataType getI8
 putType :: BsonValue -> Put
 putType BsonDouble{}   = putDataType DataNumber
 putType BsonString{}   = putDataType DataString
-putType BsonObject{}   = putDataType DataObject
+putType BsonDoc{}      = putDataType DataDoc
 putType BsonArray{}    = putDataType DataArray
 putType BsonBinary{}   = putDataType DataBinary
 putType BsonUndefined  = putDataType DataUndefined
@@ -255,7 +255,7 @@ putType BsonMaxKey     = putDataType DataMaxKey
 putVal :: BsonValue -> Put
 putVal (BsonDouble d)   = putFloat64le d
 putVal (BsonString s)   = putStrSz s
-putVal (BsonObject o)   = putObj o
+putVal (BsonDoc o)      = putObj o
 putVal (BsonArray es)   = putOutterObj bs
     where bs = runPut $ forM_ (List.zip [(0::Int) .. ] es) $ \(i, e) ->
                putType e >> putS (L8.fromString $ show i) >> putVal e
@@ -345,16 +345,16 @@ instance Convertible [S8.ByteString] BsonValue where
     safeConvert bs = BsonArray `liftM` mapM safeConvert bs
 
 instance Convertible BsonDoc BsonValue where
-    safeConvert = return . BsonObject
+    safeConvert = return . BsonDoc
 
 instance Convertible (Map.Map String BsonValue) BsonValue where
-    safeConvert = return . BsonObject . Map.mapKeys L8.fromString
+    safeConvert = return . BsonDoc . Map.mapKeys L8.fromString
 
 instance Convertible [(L8.ByteString, BsonValue)] BsonValue where
-    safeConvert = return . BsonObject . toBsonDoc
+    safeConvert = return . BsonDoc . toBsonDoc
 
 instance Convertible [(String, BsonValue)] BsonValue where
-    safeConvert = return . BsonObject . toBsonDoc
+    safeConvert = return . BsonDoc . toBsonDoc
 
 instance Convertible [Bool] BsonValue where
     safeConvert bs = BsonArray `liftM` mapM safeConvert bs
@@ -428,19 +428,19 @@ instance Convertible BsonValue S8.ByteString where
     safeConvert v = unsupportedError v
 
 instance Convertible BsonValue BsonDoc where
-    safeConvert (BsonObject o) = return o
+    safeConvert (BsonDoc o) = return o
     safeConvert v = unsupportedError v
 
 instance Convertible BsonValue (Map.Map String BsonValue) where
-    safeConvert (BsonObject o) = return $ Map.mapKeys L8.toString o
+    safeConvert (BsonDoc o) = return $ Map.mapKeys L8.toString o
     safeConvert v = unsupportedError v
 
 instance Convertible BsonValue [(String, BsonValue)] where
-    safeConvert (BsonObject o) = return $ fromBsonDoc o
+    safeConvert (BsonDoc o) = return $ fromBsonDoc o
     safeConvert v = unsupportedError v
 
 instance Convertible BsonValue [(L8.ByteString, BsonValue)] where
-    safeConvert (BsonObject o) = return $ fromBsonDoc o
+    safeConvert (BsonDoc o) = return $ fromBsonDoc o
     safeConvert v = unsupportedError v
 
 instance Convertible BsonValue [Double] where
