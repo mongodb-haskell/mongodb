@@ -48,7 +48,6 @@ MongoDB
     * close
     * group
     * distinct
-    * map reduce
   - cursor object
     * hasMore
 
@@ -98,3 +97,9 @@ deep "lookup" function (other deep Map functions?)
 how to make bytestrings less painful
 custom Show/Read instance that looks more like json
 make sure NULLs aren't in created table names
+
+update tutorial to match new python one
+
++ custom types (see python examples)
++ support array conversions again
++ better type conversion errors

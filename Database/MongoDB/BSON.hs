@@ -30,7 +30,7 @@ module Database.MongoDB.BSON
      BsonDoc,
      BinarySubType(..),
      -- * BsonDoc Operations
-     empty, lookup,
+     empty,
      -- * Type Conversion
      fromBson, toBson,
      fromBsonDoc, toBsonDoc,
@@ -40,6 +40,8 @@ module Database.MongoDB.BSON
 where
 import Prelude hiding (lookup)
 
+import qualified Control.Arrow as Arrow
+import Control.Exception
 import Control.Monad
 import Data.Binary
 import Data.Binary.Get
@@ -49,10 +51,9 @@ import Data.ByteString.Char8 as C8 hiding (empty)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
 import qualified Data.ByteString.UTF8 as S8
-import Data.Convertible
 import Data.Int
-import qualified Data.Map as Map
 import qualified Data.List as List
+import qualified Data.Map as Map
 import Data.Time.Clock.POSIX
 import Data.Typeable
 import Database.MongoDB.Util
@@ -79,37 +80,11 @@ data BsonValue
     | BsonMaxKey
     deriving (Show, Eq, Ord)
 
-instance Typeable BsonValue where
-    typeOf _ = mkTypeName "BsonValue"
-
--- | BSON Document: this is the top-level (but recursive) type that
--- all MongoDB collections work in terms of. It is a mapping between
--- strings ('Data.ByteString.Lazu.UTF8.ByteString') and 'BsonValue's.
--- It can be constructed either from a 'Map' (eg @'BsonDoc' myMap@) or
--- from a associative list (eg @'toBsonDoc' myAL@).
-type BsonDoc = Map.Map L8.ByteString BsonValue
-
-class BsonDocOps a where
-    -- | Construct a BsonDoc from an associative list
-    toBsonDoc :: [(a, BsonValue)] -> BsonDoc
-    -- | Unwrap BsonDoc to be a Map
-    fromBsonDoc :: BsonDoc -> [(a, BsonValue)]
-    -- | Return the BsonValue for given key, if any.
-    lookup :: a -> BsonDoc -> Maybe BsonValue
+type BsonDoc = [(L8.ByteString, BsonValue)]
 
 -- | An empty BsonDoc
 empty :: BsonDoc
-empty = Map.empty
-
-instance BsonDocOps L8.ByteString where
-    toBsonDoc = Map.fromList
-    fromBsonDoc = Map.toList
-    lookup = Map.lookup
-
-instance BsonDocOps String where
-    toBsonDoc = Map.mapKeys L8.fromString .Map.fromList
-    fromBsonDoc = Map.toList . Map.mapKeys L8.toString
-    lookup = Map.lookup . L8.fromString
+empty = []
 
 data DataType =
     DataMinKey       | -- -1
@@ -176,9 +151,10 @@ getVal DataString = do
   return (fromIntegral $ 4 + sLen1, BsonString s)
 getVal DataDoc = getDoc >>= \(len, obj) -> return (len, BsonDoc obj)
 getVal DataArray = do
-  (len, arr) <- getRawObj
-  let arr2 = Map.fold (:) [] arr -- reverse and remove key
-  return (len, BsonArray arr2)
+  bytes <- getI32
+  arr <- getInnerArray (bytes - 4)
+  getNull
+  return (fromIntegral bytes, BsonArray arr)
 getVal DataBinary = do
   skip 4
   st   <- getI8
@@ -212,21 +188,31 @@ getVal DataLong = liftM ((,) 8 . BsonInt64) getI64
 getVal DataMinKey = return (0, BsonMinKey)
 getVal DataMaxKey = return (0, BsonMaxKey)
 
-getInnerObj :: Int32 -> BsonDoc -> Get BsonDoc
-getInnerObj 1 obj = return obj
-getInnerObj bytesLeft obj = do
+getInnerObj :: Int32 -> Get BsonDoc
+getInnerObj 1 = return []
+getInnerObj bytesLeft = do
   typ <- getDataType
   (keySz, key) <- getS
   (valSz, val) <- getVal typ
-  getInnerObj (bytesLeft - 1 - fromIntegral keySz - fromIntegral valSz) $
-              Map.insert key val obj
+  rest <- getInnerObj (bytesLeft - 1 - fromIntegral keySz - fromIntegral valSz)
+  return $ (key, val) : rest
 
 getRawObj :: Get (Integer, BsonDoc)
 getRawObj = do
   bytes <- getI32
-  obj <- getInnerObj (bytes - 4) empty
+  obj <- getInnerObj (bytes - 4)
   getNull
   return (fromIntegral bytes, obj)
+
+getInnerArray :: Int32 -> Get [BsonValue]
+getInnerArray 1 = return []
+getInnerArray bytesLeft = do
+  typ <- getDataType
+  (keySz, _key) <- getS
+  (valSz, val) <- getVal typ
+  rest <- getInnerArray
+          (bytesLeft - 1 - fromIntegral keySz - fromIntegral valSz)
+  return $ val : rest
 
 getDoc :: Get (Integer, BsonDoc)
 getDoc = getRawObj
@@ -288,8 +274,7 @@ putVal BsonMaxKey       = putNothing
 
 putObj :: BsonDoc -> Put
 putObj obj   = putOutterObj bs
-    where bs = runPut $ forM_ (fromBsonDoc obj) $ \(k, v) ->
-               putType v >> putS k >> putVal v
+    where bs = runPut $ forM_ obj $ \(k, v) -> putType v >> putS k >> putVal v
 
 putOutterObj :: L.ByteString -> Put
 putOutterObj bytes = do
@@ -301,214 +286,189 @@ putOutterObj bytes = do
 putDataType :: DataType -> Put
 putDataType = putI8 . fromDataType
 
-class BsonConv a b where
-    -- | Convert a BsonValue into a native Haskell type.
-    fromBson :: Convertible a b => a -> b
+class BsonDocConv a where
+    -- | Convert a BsonDoc into another form such as a Map or a tuple
+    -- list with String keys.
+    fromBsonDoc :: BsonDoc -> a
+    -- | Convert a Map or a tuple list with String keys into a BsonDoc.
+    toBsonDoc :: a -> BsonDoc
+
+instance BsonDocConv [(L8.ByteString, BsonValue)] where
+    fromBsonDoc = id
+    toBsonDoc = id
+
+instance BsonDocConv [(String, BsonValue)] where
+    fromBsonDoc = List.map $ Arrow.first L8.toString
+    toBsonDoc = List.map $ Arrow.first L8.fromString
+
+instance BsonDocConv (Map.Map L8.ByteString BsonValue) where
+    fromBsonDoc = Map.fromList
+    toBsonDoc = Map.toList
+
+instance BsonDocConv (Map.Map String BsonValue) where
+    fromBsonDoc = Map.fromList . fromBsonDoc
+    toBsonDoc = toBsonDoc . Map.toList
+
+data BsonUnsupportedConversion = BsonUnsupportedConversion
+                                 deriving (Eq, Show, Read)
+
+bsonUnsupportedConversion :: TyCon
+bsonUnsupportedConversion =
+    mkTyCon "Database.MongoDB.BSON.BsonUnsupportedConversion "
+
+instance Typeable BsonUnsupportedConversion where
+    typeOf _ = mkTyConApp bsonUnsupportedConversion []
+
+instance Exception BsonUnsupportedConversion
+
+throwUnsupConv :: a
+throwUnsupConv = throw BsonUnsupportedConversion
+
+class BsonConv a where
     -- | Convert a native Haskell type into a BsonValue.
-    toBson :: Convertible b a => b -> a
+    toBson :: a -> BsonValue
+    -- | Convert a BsonValue into a native Haskell type.
+    fromBson :: BsonValue -> a
 
-instance BsonConv BsonValue a where
-    fromBson = convert
-    toBson = convert
+instance BsonConv Double where
+    toBson = BsonDouble
+    fromBson (BsonDouble d) = d
+    fromBson _ = throwUnsupConv
 
-instance BsonConv (Maybe BsonValue) (Maybe a) where
-    fromBson = convert
-    toBson = convert
+instance BsonConv Float where
+    toBson = BsonDouble . realToFrac
+    fromBson (BsonDouble d) = realToFrac d
+    fromBson _ = throwUnsupConv
 
-unsupportedError :: (Typeable a, Convertible BsonValue a) =>
-                    BsonValue -> ConvertResult a
-unsupportedError = convError "Unsupported conversion"
+instance BsonConv L8.ByteString where
+    toBson = BsonString
+    fromBson (BsonString s) = s
+    fromBson _ = throwUnsupConv
 
-instance Convertible Double BsonValue where
-    safeConvert = return . BsonDouble
+instance BsonConv String where
+    toBson = BsonString . L8.fromString
+    fromBson (BsonString s) = L8.toString s
+    fromBson _ = throwUnsupConv
 
-instance Convertible Float BsonValue where
-    safeConvert = return . BsonDouble . realToFrac
+instance BsonConv S8.ByteString where
+    toBson bs = BsonString $ L.fromChunks [bs]
+    fromBson (BsonString s) = C8.concat $ L.toChunks s
+    fromBson _ = throwUnsupConv
 
-instance Convertible String BsonValue where
-    safeConvert = return . BsonString . L8.fromString
+instance  BsonConv BsonDoc where
+    toBson = BsonDoc
+    fromBson (BsonDoc d) = d
+    fromBson _ = throwUnsupConv
 
-instance Convertible L8.ByteString BsonValue where
-    safeConvert = return . BsonString
+instance BsonConv [(String, BsonValue)] where
+    toBson = toBson . toBsonDoc
+    fromBson (BsonDoc d) = fromBsonDoc d
+    fromBson _ = throwUnsupConv
 
-instance Convertible S8.ByteString BsonValue where
-    safeConvert = return . BsonString . L.fromChunks . return
+instance BsonConv (Map.Map L8.ByteString BsonValue) where
+    toBson = toBson . toBsonDoc
+    fromBson (BsonDoc d) = fromBsonDoc d
+    fromBson _ = throwUnsupConv
 
-instance Convertible [Double] BsonValue where
-    safeConvert ds = BsonArray `liftM` mapM safeConvert ds
+instance BsonConv (Map.Map String BsonValue) where
+    toBson = toBson . toBsonDoc
+    fromBson (BsonDoc d) = fromBsonDoc d
+    fromBson _ = throwUnsupConv
 
-instance Convertible [Float] BsonValue where
-    safeConvert fs = BsonArray `liftM` mapM safeConvert fs
+instance BsonConv POSIXTime where
+    toBson = BsonDate
+    fromBson (BsonDate d) = d
+    fromBson _ = throwUnsupConv
 
-instance Convertible [String] BsonValue where
-    safeConvert ss = BsonArray `liftM` mapM safeConvert ss
+instance BsonConv Bool where
+    toBson = BsonBool
+    fromBson (BsonBool b) = b
+    fromBson _ = throwUnsupConv
 
-instance Convertible [L8.ByteString] BsonValue where
-    safeConvert bs = BsonArray `liftM` mapM safeConvert bs
+instance BsonConv Int where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible [S8.ByteString] BsonValue where
-    safeConvert bs = BsonArray `liftM` mapM safeConvert bs
+instance BsonConv Int8 where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible BsonDoc BsonValue where
-    safeConvert = return . BsonDoc
+instance BsonConv Int16 where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible (Map.Map String BsonValue) BsonValue where
-    safeConvert = return . BsonDoc . Map.mapKeys L8.fromString
+instance BsonConv Int32 where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible [(L8.ByteString, BsonValue)] BsonValue where
-    safeConvert = return . BsonDoc . toBsonDoc
+instance BsonConv Int64 where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible [(String, BsonValue)] BsonValue where
-    safeConvert = return . BsonDoc . toBsonDoc
+instance BsonConv Integer where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible [Bool] BsonValue where
-    safeConvert bs = BsonArray `liftM` mapM safeConvert bs
+instance BsonConv Word where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible [POSIXTime] BsonValue where
-    safeConvert ts = BsonArray `liftM` mapM safeConvert ts
+instance BsonConv Word8 where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible [Int] BsonValue where
-    safeConvert is = BsonArray `liftM` mapM safeConvert is
+instance BsonConv Word16 where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible [Integer] BsonValue where
-    safeConvert is = BsonArray `liftM` mapM safeConvert is
+instance BsonConv Word32 where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv
 
-instance Convertible [Int32] BsonValue where
-    safeConvert is = BsonArray `liftM` mapM safeConvert is
-
-instance Convertible [Int64] BsonValue where
-    safeConvert is = BsonArray `liftM` mapM safeConvert is
-
-instance Convertible POSIXTime BsonValue where
-    safeConvert = return . BsonDate
-
-instance Convertible Bool BsonValue where
-    safeConvert = return . BsonBool
-
-instance Convertible Int BsonValue where
-    safeConvert i = if i >= fromIntegral (minBound::Int32) &&
-                       i <= fromIntegral (maxBound::Int32)
-                    then return $ BsonInt32 $ fromIntegral i
-                    else return $ BsonInt64 $ fromIntegral i
-
-instance Convertible Integer BsonValue where
-    safeConvert i = if i >= fromIntegral (minBound::Int32) &&
-                       i <= fromIntegral (maxBound::Int32)
-                    then return $ BsonInt32 $ fromIntegral i
-                    else return $ BsonInt64 $ fromIntegral i
-
-instance Convertible Int32 BsonValue where
-    safeConvert = return . BsonInt32
-
-instance Convertible Int64 BsonValue where
-    safeConvert = return . BsonInt64
-
-instance (Convertible a BsonValue) =>
-    Convertible (Maybe a) BsonValue where
-        safeConvert Nothing = return BsonNull
-        safeConvert (Just a) = safeConvert a
-
-instance Convertible BsonValue Double where
-    safeConvert (BsonDouble d) = return d
-    safeConvert (BsonInt32 i) = safeConvert i
-    safeConvert (BsonInt64 i) = safeConvert i
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue Float where
-    safeConvert (BsonDouble d) = safeConvert d
-    safeConvert (BsonInt32 i) = safeConvert i
-    safeConvert (BsonInt64 i) = safeConvert i
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue String where
-    safeConvert (BsonString bs) = return $ L8.toString bs
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue L8.ByteString where
-    safeConvert (BsonString bs) = return bs
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue S8.ByteString where
-    safeConvert (BsonString bs) = return $ C8.concat $ L.toChunks bs
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue BsonDoc where
-    safeConvert (BsonDoc o) = return o
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue (Map.Map String BsonValue) where
-    safeConvert (BsonDoc o) = return $ Map.mapKeys L8.toString o
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue [(String, BsonValue)] where
-    safeConvert (BsonDoc o) = return $ fromBsonDoc o
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue [(L8.ByteString, BsonValue)] where
-    safeConvert (BsonDoc o) = return $ fromBsonDoc o
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue [Double] where
-    safeConvert (BsonArray a) = mapM safeConvert a
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue [Float] where
-    safeConvert (BsonArray a) = mapM safeConvert a
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue [String] where
-    safeConvert (BsonArray a) = mapM safeConvert a
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue [Bool] where
-    safeConvert (BsonArray a) = mapM safeConvert a
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue [POSIXTime] where
-    safeConvert (BsonArray a) = mapM safeConvert a
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue [Int32] where
-    safeConvert (BsonArray a) = mapM safeConvert a
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue [Int64] where
-    safeConvert (BsonArray a) = mapM safeConvert a
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue Bool where
-    safeConvert (BsonBool b) = return b
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue POSIXTime where
-    safeConvert (BsonDate t) = return t
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue Int where
-    safeConvert (BsonDouble d) = safeConvert d
-    safeConvert (BsonInt32 d) = safeConvert d
-    safeConvert (BsonInt64 d) = safeConvert d
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue Integer where
-    safeConvert (BsonDouble d) = safeConvert d
-    safeConvert (BsonInt32 d) = safeConvert d
-    safeConvert (BsonInt64 d) = safeConvert d
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue Int32 where
-    safeConvert (BsonDouble d) = safeConvert d
-    safeConvert (BsonInt32 d) = return d
-    safeConvert (BsonInt64 d) = safeConvert d
-    safeConvert v = unsupportedError v
-
-instance Convertible BsonValue Int64 where
-    safeConvert (BsonDouble d) = safeConvert d
-    safeConvert (BsonInt32 d) = safeConvert d
-    safeConvert (BsonInt64 d) = return d
-    safeConvert v = unsupportedError v
-
-instance (Convertible BsonValue a) =>
-    Convertible (Maybe BsonValue) (Maybe a) where
-        safeConvert Nothing = return Nothing
-        safeConvert (Just a) = liftM Just $ safeConvert a
+instance BsonConv Word64 where
+    toBson i | i >= fromIntegral (minBound::Int32) &&
+               i <= fromIntegral (maxBound::Int32) = BsonInt32 $ fromIntegral i
+             | otherwise = BsonInt64 $ fromIntegral i
+    fromBson (BsonInt32 i) = fromIntegral i
+    fromBson (BsonInt64 i) = fromIntegral i
+    fromBson _ = throwUnsupConv

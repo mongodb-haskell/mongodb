@@ -70,7 +70,6 @@ import qualified Data.ByteString.Lazy.UTF8 as L8
 import Data.Int
 import Data.IORef
 import qualified Data.List as List
-import qualified Data.Map as Map
 import Data.Maybe
 import Data.Typeable
 import Data.Digest.OpenSSL.MD5
@@ -121,10 +120,10 @@ newConnection servers opts = do
   hRef <- openHandle (head servers) >>= newIORef
   let c = Connection hRef nsRef
   res <- isMaster c
-  if fromBson (fromLookup $ BSON.lookup "ismaster" res) == (1::Int) ||
+  if fromBson (fromLookup $ List.lookup (s2L "ismaster") res) == (1::Int) ||
      isJust (List.elemIndex SlaveOK opts)
     then return c
-    else case BSON.lookup "remote" res of
+    else case List.lookup (s2L "remote") res of
            Nothing -> throwConFailure "Couldn't find master to connect to"
            Just server -> do
              hRef' <- openHandle (splitHostPort $ fromBson server) >>= newIORef
@@ -149,14 +148,14 @@ conClose c = readIORef (cHandle c) >>= hClose
 -- | Information about the databases on the server.
 databasesInfo :: Connection -> IO BsonDoc
 databasesInfo c =
-    runCommand c (s2L "admin") $ toBsonDoc [("listDatabases", toBson (1::Int))]
+    runCommand c (s2L "admin") $ toBsonDoc [("listDatabases",  BsonInt32 1)]
 
 -- | Return a list of database names on the server.
 databaseNames :: Connection -> IO [Database]
 databaseNames c = do
     info <- databasesInfo c
-    let (BsonArray dbs) = fromLookup $ Map.lookup (s2L "databases") info
-        names = mapMaybe (Map.lookup (s2L "name") . fromBson) dbs
+    let (BsonArray dbs) = fromLookup $ List.lookup (s2L "databases") info
+        names = mapMaybe (List.lookup (s2L "name") . fromBson) dbs
     return $ List.map fromBson (names::[BsonValue])
 
 -- | Alias for 'conClose'
@@ -166,7 +165,7 @@ disconnect = conClose
 -- | Drop a database.
 dropDatabase :: Connection -> Database -> IO ()
 dropDatabase c db = do
-  _ <- runCommand c db $ toBsonDoc [("dropDatabase", toBson (1::Int))]
+  _ <- runCommand c db $ toBsonDoc [("dropDatabase", BsonInt32 1)]
   return ()
 
 isMaster :: Connection -> IO BsonDoc
@@ -175,7 +174,7 @@ isMaster c = runCommand c (s2L "admin") $ toBsonDoc [("ismaster", BsonInt32 1)]
 -- | Get information about the MongoDB server we're connected to.
 serverInfo :: Connection -> IO BsonDoc
 serverInfo c =
-  runCommand c (s2L "admin") $ toBsonDoc [("buildinfo", toBson (1::Int))]
+  runCommand c (s2L "admin") $ toBsonDoc [("buildinfo", BsonInt32 1)]
 
 -- | Shut down the MongoDB server.
 --
@@ -183,13 +182,14 @@ serverInfo c =
 -- Note that it will wait until all ongoing operations are complete.
 serverShutdown :: Connection -> IO BsonDoc
 serverShutdown c =
-  runCommand c (s2L "admin") $ toBsonDoc [("shutdown", toBson (1::Int))]
+  runCommand c (s2L "admin") $ toBsonDoc [("shutdown", BsonInt32 1)]
 
 -- | Return a list of collections in /Database/.
 collectionNames :: Connection -> Database -> IO [FullCollection]
 collectionNames c db = do
   docs <- quickFind' c (L.append db $ s2L ".system.namespaces") empty
-  let names = flip List.map docs $ fromBson . fromLookup . BSON.lookup "name"
+  let names = flip List.map docs $
+              fromBson . fromLookup . List.lookup (s2L "name")
   return $ List.filter (L.notElem $ c2w '$') names
 
 data ColCreateOpt = CCOSize Int64  -- ^ Desired initial size for the
@@ -267,7 +267,7 @@ validateCollection :: Connection -> FullCollection -> IO String
 validateCollection c col = do
   let (db, col') = splitFullCol col
   res <- runCommand c db $ toBsonDoc [("validate", toBson col')]
-  return $ fromBson $ fromLookup $ BSON.lookup "result" res
+  return $ fromBson $ fromLookup $ List.lookup (s2L "result") res
 
 splitFullCol :: FullCollection -> (Database, Collection)
 splitFullCol col = (L.takeWhile (c2w '.' /=) col,
@@ -287,9 +287,9 @@ runCommand :: Connection -> Database -> BsonDoc -> IO BsonDoc
 runCommand c db cmd = do
   mres <- findOne c (L.append db $ s2L ".$cmd") cmd
   let res = fromLookup mres
-  when (1 /= (fromBson $ fromLookup $ BSON.lookup "ok" res :: Int)) $
+  when (BsonDouble 1.0 /= fromLookup (List.lookup (s2L "ok") res)) $
        throwOpFailure $ "command \"" ++ show cmd ++ "\" failed: " ++
-                      fromBson (fromLookup $ BSON.lookup "errmsg" res)
+                      fromBson (fromLookup $ List.lookup (s2L "errmsg") res)
   return res
 
 -- | An Iterator over the results of a query. Use 'nextDoc' to get each
@@ -472,7 +472,7 @@ countMatching c col sel = do
   let (db, col') = splitFullCol col
   res <- runCommand c db $ toBsonDoc [("count", toBson col'),
                                       ("query", toBson sel)]
-  return $ fromBson $ fromLookup $ BSON.lookup "n" res
+  return $ fromBson $ fromLookup $ List.lookup (s2L "n") res
 
 -- | Delete documents matching /Selector/ from the given /FullCollection/.
 delete :: Connection -> FullCollection -> Selector -> IO RequestID
@@ -587,7 +587,7 @@ update c col flags sel obj = do
 login :: Connection -> Database -> Username -> Password -> IO BsonDoc
 login c db user pass = do
   doc <- runCommand c db (toBsonDoc [("getnonce", toBson (1 :: Int))])
-  let nonce = fromBson $ fromLookup $ BSON.lookup "nonce" doc :: String
+  let nonce = fromBson $ fromLookup $ List.lookup (s2L "nonce") doc :: String
       digest = md5sum $ pack $ nonce ++ user ++
                        md5sum (pack (user ++ ":mongo:" ++ pass))
       request = toBsonDoc [("authenticate", toBson (1 :: Int)),
@@ -610,7 +610,10 @@ addUser c db user pass = do
       fdb = L.append db (s2L ".system.users")
   doc <- findOne c fdb userDoc
   let pwd = md5sum $ pack (user ++ ":mongo:" ++ pass)
-      doc' = Map.insert (s2L "pwd") (toBson pwd) (fromMaybe userDoc doc)
+      doc' = (s2L "pwd", toBson pwd) :
+             List.deleteBy (\(k1,_) (k2,_) -> (k1 == k2))
+                           (s2L user, undefined)
+                           (fromMaybe userDoc doc)
   _ <- save c fdb doc'
   return doc'
 
@@ -620,7 +623,7 @@ addUser c db user pass = do
 -- we insert it
 save :: Connection -> FullCollection -> BsonDoc -> IO RequestID
 save c fc doc =
-  case Map.lookup (s2L "_id") doc of
+  case List.lookup (s2L "_id") doc of
     Nothing -> insert c fc doc
     Just obj -> update c fc [UFUpsert] (toBsonDoc [("_id", obj)]) doc
 
