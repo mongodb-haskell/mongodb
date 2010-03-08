@@ -55,6 +55,8 @@ module Database.MongoDB
      Key, Unique,
      Direction(..),
      createIndex, dropIndex, dropIndexes, indexInformation,
+     -- * Map-Reduce
+     MapReduceOpt(..), mapReduce,
     )
 where
 import Control.Exception
@@ -616,6 +618,52 @@ addUser c db user pass = do
                            (fromMaybe userDoc doc)
   _ <- save c fdb doc'
   return doc'
+
+data MapReduceOpt
+    = MROptQuery BsonDoc      -- ^ query filter object
+
+    -- | MRSort ???? TODO  <sort the query.  useful for optimization>
+
+    | MROptLimit Int64        -- ^ number of objects to return from
+                              -- collection
+
+    | MROptOut L8.ByteString  -- ^ output-collection name
+
+    | MROptKeepTemp           -- ^ If set the generated collection is
+                              -- not treated as temporary, as it will
+                              -- be by defualt. When /MROptOut/ is
+                              -- specified, the collection is
+                              -- automatically made permanent.
+
+    | MROptFinalize JSCode    -- ^ function to apply to all the
+                              -- results when finished
+
+    | MROptScope BsonDoc      -- ^ can pass in variables that can be
+                              -- access from map/reduce/finalize
+
+    | MROptVerbose            -- ^ provide statistics on job execution
+                              -- time
+
+mrOptToTuple :: MapReduceOpt -> (String, BsonValue)
+mrOptToTuple (MROptQuery q)    = ("query", BsonDoc q)
+mrOptToTuple (MROptLimit l)    = ("limit", BsonInt64 l)
+mrOptToTuple (MROptOut c)      = ("out", BsonString c)
+mrOptToTuple MROptKeepTemp     = ("keeptemp", BsonBool True)
+mrOptToTuple (MROptFinalize f) = ("finalize", BsonJSCode f)
+mrOptToTuple (MROptScope s)    = ("scope", BsonDoc s)
+mrOptToTuple MROptVerbose      = ("verbose", BsonBool True)
+
+mapReduce :: Connection -> FullCollection
+          -> JSCode -- ^ mapping javascript function
+          -> JSCode -- ^ reducing javascript function
+          -> [MapReduceOpt]
+          -> IO BsonDoc
+mapReduce c fc m r opts = do
+  let (db, col) = splitFullCol fc
+      doc = [("mapreduce", toBson col),
+             ("map", BsonCode m),
+             ("reduce", BsonCode r)] ++ List.map mrOptToTuple opts
+  runCommand c db $ toBsonDoc doc
 
 -- | Conveniently stores the /BsonDoc/ to the /FullCollection/
 -- if there is an _id present in the /BsonDoc/ then it already has
