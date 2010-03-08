@@ -567,3 +567,9 @@ instance BsonConv [BsonDoc] where
     toBson = BsonArray . List.map toBson
     fromBson (BsonArray ss) = List.map fromBson ss
     fromBson _ = throwUnsupConv
+
+instance (BsonConv a) => BsonConv (Maybe a) where
+    toBson Nothing = BsonNull
+    toBson (Just a) = toBson a
+    fromBson BsonNull = Nothing
+    fromBson a = Just $ fromBson a
