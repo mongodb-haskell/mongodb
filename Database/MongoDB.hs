@@ -437,6 +437,8 @@ type NumToReturn = Int32
 type Username = String
 type Password = String
 
+type JSCode = L8.ByteString
+
 -- | Options that control the behavior of a 'query' operation.
 data QueryOpt = QOTailableCursor
               | QOSlaveOK
@@ -629,9 +631,11 @@ save c fc doc =
 -- Example:
 --
 -- > findOne conn mycoll $ whereClause "this.name == (name1 + name2)"
--- >     (toBsonDoc [("name1", toBson "mar"), ("name2", toBson "tha")])
-whereClause :: String -> BsonDoc -> BsonDoc
-whereClause qry scope = toBsonDoc [("$where", BsonCodeWScope (s2L qry) scope)]
+-- >     Just (toBsonDoc [("name1", toBson "mar"), ("name2", toBson "tha")])
+whereClause :: String -> Maybe BsonDoc -> BsonDoc
+whereClause qry Nothing = toBsonDoc [("$where", BsonJSCode (s2L qry))]
+whereClause qry (Just scope) =
+    toBsonDoc [("$where", BsonJSCodeWScope (s2L qry) scope)]
 
 data Hdr = Hdr {
       hMsgLen :: Int32,

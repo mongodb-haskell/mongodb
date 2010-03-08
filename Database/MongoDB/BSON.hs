@@ -70,10 +70,11 @@ data BsonValue
     | BsonDate POSIXTime
     | BsonNull
     | BsonRegex L8.ByteString String
+    | BsonJSCode L8.ByteString
     | BsonSymbol L8.ByteString
+    | BsonJSCodeWScope L8.ByteString BsonDoc
     | BsonInt32 Int32
     | BsonInt64 Int64
-    | BsonCodeWScope L8.ByteString BsonDoc
     | BsonMinKey
     | BsonMaxKey
     deriving (Show, Eq, Ord)
@@ -111,26 +112,26 @@ instance BsonDocOps String where
     lookup = Map.lookup . L8.fromString
 
 data DataType =
-    DataMinKey     | -- -1
-    DataNumber     | -- 1
-    DataString     | -- 2
-    DataDoc	   | -- 3
-    DataArray      | -- 4
-    DataBinary     | -- 5
-    DataUndefined  | -- 6
-    DataOid        | -- 7
-    DataBoolean    | -- 8
-    DataDate       | -- 9
-    DataNull       | -- 10
-    DataRegex      | -- 11
-    DataRef        | -- 12
-    DataCode       | -- 13
-    DataSymbol	   | -- 14
-    DataCodeWScope | -- 15
-    DataInt        | -- 16
-    DataTimestamp  | -- 17
-    DataLong       | -- 18
-    DataMaxKey       -- 127
+    DataMinKey       | -- -1
+    DataNumber       | -- 1
+    DataString       | -- 2
+    DataDoc          | -- 3
+    DataArray        | -- 4
+    DataBinary       | -- 5
+    DataUndefined    | -- 6
+    DataOid          | -- 7
+    DataBoolean      | -- 8
+    DataDate         | -- 9
+    DataNull         | -- 10
+    DataRegex        | -- 11
+    DataRef          | -- 12
+    DataJSCode       | -- 13
+    DataSymbol       | -- 14
+    DataJSCodeWScope | -- 15
+    DataInt          | -- 16
+    DataTimestamp    | -- 17
+    DataLong         | -- 18
+    DataMaxKey         -- 127
     deriving (Show, Read, Enum, Eq, Ord)
 
 toDataType :: Int -> DataType
@@ -189,18 +190,21 @@ getVal DataOid = liftM ((,) 12 . BsonObjectId) $ getLazyByteString 12
 getVal DataBoolean = liftM ((,) (1::Integer) . BsonBool . (/= (0::Int))) getI8
 getVal DataDate = liftM ((,) 8 . BsonDate . flip (/) 1000 . realToFrac) getI64
 getVal DataNull = return (1, BsonNull)
-getVal DataRegex = fail "DataCode not yet supported" -- TODO
+getVal DataRegex = fail "DataJSCode not yet supported" -- TODO
 getVal DataRef = fail "DataRef is deprecated"
-getVal DataCode = fail "DataCode not yet supported" -- TODO
+getVal DataJSCode = do
+  sLen1 <- getI32
+  (_sLen2, s) <- getS
+  return (fromIntegral $ 4 + sLen1, BsonJSCode s)
 getVal DataSymbol = do
   sLen1 <- getI32
   (_sLen2, s) <- getS
   return (fromIntegral $ 4 + sLen1, BsonString s)
-getVal DataCodeWScope = do
+getVal DataJSCodeWScope = do
   sLen1 <- getI32
   (_, qry) <- getS
   (_, scope) <- getDoc
-  return (fromIntegral sLen1, BsonCodeWScope qry scope)
+  return (fromIntegral sLen1, BsonJSCodeWScope qry scope)
 getVal DataInt = liftM ((,) 4 . BsonInt32 . fromIntegral) getI32
 getVal DataTimestamp = fail "DataTimestamp not yet supported" -- TODO
 
@@ -243,9 +247,9 @@ putType BsonDate{}     = putDataType DataDate
 putType BsonNull       = putDataType DataNull
 putType BsonRegex{}    = putDataType DataRegex
 -- putType = putDataType DataRef
--- putType = putDataType DataCode
+putType BsonJSCode {}  = putDataType DataJSCode
 putType BsonSymbol{}   = putDataType DataSymbol
-putType BsonCodeWScope{} = putDataType DataCodeWScope
+putType BsonJSCodeWScope{} = putDataType DataJSCodeWScope
 putType BsonInt32 {}   = putDataType DataInt
 putType BsonInt64 {}   = putDataType DataLong
 -- putType = putDataType DataTimestamp
@@ -272,12 +276,13 @@ putVal BsonNull         = putNothing
 putVal (BsonRegex r opt)= do putS r
                              putByteString $ pack $ List.sort opt
                              putNull
+putVal (BsonJSCode c)   = putStrSz c
 putVal (BsonSymbol s)   = putI32 (fromIntegral $ 1 + L8.length s) >> putS s
-putVal (BsonInt32 i)    = putI32 i
-putVal (BsonInt64 i)    = putI64 i
-putVal (BsonCodeWScope q s) =
+putVal (BsonJSCodeWScope q s) =
   let bytes = runPut (putStrSz q >> putObj s)
     in putI32 ((+4) $ fromIntegral $ L.length bytes) >> putLazyByteString bytes
+putVal (BsonInt32 i)    = putI32 i
+putVal (BsonInt64 i)    = putI64 i
 putVal BsonMinKey       = putNothing
 putVal BsonMaxKey       = putNothing
 
