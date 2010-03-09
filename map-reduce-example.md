@@ -25,14 +25,11 @@ map/reduce queries on:
     > :{
     insertMany c col [
           (toBsonDoc [("x", BsonInt32 1),
-                      ("tags", BsonArray [toBson "dog",
-                                          toBson "cat"])]),
+                      ("tags", toBson ["dog", "cat"])]),
           (toBsonDoc [("x", BsonInt32 2),
-                      ("tags", BsonArray [toBson "cat"])]),
+                      ("tags", toBson ["cat"])]),
           (toBsonDoc [("x", BsonInt32 3),
-                      ("tags", BsonArray [toBson "mouse",
-                                          toBson "cat",
-                                          toBson "doc"])]),
+                      ("tags", toBson ["mouse", "cat", "doc"])]),
           (toBsonDoc [("x", BsonInt32 4),
                       ("tags", BsonArray [])])
     ]

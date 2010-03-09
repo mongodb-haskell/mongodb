@@ -472,3 +472,98 @@ instance BsonConv Word64 where
     fromBson (BsonInt32 i) = fromIntegral i
     fromBson (BsonInt64 i) = fromIntegral i
     fromBson _ = throwUnsupConv
+
+instance BsonConv [Double] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Float] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Int] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Int8] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Int16] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Int32] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Int64] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Integer] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Word] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Word8] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Word16] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Word32] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Word64] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [Bool] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [POSIXTime] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [String] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [L8.ByteString] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [S8.ByteString] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
+
+instance BsonConv [BsonDoc] where
+    toBson = BsonArray . List.map toBson
+    fromBson (BsonArray ss) = List.map fromBson ss
+    fromBson _ = throwUnsupConv
