@@ -468,16 +468,17 @@ fromUpdateFlags flags = List.foldl (.|.) 0 $
                         flip fmap flags $ (1 `shiftL`) . fromEnum
 
 -- | Return the number of documents in /FullCollection/.
-count :: Connection -> FullCollection -> IO Int64
+count :: Connection -> FullCollection -> IO Integer
 count c col = countMatching c col empty
 
 -- | Return the number of documents in /FullCollection/ matching /Selector/
-countMatching :: Connection -> FullCollection -> Selector -> IO Int64
+countMatching :: Connection -> FullCollection -> Selector -> IO Integer
 countMatching c col sel = do
   let (db, col') = splitFullCol col
   res <- runCommand c db $ toBsonDoc [("count", toBson col'),
                                       ("query", toBson sel)]
-  return $ fromBson $ fromLookup $ List.lookup (s2L "n") res
+  let cnt = (fromBson $ fromLookup $ List.lookup (s2L "n") res :: Double)
+  return $ truncate $ cnt
 
 -- | Delete documents matching /Selector/ from the given /FullCollection/.
 delete :: Connection -> FullCollection -> Selector -> IO RequestID
