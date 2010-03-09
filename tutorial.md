@@ -6,13 +6,13 @@ MongoDB Haskell Mini Tutorial
   __Updated:__ 2/28/2010
 
 This is a mini tutorial to get you up and going with the basics
-of the Haskell mongoDB drivers. It is modeled after the python tutorial
-pymongo available here: http://api.mongodb.org/python/1.4%2B/tutorial.html
+of the Haskell mongoDB drivers. It is modeled after the
+[pymongo tutorial](http://api.mongodb.org/python/1.4%2B/tutorial.html).
 
 You will need the mongoDB bindings installed as well as mongo itself installed.
 
->$ = command line prompt
-> = ghci repl prompt
+    $ = command line prompt
+    > = ghci repl prompt
 
 
 Installing Haskell Bindings
@@ -20,68 +20,62 @@ Installing Haskell Bindings
 
 From Source:
 
-> $ git clone git://github.com/srp/mongoDB.git
-
-> $ cd mongoDB
-
-> $ runhaskell Setup.hs configure
-
-> $ runhaskell Setup.hs build
-
-> $ runhaskell Setup.hs install
+    $ git clone git://github.com/srp/mongoDB.git
+    $ cd mongoDB
+    $ runhaskell Setup.hs configure
+    $ runhaskell Setup.hs build
+    $ runhaskell Setup.hs install
 
 From Hackage using cabal:
 
-> $ cabal install mongoDB
-
+    $ cabal install mongoDB
 
 Getting Ready
 -------------
 
 Start a MongoDB instance for us to play with:
 
-> $ mongod
+    $ mongod
 
 Start up a haskell repl:
 
-> $ ghci
+    $ ghci
 
 Now We'll need to bring in the MongoDB/BSON bindings:
 
-> import Database.MongoDB
-
-> import Database.MongoDB.BSON
+    > import Database.MongoDB
+    > import Database.MongoDB.BSON
 
 Making A Connection
 -------------------
 Open up a connection to your DB instance, using the standard port:
 
-> con <- connect "127.0.0.1" []
+    > con <- connect "127.0.0.1" []
 
 or for a non-standard port
 
-> import Network
-> con <- connectOnPort "127.0.0.1" (Network.PortNumber 666) []
+    > import Network
+    > con <- connectOnPort "127.0.0.1" (Network.PortNumber 666) []
 
 By default mongoDB will try to find the master and connect to it and
 will throw an exception if a master can not be found to connect
 to. You can force mongoDB to connect to the slave by adding SlaveOK as
 a connection option, eg:
 
-> con <- connect "127.0.0.1" [SlaveOK]
+    > con <- connect "127.0.0.1" [SlaveOK]
 
 Getting the Databases
 ------------------
 
-> dbs <- databaseNames con
-> let testdb = head dbs
+    > dbs <- databaseNames con
+    > let testdb = head dbs
 
 
 Getting the Collections
 -----------------------
 
-> collections <- collectionNames con testdb
-> let testcol = head collections
+    > collections <- collectionNames con testdb
+    > let testcol = head collections
 
 Documents
 ---------
@@ -91,24 +85,23 @@ BSON representation in Haskell
 Inserting a Document
 -------------------
 
-> insert con testcol (toBsonDoc [("author", toBson "Mike"), ("text", toBson "My first Blog post!"), ("tags", toBson ["mongodb", "python","pymongo"])])
+    > insert con testcol (toBsonDoc [("author", toBson "Mike"), ("text", toBson "My first Blog post!"), ("tags", toBson ["mongodb", "python","pymongo"])])
 
 
 Getting a single document with findOne
 -------------------------------------
 
-> findOne con curcol (toBsonDoc [("author", toBson "Mike")])
+    > findOne con curcol (toBsonDoc [("author", toBson "Mike")])
 
 Querying for More Than One Document
 ------------------------------------
 
-> cursor <- find con curcol (toBsonDoc [("author", toBson "Mike")])
-
-> allDocs cursor
+    > cursor <- find con curcol (toBsonDoc [("author", toBson "Mike")])
+    > allDocs cursor
 
 You can combine these into one line:
 
-> docs <- allDocs =<< find con curcol (toBsonDoc [("author", toBson "Mike")])
+    > docs <- allDocs =<< find con curcol (toBsonDoc [("author", toBson "Mike")])
 
 See nextDoc to modify cursor incrementally one at a time.
 
@@ -118,23 +111,24 @@ See nextDoc to modify cursor incrementally one at a time.
 Counting
 --------
 
-  We can count how many documents are in an entire collection:
+We can count how many documents are in an entire collection:
 
-> num <- count con testcol
+    > num <- count con testcol
 
-  Or we can query for how many documents match a query:
+Or we can query for how many documents match a query:
 
-> num <- countMatching con  testcol (toBsonDoc [("author", toBson "Mike")])
+    > num <- countMatching con  testcol (toBsonDoc [("author", toBson "Mike")])
 
 Range Queries
 -------------
 
-  No non native sorting yet.
+No non native sorting yet.
 
 Indexing
 --------
 
- WIP - coming soon.
+WIP - coming soon.
 
- Something like...
-> index <- createIndex con testcol [("author", Ascending)] True
+Something like...
+
+    > index <- createIndex con testcol [("author", Ascending)] True
