@@ -56,7 +56,10 @@ module Database.MongoDB
      Direction(..),
      createIndex, dropIndex, dropIndexes, indexInformation,
      -- * Map-Reduce
-     MapReduceOpt(..), mapReduce,
+     MapReduceOpt(..),
+     mapReduce, mapReduceWScopes,
+     runMapReduce, runMapReduceWScopes,
+     mapReduceResults,
     )
 where
 import Control.Exception
@@ -653,17 +656,85 @@ mrOptToTuple (MROptFinalize f) = ("finalize", BsonJSCode f)
 mrOptToTuple (MROptScope s)    = ("scope", BsonDoc s)
 mrOptToTuple MROptVerbose      = ("verbose", BsonBool True)
 
-mapReduce :: Connection -> FullCollection
+-- | Issue a map/reduce command and return the results metadata.  If
+-- all you care about is the actual map/reduce results you might want
+-- to use the 'mapReduce' command instead.
+--
+-- The results meta-document will look something like this:
+--
+-- > {"result": "tmp.mr.mapreduce_1268095152_14",
+-- >  "timeMillis": 67,
+-- >  "counts": {"input": 4,
+-- >             "emit": 6,
+-- >             "output": 3},
+-- >  "ok": 1.0}
+--
+-- The /results/ field is the collection name within the same Database
+-- that contain the results of the map/reduce.
+runMapReduce :: Connection -> FullCollection
           -> JSCode -- ^ mapping javascript function
           -> JSCode -- ^ reducing javascript function
           -> [MapReduceOpt]
           -> IO BsonDoc
-mapReduce c fc m r opts = do
+runMapReduce c fc m r opts = do
   let (db, col) = splitFullCol fc
       doc = [("mapreduce", toBson col),
-             ("map", BsonCode m),
-             ("reduce", BsonCode r)] ++ List.map mrOptToTuple opts
+             ("map", BsonJSCode m),
+             ("reduce", BsonJSCode r)] ++ List.map mrOptToTuple opts
   runCommand c db $ toBsonDoc doc
+
+-- | Issue a map/reduce command with associated scopes and return the
+-- results metadata. If all you care about is the actual map/reduce
+-- results you might want to use the 'mapReduce' command instead.
+--
+-- See 'runMapReduce' for more information about the form of the
+-- result metadata.
+runMapReduceWScopes :: Connection -> FullCollection
+          -> JSCode -- ^ mapping javascript function
+          -> BsonDoc -- ^ Scope for mapping function
+          -> JSCode -- ^ reducing javascript function
+          -> BsonDoc -- ^ Scope for reducing function
+          -> [MapReduceOpt]
+          -> IO BsonDoc
+runMapReduceWScopes c fc m ms r rs opts = do
+  let (db, col) = splitFullCol fc
+      doc = [("mapreduce", toBson col),
+             ("map", BsonJSCodeWScope m ms),
+             ("reduce", BsonJSCodeWScope r rs)] ++ List.map mrOptToTuple opts
+  runCommand c db $ toBsonDoc doc
+
+-- | Given a result metadata from a 'mapReduce' command (or
+-- 'mapReduceWScope'), issue the 'find' command that will produce the
+-- actual map/reduce results.
+mapReduceResults :: Connection -> Database -> BsonDoc -> IO Cursor
+mapReduceResults c db r = do
+  let col = case List.lookup (s2L "result") r of
+              Just bCol -> fromBson bCol
+              Nothing -> throwOpFailure "No 'result' in mapReduce response"
+      fc = L.append (L.append db $ s2L ".") col
+  find c fc []
+
+-- | Run map/reduce and produce a cursor on the results.
+mapReduce :: Connection -> FullCollection
+          -> JSCode -- ^ mapping javascript function
+          -> JSCode -- ^ reducing javascript function
+          -> [MapReduceOpt]
+          -> IO Cursor
+mapReduce c fc m r opts =
+    runMapReduce c fc m r opts >>= mapReduceResults c (fst $ splitFullCol fc)
+
+-- | Run map/reduce with associated scopes and produce a cursor on the
+-- results.
+mapReduceWScopes :: Connection -> FullCollection
+          -> JSCode -- ^ mapping javascript function
+          -> BsonDoc -- ^ Scope for mapping function
+          -> JSCode -- ^ reducing javascript function
+          -> BsonDoc -- ^ Scope for mapping function
+          -> [MapReduceOpt]
+          -> IO Cursor
+mapReduceWScopes c fc m ms r rs opts =
+    runMapReduceWScopes c fc m ms r rs opts >>=
+    mapReduceResults c (fst $ splitFullCol fc)
 
 -- | Conveniently stores the /BsonDoc/ to the /FullCollection/
 -- if there is an _id present in the /BsonDoc/ then it already has
