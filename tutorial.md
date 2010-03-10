@@ -64,44 +64,91 @@ a connection option, eg:
 
     > con <- connect "127.0.0.1" [SlaveOK]
 
-Getting the Databases
-------------------
+Databases, Collections and FullCollections
+------------------------------------------
+
+As many database servers, MongoDB has databases--separate namespaces
+under which collections reside. Most of the APIs for this driver
+request the *FullCollection* which is simply the *Database* and the
+*Collection* concatenated with a period.
+
+For instance 'myweb_prod.users' is the the *FullCollection* name for
+the *Collection 'users' in the database 'myweb_prod'.
+
+Databases and collections do not need to be created, just start using
+them and MongoDB will automatically create them for you.
+
+In the below examples we'll be using the following *FullCollection*:
+
+    > import Data.ByteString.Lazy.UTF8
+    > let testcol = (fromString "test.haskell")
+
+You can obtain a list of databases available on a connection:
 
     > dbs <- databaseNames con
-    > let testdb = head dbs
 
+You can obtain a list of collections available on a database:
 
-Getting the Collections
------------------------
-
-    > collections <- collectionNames con testdb
-    > let testcol = head collections
+    > collections <- collectionNames con (fromString "test")
 
 Documents
 ---------
 
-BSON representation in Haskell
+Data in MongoDB is represented (and stored) using JSON-style
+documents. In mongoDB we use the *BsonDoc* type to represent these
+documents. At the moment a *BsonDoc* is simply a tuple list of the
+type '[(ByteString, BsonValue)]'. Here's a BsonDoc which could represent
+a blog post:
+
+    > import Data.Time.Clock.POSIX
+    > now <- getPOSIXTime
+    > :{
+      let post = [(fromString "author", BsonString $ fromString "Mike"),
+                  (fromString "text",
+                   BsonString $ fromString "My first blog post!"),
+                  (fromString "tags",
+                   BsonArray [BsonString $ fromString "mongodb",
+                              BsonString $ fromString "python",
+                              BsonString $ fromString "pymongo"]),
+                  (fromString "date", BsonDate now)]
+      :}
+
+With all the type wrappers and string conversion, it's hard to see
+what's actually going on. Fortunately the BSON library provides
+conversion functions *toBson* and *fromBson* for converting native
+between the wrapped BSON types and many native Haskell types. The
+functions *toBsonDoc* and *fromBsonDoc* help convert from tuple lists
+with plain *String* keys, or *Data.Map*.
+
+Here's the same BSON data structure using these conversion functions:
+
+    > :{
+      let post = toBsonDoc [("author", toBson "Mike"),
+                            ("text", toBson "My first blog post!"),
+                            ("tags", toBson ["mongoDB", "Haskell"]),
+                            ("date", BsonDate now)]
+      :}
 
 Inserting a Document
 -------------------
 
-    > insert con testcol (toBsonDoc [("author", toBson "Mike"), ("text", toBson "My first Blog post!"), ("tags", toBson ["mongodb", "python","pymongo"])])
+    > insert con testcol post
 
 
 Getting a single document with findOne
 -------------------------------------
 
-    > findOne con curcol (toBsonDoc [("author", toBson "Mike")])
+    > findOne con testcol (toBsonDoc [("author", toBson "Mike")])
 
 Querying for More Than One Document
 ------------------------------------
 
-    > cursor <- find con curcol (toBsonDoc [("author", toBson "Mike")])
+    > cursor <- find con testcol (toBsonDoc [("author", toBson "Mike")])
     > allDocs cursor
 
 You can combine these into one line:
 
-    > docs <- allDocs =<< find con curcol (toBsonDoc [("author", toBson "Mike")])
+    > docs <- allDocs =<< find con testcol (toBsonDoc [("author", toBson "Mike")])
 
 See nextDoc to modify cursor incrementally one at a time.
 
@@ -117,7 +164,7 @@ We can count how many documents are in an entire collection:
 
 Or we can query for how many documents match a query:
 
-    > num <- countMatching con  testcol (toBsonDoc [("author", toBson "Mike")])
+    > num <- countMatching con testcol (toBsonDoc [("author", toBson "Mike")])
 
 Range Queries
 -------------
