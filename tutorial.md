@@ -81,7 +81,7 @@ them and MongoDB will automatically create them for you.
 In the below examples we'll be using the following *FullCollection*:
 
     > import Data.ByteString.Lazy.UTF8
-    > let testcol = (fromString "test.haskell")
+    > let postsCol = (fromString "test.posts")
 
 You can obtain a list of databases available on a connection:
 
@@ -89,7 +89,9 @@ You can obtain a list of databases available on a connection:
 
 You can obtain a list of collections available on a database:
 
-    > collections <- collectionNames con (fromString "test")
+    > cols <- collectionNames con (fromString "test")
+    > map toString cols
+    ["test.system.indexes"]
 
 Documents
 ---------
@@ -132,39 +134,117 @@ Here's the same BSON data structure using these conversion functions:
 Inserting a Document
 -------------------
 
-    > insert con testcol post
+To insert a document into a collection we can use the *insert* function:
 
+    > insert con postsCol post
+
+When a document is inserted a special key, *_id*, is automatically
+added if the document doesn't already contain an *_id* key. The value
+of *_id* must be unique across the collection. insert() returns the
+value of *_id* for the inserted document. For more information, see
+the [documentation on _id](http://www.mongodb.org/display/DOCS/Object+IDs).
+
+After inserting the first document, the posts collection has actually
+been created on the server. We can verify this by listing all of the
+collections in our database:
+
+    > cols <- collectionNames con (fromString "test")
+    > map toString cols
+    [u'postsCol', u'system.indexes']
+
+* Note The system.indexes collection is a special internal collection
+that was created automatically.
 
 Getting a single document with findOne
 -------------------------------------
 
-    > findOne con testcol (toBsonDoc [("author", toBson "Mike")])
+The most basic type of query that can be performed in MongoDB is
+*findOne*. This method returns a single document matching a query (or
+*Nothing* if there are no matches). It is useful when you know there is
+only one matching document, or are only interested in the first
+match. Here we use *findOne* to get the first document from the posts
+collection:
+
+    > findOne con postsCol []
+    Just [(Chunk "_id" Empty,BsonObjectId (Chunk "K\151\153S9\CAN\138e\203X\182'" Empty)),(Chunk "author" Empty,BsonString (Chunk "Mike" Empty)),(Chunk "text" Empty,BsonString (Chunk "My first blog post!" Empty)),(Chunk "tags" Empty,BsonArray [BsonString (Chunk "mongoDB" Empty),BsonString (Chunk "Haskell" Empty)]),(Chunk "date" Empty,BsonDate 1268226361.753s)]
+
+The result is a dictionary matching the one that we inserted
+previously.
+
+* Note: The returned document contains an *_id*, which was automatically
+added on insert.
+
+*findOne* also supports querying on specific elements that the
+resulting document must match. To limit our results to a document with
+author "Mike" we do:
+
+    > findOne con postsCol $ toBsonDoc [("author", toBson "Mike")]
+    Just [(Chunk "_id" Empty,BsonObjectId (Chunk "K\151\153S9\CAN\138e\203X\182'" Empty)),(Chunk "author" Empty,BsonString (Chunk "Mike" Empty)),(Chunk "text" Empty,BsonString (Chunk "My first blog post!" Empty)),(Chunk "tags" Empty,BsonArray [BsonString (Chunk "mongoDB" Empty),BsonString (Chunk "Haskell" Empty)]),(Chunk "date" Empty,BsonDate 1268226361.753s)]
+
+If we try with a different author, like "Eliot", we'll get no result:
+
+    > findOne con postsCol $ toBsonDoc [("author", toBson "Eliot")]
+    Nothing
+
+Bulk Inserts
+------------
+
+In order to make querying a little more interesting, let's insert a
+few more documents. In addition to inserting a single document, we can
+also perform bulk insert operations, by using the *insertMany* api
+which accepts a list of documents to be inserted. This will insert
+each document in the iterable, sending only a single command to the
+server:
+
+    > now <- getPOSIXTime
+    > :{
+      let new_postsCol = [toBsonDoc [("author", toBson "Mike"),
+                                     ("text", toBson "Another post!"),
+                                     ("tags", toBson ["bulk", "insert"]),
+                                     ("date",  toBson now)],
+                          toBsonDoc [("author", toBson "Eliot"),
+                                     ("title", toBson "MongoDB is fun"),
+                                     ("text", toBson "and pretty easy too!"),
+                                     ("date", toBson now)]]
+      :}
+    > insertMany con postsCol new_posts
+
+* Note that *new_posts !! 1* has a different shape than the other
+posts - there is no "tags" field and we've added a new field,
+"title". This is what we mean when we say that MongoDB is schema-free.
 
 Querying for More Than One Document
 ------------------------------------
 
-    > cursor <- find con testcol (toBsonDoc [("author", toBson "Mike")])
+To get more than a single document as the result of a query we use the
+*find* method. *find* returns a cursor instance, which allows us to
+iterate over all matching documents. There are several ways in which
+we can iterate: we can call *nextDoc* to get documents one at a time
+or we can get a lazy list of all the results by applying the cursor
+to *allDocs*:
+
+    > cursor <- find con postsCol $ toBsonDoc [("author", toBson "Mike")]
     > allDocs cursor
 
-You can combine these into one line:
+Of course you can use bind (*>>=*) to combine these into one line:
 
-    > docs <- allDocs =<< find con testcol (toBsonDoc [("author", toBson "Mike")])
+    > docs <- find con postsCol (toBsonDoc [("author", toBson "Mike")]) >>= allDocs
 
-See nextDoc to modify cursor incrementally one at a time.
-
- * Note: allDocs automatically closes the cursor when done, through nextDoc.
-
+* Note: *nextDoc* automatically closes the cursor when the last
+document has been read out of it. Similarly, *allDocs* automatically
+closes the cursor when you've consumed to the end of the resulting
+list.
 
 Counting
 --------
 
 We can count how many documents are in an entire collection:
 
-    > num <- count con testcol
+    > num <- count con postsCol
 
 Or we can query for how many documents match a query:
 
-    > num <- countMatching con testcol (toBsonDoc [("author", toBson "Mike")])
+    > num <- countMatching con postsCol (toBsonDoc [("author", toBson "Mike")])
 
 Range Queries
 -------------

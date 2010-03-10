@@ -1,6 +1,8 @@
 TODO
 ====
 
++ inject _id if not given, return it
+
 BSON
 ----
 + on insert/update: reject keys that start with "$" or "."
