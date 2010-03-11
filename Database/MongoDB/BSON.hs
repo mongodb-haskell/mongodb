@@ -156,11 +156,17 @@ getVal DataArray = do
   getNull
   return (fromIntegral bytes, BsonArray arr)
 getVal DataBinary = do
-  skip 4
-  st   <- getI8
-  len2 <- getI32
-  bs   <- getLazyByteString $ fromIntegral len2
-  return (4 + 1 + 4 + fromIntegral len2, BsonBinary (toBinarySubType st) bs)
+  len1 <- getI32
+  st <- getI8
+  (len, hdrLen) <- if toBinarySubType st == BSTByteArray
+                     then do
+                       len2 <- getI32
+                       assert (len1 - 4 == len2) $ return ()
+                       return (len2, 4 + 1 + 4)
+                     else return (len1, 4 + 1)
+  bs <- getLazyByteString $ fromIntegral len
+  return (hdrLen + fromIntegral len, BsonBinary (toBinarySubType st) bs)
+
 getVal DataUndefined = return (1, BsonUndefined)
 getVal DataOid = liftM ((,) 12 . BsonObjectId) $ getLazyByteString 12
 getVal DataBoolean = liftM ((,) (1::Integer) . BsonBool . (/= (0::Int))) getI8
