@@ -21,6 +21,7 @@ Build-Depends:       base < 5,
 		     network,
 		     random,
 		     time,
+		     unix,
 		     utf8-string,
                      nano-md5
 Build-Type:          Simple

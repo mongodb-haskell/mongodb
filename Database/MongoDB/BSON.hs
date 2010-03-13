@@ -36,6 +36,8 @@ module Database.MongoDB.BSON
      fromBsonDoc, toBsonDoc,
      -- * Binary encoding/decoding
      getBsonDoc, putBsonDoc,
+     -- * ObjectId creation
+     mkObjectIdGen, genObjectId,
     )
 where
 import Prelude hiding (lookup)
@@ -47,16 +49,22 @@ import Data.Binary
 import Data.Binary.Get
 import Data.Binary.IEEE754
 import Data.Binary.Put
+import Data.Bits
 import Data.ByteString.Char8 as C8 hiding (empty)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
 import qualified Data.ByteString.UTF8 as S8
+import Data.Digest.OpenSSL.MD5
 import Data.Int
+import Data.IORef
 import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Time.Clock.POSIX
 import Data.Typeable
 import Database.MongoDB.Util
+import Network.BSD
+import Numeric
+import System.Posix.Process
 
 -- | BsonValue is the type that can be used as a key in a 'BsonDoc'.
 data BsonValue
@@ -66,7 +74,7 @@ data BsonValue
     | BsonArray [BsonValue]
     | BsonUndefined
     | BsonBinary BinarySubType L.ByteString
-    | BsonObjectId L.ByteString
+    | BsonObjectId Integer
     | BsonBool !Bool
     | BsonDate POSIXTime
     | BsonNull
@@ -137,6 +145,29 @@ fromBinarySubType :: BinarySubType -> Int8
 fromBinarySubType BSTUserDefined = 0x80
 fromBinarySubType d = fromIntegral $ fromEnum d
 
+data ObjectIdGen = ObjectIdGen {
+      oigMachine :: Integer,
+      oigInc :: IORef Integer
+    }
+
+mkObjectIdGen :: IO ObjectIdGen
+mkObjectIdGen = do
+  host <- liftM (fst . (!! 0) . readHex . List.take 6 . md5sum . C8.pack)
+                getHostName
+  inc <- newIORef 0
+  return ObjectIdGen {oigMachine = host, oigInc = inc}
+
+genObjectId :: ObjectIdGen -> IO BsonValue
+genObjectId oig = do
+  now <- liftM (truncate . (realToFrac :: POSIXTime -> Double)) getPOSIXTime
+  pid <- liftM fromIntegral getProcessID
+  inc <- atomicModifyIORef (oigInc oig) $ \i -> ((i+1) `rem` 0x10000, i)
+  return $ BsonObjectId
+             ((now `shiftL` 64) .|.
+              oigMachine oig `shiftL` 40 .|.
+              (0xffff .&. pid) `shiftL` 24 .|.
+              (inc `div` 0x100) `shiftL` 8 .|. (inc `rem` 0x100))
+
 getBsonDoc :: Get BsonDoc
 getBsonDoc = liftM snd getDoc
 
@@ -168,7 +199,11 @@ getVal DataBinary = do
   return (hdrLen + fromIntegral len, BsonBinary (toBinarySubType st) bs)
 
 getVal DataUndefined = return (1, BsonUndefined)
-getVal DataOid = liftM ((,) 12 . BsonObjectId) $ getLazyByteString 12
+getVal DataOid = do
+  oid1 <- getWord64be
+  oid2 <- getWord32be
+  let oid = (fromIntegral oid1 `shiftL` 32) .|. fromIntegral oid2
+  return (12, BsonObjectId oid)
 getVal DataBoolean = liftM ((,) (1::Integer) . BsonBool . (/= (0::Int))) getI8
 getVal DataDate = liftM ((,) 8 . BsonDate . flip (/) 1000 . realToFrac) getI64
 getVal DataNull = return (1, BsonNull)
@@ -260,7 +295,8 @@ putVal (BsonBinary t bs)= do putI32 $ fromIntegral $ 4 + L.length bs
                              putI32 $ fromIntegral $ L.length bs
                              putLazyByteString bs
 putVal BsonUndefined    = putNothing
-putVal (BsonObjectId o) = putLazyByteString o
+putVal (BsonObjectId o) = putWord64be (fromIntegral $ o `shiftR` 32) >>
+                          putWord32be (fromIntegral $ o .&. 0xffffffff)
 putVal (BsonBool False) = putI8 0
 putVal (BsonBool True)  = putI8 1
 putVal (BsonDate pt)    = putI64 $ round $ 1000 * (realToFrac pt :: Double)

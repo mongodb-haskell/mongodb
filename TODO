@@ -105,3 +105,4 @@ update tutorial to match new python one
 + custom types (see python examples)
 + support array conversions again
 + better type conversion errors
++ make BSON an instance of Binary (eg get/put)
