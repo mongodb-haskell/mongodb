@@ -72,12 +72,12 @@ import Data.ByteString.Char8 (pack)
 import Data.ByteString.Internal (c2w)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.UTF8 as L8
+import Data.Digest.OpenSSL.MD5
 import Data.Int
 import Data.IORef
 import qualified Data.List as List
 import Data.Maybe
 import Data.Typeable
-import Data.Digest.OpenSSL.MD5
 import Database.MongoDB.BSON as BSON
 import Database.MongoDB.Util
 import qualified Network
@@ -478,7 +478,7 @@ countMatching c col sel = do
   res <- runCommand c db $ toBsonDoc [("count", toBson col'),
                                       ("query", toBson sel)]
   let cnt = (fromBson $ fromLookup $ List.lookup (s2L "n") res :: Double)
-  return $ truncate $ cnt
+  return $ truncate cnt
 
 -- | Delete documents matching /Selector/ from the given /FullCollection/.
 delete :: Connection -> FullCollection -> Selector -> IO RequestID
