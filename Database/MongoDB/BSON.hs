@@ -114,10 +114,10 @@ toDataType (-1) = DataMinKey
 toDataType 127 = DataMaxKey
 toDataType d = toEnum d
 
-fromDataType :: DataType -> Int
+fromDataType :: DataType -> Int8
 fromDataType DataMinKey = - 1
 fromDataType DataMaxKey = 127
-fromDataType d = fromEnum d
+fromDataType d = fromIntegral $ fromEnum d
 
 data BinarySubType =
     BSTUNDEFINED1      |
@@ -133,9 +133,9 @@ toBinarySubType :: Int -> BinarySubType
 toBinarySubType 0x80 = BSTUserDefined
 toBinarySubType d = toEnum d
 
-fromBinarySubType :: BinarySubType -> Int
+fromBinarySubType :: BinarySubType -> Int8
 fromBinarySubType BSTUserDefined = 0x80
-fromBinarySubType d = fromEnum d
+fromBinarySubType d = fromIntegral $ fromEnum d
 
 getBsonDoc :: Get BsonDoc
 getBsonDoc = liftM snd getDoc
@@ -261,8 +261,8 @@ putVal (BsonBinary t bs)= do putI32 $ fromIntegral $ 4 + L.length bs
                              putLazyByteString bs
 putVal BsonUndefined    = putNothing
 putVal (BsonObjectId o) = putLazyByteString o
-putVal (BsonBool False) = putI8 (0::Int)
-putVal (BsonBool True)  = putI8 (1::Int)
+putVal (BsonBool False) = putI8 0
+putVal (BsonBool True)  = putI8 1
 putVal (BsonDate pt)    = putI64 $ round $ 1000 * (realToFrac pt :: Double)
 putVal BsonNull         = putNothing
 putVal (BsonRegex r opt)= do putS r

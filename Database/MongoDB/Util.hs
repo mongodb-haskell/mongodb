@@ -58,7 +58,7 @@ getS = getLazyByteStringNul >>= \s -> return (fromIntegral $ L.length s + 1, s)
 getNull :: Get ()
 getNull = do {c <- getC; assert (c == '\0') $ return ()}
 
-putI8 :: (Integral i) => i -> Put
+putI8 :: Int8 -> Put
 putI8 = putWord8 . fromIntegral
 
 putI32 :: Int32 -> Put
@@ -71,7 +71,7 @@ putNothing :: Put
 putNothing = putByteString $ pack ""
 
 putNull :: Put
-putNull = putI8 (0::Int)
+putNull = putI8 0
 
 putS :: L8.ByteString -> Put
 putS s = putLazyByteString s >> putNull
