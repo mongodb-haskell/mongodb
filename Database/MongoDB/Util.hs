@@ -25,7 +25,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 module Database.MongoDB.Util
     (
-     putI8, putI32, putI64, putNothing, putNull, putS,
+     putI8, putI16, putI32, putI64, putNothing, putNull, putS,
      getI8, getI32, getI64, getC, getS, getNull, putStrSz,
     )
 where
@@ -60,6 +60,9 @@ getNull = do {c <- getC; assert (c == '\0') $ return ()}
 
 putI8 :: Int8 -> Put
 putI8 = putWord8 . fromIntegral
+
+putI16 :: Int16 -> Put
+putI16 = putWord16le . fromIntegral
 
 putI32 :: Int32 -> Put
 putI32 = putWord32le . fromIntegral
