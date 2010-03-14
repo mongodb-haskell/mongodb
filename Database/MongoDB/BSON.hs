@@ -37,7 +37,7 @@ module Database.MongoDB.BSON
      -- * Binary encoding/decoding
      getBsonDoc, putBsonDoc,
      -- * ObjectId creation
-     mkObjectIdGen, genObjectId,
+     ObjectIdGen, mkObjectIdGen, genObjectId,
     )
 where
 import Prelude hiding (lookup)
@@ -64,6 +64,7 @@ import Data.Typeable
 import Database.MongoDB.Util
 import Network.BSD
 import Numeric
+import System.IO.Unsafe
 import System.Posix.Process
 
 -- | BsonValue is the type that can be used as a key in a 'BsonDoc'.
@@ -150,12 +151,15 @@ data ObjectIdGen = ObjectIdGen {
       oigInc :: IORef Integer
     }
 
+globalObjectIdInc :: IORef Integer
+{-# NOINLINE globalObjectIdInc #-}
+globalObjectIdInc = unsafePerformIO (newIORef 0)
+
 mkObjectIdGen :: IO ObjectIdGen
 mkObjectIdGen = do
   host <- liftM (fst . (!! 0) . readHex . List.take 6 . md5sum . C8.pack)
                 getHostName
-  inc <- newIORef 0
-  return ObjectIdGen {oigMachine = host, oigInc = inc}
+  return ObjectIdGen {oigMachine = host, oigInc = globalObjectIdInc}
 
 genObjectId :: ObjectIdGen -> IO BsonValue
 genObjectId oig = do
