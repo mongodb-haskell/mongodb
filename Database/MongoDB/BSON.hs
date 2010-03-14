@@ -294,10 +294,11 @@ putVal (BsonDoc o)      = putObj o
 putVal (BsonArray es)   = putOutterObj bs
     where bs = runPut $ forM_ (List.zip [(0::Int) .. ] es) $ \(i, e) ->
                putType e >> putS (L8.fromString $ show i) >> putVal e
-putVal (BsonBinary t bs)= do putI32 $ fromIntegral $ 4 + L.length bs
-                             putI8 $ fromBinarySubType t
-                             putI32 $ fromIntegral $ L.length bs
-                             putLazyByteString bs
+putVal (BsonBinary t bs) = do
+  putI32 $ fromIntegral $ (if t == BSTByteArray then 4 else 0) + L.length bs
+  putI8 $ fromBinarySubType t
+  when (t == BSTByteArray) $ putI32 $ fromIntegral $ L.length bs
+  putLazyByteString bs
 putVal BsonUndefined    = putNothing
 putVal (BsonObjectId o) = putWord64be (fromIntegral $ o `shiftR` 32) >>
                           putWord32be (fromIntegral $ o .&. 0xffffffff)
