@@ -23,6 +23,23 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 -}
 
+-- | A driver for MongoDB
+--
+-- This module lets you connect to MongoDB, do inserts, queries,
+-- updates, etc. Also has many convience functions inspired by HDBC
+-- such as more easily converting between the BsonValue types and
+-- native Haskell types.
+--
+-- * Tutorial for this driver:
+--   <http://github.com/srp/mongoDB/blob/master/tutorial.md>
+--
+-- * Map/Reduce example for this driver:
+--   <http://github.com/srp/mongoDB/blob/master/map-reduce-example.md>
+--
+-- * MongoDB:
+--   <http://www.mongodb.org/>
+--
+
 module Database.MongoDB
     (
      -- * Connection

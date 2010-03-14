@@ -7,7 +7,7 @@ Copyright:           Copyright (c) 2010-2010 Scott Parish
 homepage:            http://github.com/srp/mongoDB
 Category:            Database
 Synopsis:            A driver for MongoDB
-Description:         This driver lets you connect to MongoDB, do inserts,
+Description:         This module lets you connect to MongoDB, do inserts,
                      queries, updates, etc. Also has many convience functions
                      inspired by HDBC such as more easily converting between
                      the BsonValue types and native Haskell types.
