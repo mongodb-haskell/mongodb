@@ -137,10 +137,11 @@ Inserting a Document
 To insert a document into a collection we can use the *insert* function:
 
     > insert con postsCol post
+    BsonObjectId 23400392795601893065744187392
 
 When a document is inserted a special key, *_id*, is automatically
 added if the document doesn't already contain an *_id* key. The value
-of *_id* must be unique across the collection. insert() returns the
+of *_id* must be unique across the collection. *insert* returns the
 value of *_id* for the inserted document. For more information, see
 the [documentation on _id](http://www.mongodb.org/display/DOCS/Object+IDs).
 
@@ -208,6 +209,7 @@ server:
                                      ("date", toBson now)]]
       :}
     > insertMany con postsCol new_posts
+    [BsonObjectId 23400393883959793414607732737,BsonObjectId 23400398126710930368559579137]
 
 * Note that *new_posts !! 1* has a different shape than the other
 posts - there is no "tags" field and we've added a new field,
