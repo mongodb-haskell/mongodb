@@ -90,7 +90,8 @@ import System.Random
 -- | A list of handles to database connections
 data Connection = Connection {
       cHandle :: IORef Handle,
-      cRand :: IORef [Int]
+      cRand :: IORef [Int],
+      cOidGen :: ObjectIdGen
     }
 
 data ConnectOpt
@@ -123,7 +124,8 @@ newConnection servers opts = do
                      fromIntegral (maxBound :: Int32)) r
   nsRef <- newIORef ns
   hRef <- openHandle (head servers) >>= newIORef
-  let c = Connection hRef nsRef
+  oidGen <- mkObjectIdGen
+  let c = Connection hRef nsRef oidGen
   res <- isMaster c
   if fromBson (fromLookup $ List.lookup (s2L "ismaster") res) == (1::Int) ||
      isJust (List.elemIndex SlaveOK opts)
@@ -496,27 +498,41 @@ delete c col sel = do
 remove :: Connection -> FullCollection -> Selector -> IO RequestID
 remove = delete
 
--- | Insert a single document into /FullCollection/.
-insert :: Connection -> FullCollection -> BsonDoc -> IO RequestID
+moveOidToFrontOrGen :: Connection -> BsonDoc -> IO BsonDoc
+moveOidToFrontOrGen c doc =
+    case List.lookup (s2L "_id") doc of
+      Nothing -> do
+        oid <- genObjectId $ cOidGen c
+        return $ (s2L "_id", oid) : doc
+      Just oid -> do
+        let keyEq = (\(k1, _) (k2, _) -> k1 == k2)
+            delByKey = \k -> List.deleteBy keyEq (k, undefined)
+        return $ (s2L "_id", oid) : delByKey (s2L "_id") doc
+
+-- | Insert a single document into /FullCollection/ returning the /_id/ field.
+insert :: Connection -> FullCollection -> BsonDoc -> IO BsonValue
 insert c col doc = do
+  doc' <- moveOidToFrontOrGen c doc
   let body = runPut $ do
                      putI32 0
                      putCol col
-                     putBsonDoc doc
-  (reqID, msg) <- packMsg c OPInsert body
+                     putBsonDoc doc'
+  (_reqID, msg) <- packMsg c OPInsert body
   cPut c msg
-  return reqID
+  return $ snd $ head doc'
 
--- | Insert a list of documents into /FullCollection/.
-insertMany :: Connection -> FullCollection -> [BsonDoc] -> IO RequestID
+-- | Insert a list of documents into /FullCollection/ returing the
+-- /_id/ field for each one in the same order as they were given.
+insertMany :: Connection -> FullCollection -> [BsonDoc] -> IO [BsonValue]
 insertMany c col docs = do
+  docs' <- mapM (moveOidToFrontOrGen c) docs
   let body = runPut $ do
                putI32 0
                putCol col
-               forM_ docs putBsonDoc
-  (reqID, msg) <- packMsg c OPInsert body
+               forM_ docs' putBsonDoc
+  (_, msg) <- packMsg c OPInsert body
   cPut c msg
-  return reqID
+  return $ List.map (snd . head) docs'
 
 -- | Open a cursor to find documents. If you need full functionality,
 -- see 'query'
@@ -741,11 +757,12 @@ mapReduceWScopes c fc m ms r rs opts =
 -- if there is an _id present in the /BsonDoc/ then it already has
 -- a place in the DB, so we update it using the _id, otherwise
 -- we insert it
-save :: Connection -> FullCollection -> BsonDoc -> IO RequestID
+save :: Connection -> FullCollection -> BsonDoc -> IO BsonValue
 save c fc doc =
   case List.lookup (s2L "_id") doc of
     Nothing -> insert c fc doc
-    Just obj -> update c fc [UFUpsert] (toBsonDoc [("_id", obj)]) doc
+    Just oid -> update c fc [UFUpsert] (toBsonDoc [("_id", oid)]) doc >>
+                return oid
 
 -- | Use this in the place of the query portion of a select type query
 -- This uses javascript and a scope supplied by a /BsonDoc/ to evaluate

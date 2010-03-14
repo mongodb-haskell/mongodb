@@ -1,8 +1,6 @@
 TODO
 ====
 
-+ inject _id if not given, return it
-
 BSON
 ----
 + on insert/update: reject keys that start with "$" or "."
@@ -63,7 +61,6 @@ MongoDB
 + support safe operations
 + auto-reconnection
 + auto-destoy connection (how?/when?)
-+ pymongo returns the new ObjectId(s) on insert
 + don't read into cursor until needed, but have cursor send getMore before
   it is actually out of docs (so network is finished by the time we're ready
   to consume more)
