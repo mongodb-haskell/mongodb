@@ -28,7 +28,7 @@ Build-Type:          Simple
 Exposed-modules:     Database.MongoDB,
 		     Database.MongoDB.BSON
 Other-modules:       Database.MongoDB.Util
-ghc-options:         -Wall
+ghc-options:         -Wall -O2
 extensions:          FlexibleContexts, FlexibleInstances, MultiParamTypeClasses,
 		     TypeSynonymInstances
 cabal-version:       >= 1.4
