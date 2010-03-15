@@ -67,7 +67,7 @@ import Numeric
 import System.IO.Unsafe
 import System.Posix.Process
 
--- | BsonValue is the type that can be used as a key in a 'BsonDoc'.
+-- | BsonValue is the type that can be used as a value in a 'BsonDoc'.
 data BsonValue
     = BsonDouble Double
     | BsonString L8.ByteString
@@ -155,12 +155,15 @@ globalObjectIdInc :: IORef Integer
 {-# NOINLINE globalObjectIdInc #-}
 globalObjectIdInc = unsafePerformIO (newIORef 0)
 
+-- | Create a new 'ObjectIdGen', the structure that must be passed to
+-- genObjectId to create a 'ObjectId'.
 mkObjectIdGen :: IO ObjectIdGen
 mkObjectIdGen = do
   host <- liftM (fst . (!! 0) . readHex . List.take 6 . md5sum . C8.pack)
                 getHostName
   return ObjectIdGen {oigMachine = host, oigInc = globalObjectIdInc}
 
+-- | Create a new 'ObjectId'.
 genObjectId :: ObjectIdGen -> IO BsonValue
 genObjectId oig = do
   now <- liftM (truncate . (realToFrac :: POSIXTime -> Double)) getPOSIXTime
@@ -172,9 +175,11 @@ genObjectId oig = do
               (0xffff .&. pid) `shiftL` 24 .|.
               (inc `div` 0x100) `shiftL` 8 .|. (inc `rem` 0x100))
 
+-- | Decode binary bytes into 'BsonDoc'.
 getBsonDoc :: Get BsonDoc
 getBsonDoc = liftM snd getDoc
 
+-- | Encode 'BsonDoc' into binary bytes.
 putBsonDoc :: BsonDoc -> Put
 putBsonDoc = putObj
 
