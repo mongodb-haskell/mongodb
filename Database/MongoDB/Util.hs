@@ -80,4 +80,4 @@ putS :: L8.ByteString -> Put
 putS s = putLazyByteString s >> putNull
 
 putStrSz :: L.ByteString -> Put
-putStrSz s = putI32 (fromIntegral $ 1 + L8.length s) >> putS s
+putStrSz s = putI32 (fromIntegral $ 1 + L.length s) >> putS s
