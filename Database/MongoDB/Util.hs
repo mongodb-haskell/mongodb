@@ -79,5 +79,5 @@ putNull = putI8 0
 putS :: L8.ByteString -> Put
 putS s = putLazyByteString s >> putNull
 
-putStrSz :: L.ByteString -> Put
+putStrSz :: L8.ByteString -> Put
 putStrSz s = putI32 (fromIntegral $ 1 + L.length s) >> putS s
