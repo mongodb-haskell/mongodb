@@ -315,7 +315,7 @@ putVal (BsonRegex r opt)= do putS r
                              putByteString $ pack $ List.sort opt
                              putNull
 putVal (BsonJSCode c)   = putStrSz c
-putVal (BsonSymbol s)   = putI32 (fromIntegral $ 1 + L8.length s) >> putS s
+putVal (BsonSymbol s)   = putStrSz s
 putVal (BsonJSCodeWScope q s) =
   let bytes = runPut (putStrSz q >> putObj s)
     in putI32 ((+4) $ fromIntegral $ L.length bytes) >> putLazyByteString bytes
