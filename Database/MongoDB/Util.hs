@@ -1,83 +1,65 @@
-{-
+-- | Miscellaneous general functions
 
-Copyright (C) 2010 Scott R Parish <srp@srparish.net>
+{-# LANGUAGE StandaloneDeriving #-}
 
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
+module Database.MongoDB.Util where
 
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
--}
-
-module Database.MongoDB.Util
-    (
-     putI8, putI16, putI32, putI64, putNothing, putNull, putS,
-     getI8, getI32, getI64, getC, getS, getNull, putStrSz,
-    )
-where
+import Prelude hiding (length)
+import Network (PortID(..))
+import Control.Applicative (Applicative(..), (<$>))
 import Control.Exception (assert)
-import Control.Monad
-import Data.Binary
-import Data.Binary.Get
-import Data.Binary.Put
-import Data.ByteString.Char8
-import qualified Data.ByteString.Lazy as L
-import qualified Data.ByteString.Lazy.UTF8 as L8
-import Data.Char          (chr)
-import Data.Int
+import Control.Monad.Reader
+import Control.Monad.Error
+import Data.UString as U (UString, cons, append)
+import Data.Bits (Bits, (.|.))
+import Data.Bson
+import System.IO (Handle)
+import Data.ByteString.Lazy as B (ByteString, length, append, hGet)
 
-getC :: Get Char
-getC = liftM chr getI8
+deriving instance Show PortID
+deriving instance Eq PortID
+deriving instance Ord PortID
 
-getI8 :: (Integral a) => Get a
-getI8 = liftM fromIntegral getWord8
+instance (Monad m) => Applicative (ReaderT r m) where
+	pure = return
+	(<*>) = ap
 
-getI32 :: Get Int32
-getI32 = liftM fromIntegral getWord32le
+instance (Monad m, Error e) => Applicative (ErrorT e m) where
+	pure = return
+	(<*>) = ap
 
-getI64 :: Get Int64
-getI64 = liftM fromIntegral getWord64le
+ignore :: (Monad m) => a -> m ()
+ignore _ = return ()
 
-getS :: Get (Integer, L8.ByteString)
-getS = getLazyByteStringNul >>= \s -> return (fromIntegral $ L.length s + 1, s)
+type Secs = Float
 
-getNull :: Get ()
-getNull = do {c <- getC; assert (c == '\0') $ return ()}
+bitOr :: (Bits a) => [a] -> a
+-- ^ bit-or all numbers together
+bitOr = foldl (.|.) 0
 
-putI8 :: Int8 -> Put
-putI8 = putWord8 . fromIntegral
+(<.>) :: UString -> UString -> UString
+-- ^ Concat first and second together with period in between. Eg. @\"hello\" \<.\> \"world\" = \"hello.world\"@
+a <.> b = U.append a (cons '.' b)
 
-putI16 :: Int16 -> Put
-putI16 = putWord16le . fromIntegral
+loop :: (Functor m, Monad m) => m (Maybe a) -> m [a]
+-- ^ Repeatedy execute action, collecting results, until it returns Nothing
+loop act = act >>= maybe (return []) (\a -> (a :) <$> loop act)
 
-putI32 :: Int32 -> Put
-putI32 = putWord32le . fromIntegral
+true1 :: Label -> Document -> Bool
+-- ^ Is field's value a 1 or True (MongoDB use both Int and Bools for truth values). Error if field not in document or field not a Num or Bool.
+true1 k doc = case valueAt k doc of
+	Bool b -> b
+	Float n -> n == 1
+	Int32 n -> n == 1
+	Int64 n -> n == 1
+	_ -> error $ "expected " ++ show k ++ " to be Num or Bool in " ++ show doc
 
-putI64 :: Int64 -> Put
-putI64 = putWord64le . fromIntegral
-
-putNothing :: Put
-putNothing = putByteString $ pack ""
-
-putNull :: Put
-putNull = putI8 0
-
-putS :: L8.ByteString -> Put
-putS s = putLazyByteString s >> putNull
-
-putStrSz :: L8.ByteString -> Put
-putStrSz s = putI32 (fromIntegral $ 1 + L.length s) >> putS s
+hGetN :: Handle -> Int -> IO ByteString
+-- ^ Read N bytes from hande, blocking until all N bytes are read.
+-- Unlike hGet which only blocks if no bytes are available, otherwise it returns the X bytes immediately available where X <= N.
+hGetN h n = assert (n >= 0) $ do
+	bytes <- hGet h n
+	let x = fromIntegral (length bytes)
+	if x >= n then return bytes else do
+		remainingBytes <- hGetN h (n - x)
+		return (B.append bytes remainingBytes)

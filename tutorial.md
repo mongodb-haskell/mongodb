@@ -41,94 +41,89 @@ Start up a haskell repl:
 
     $ ghci
 
-Now We'll need to bring in the MongoDB/BSON bindings:
+Now we'll need to bring in the MongoDB/BSON bindings and set
+OverloadedStrings so literal strings are converted to UTF-8 automatically.
 
     > import Database.MongoDB
-    > import Database.MongoDB.BSON
+    > :set -XOverloadedStrings
 
 Making A Connection
 -------------------
 Open up a connection to your DB instance, using the standard port:
 
-    > con <- connect "127.0.0.1" []
+    > Right con <- connect $ server "127.0.0.1"
 
 or for a non-standard port
 
-    > import Network
-    > con <- connectOnPort "127.0.0.1" (Network.PortNumber 666) []
+    > Right con <- connect $ server "127.0.0.1" (PortNumber 666)
 
-By default mongoDB will try to find the master and connect to it and
-will throw an exception if a master can not be found to connect
-to. You can force mongoDB to connect to the slave by adding SlaveOK as
-a connection option, eg:
+*connect* returns Left IOError if connection fails. We are assuming above
+it won't fail. If it does you will get a pattern match error.
 
-    > con <- connect "127.0.0.1" [SlaveOK]
+Task and Db monad
+-------------------
 
-Databases, Collections and FullCollections
-------------------------------------------
+The current connection is held in a Reader monad called "Task*, and the
+current database is held in a Reader monad on top of that. To run a task,
+supply it and a connection to *runTask*. Within a task, to access a database,
+wrap you operations in a *useDb*.
 
-As many database servers, MongoDB has databases--separate namespaces
-under which collections reside. Most of the APIs for this driver
-request the *FullCollection* which is simply the *Database* and the
-*Collection* concatenated with a period.
+But since we are working in ghci, which requires us to start from the
+IO monad every time, we'll define a convenient 'run' function that takes a
+db-action and executes it against our "test" database on the server we
+just connected to:
 
-For instance 'myweb_prod.users' is the the *FullCollection* name for
-the *Collection 'users' in the database 'myweb_prod'.
+    > let run act = runTask (useDb "test" act) con
+
+*run* (*runTask*) will return either Left Failure or Right result. Failure
+means the connection failed (eg. network problem) or the server failed
+(eg. disk full).
+
+Databases and Collections
+-----------------------------
+
+A MongoDB can store multiple databases--separate namespaces
+under which collections reside.
+
+You can obtain the list of databases available on a connection:
+
+    > runTask allDatabases con
+
+You can also use the *run* function we just created:
+
+    > run allDatabases
+
+The "test" database is ignored in this case because *allDatabases*
+is not a query on a specific database but on the server as a whole.
 
 Databases and collections do not need to be created, just start using
 them and MongoDB will automatically create them for you.
 
-In the below examples we'll be using the following *FullCollection*:
+In the below examples we'll be using the database "test" (captured in *run*
+above) and the colllection "posts":
 
-    > import Data.ByteString.Lazy.UTF8
-    > let postsCol = (fromString "test.posts")
+You can obtain a list of collections available in the "test" database:
 
-You can obtain a list of databases available on a connection:
-
-    > dbs <- databaseNames con
-
-You can obtain a list of collections available on a database:
-
-    > cols <- collectionNames con (fromString "test")
-    > map toString cols
-    ["test.system.indexes"]
+    > run allCollections
 
 Documents
 ---------
 
 Data in MongoDB is represented (and stored) using JSON-style
-documents. In mongoDB we use the *BsonDoc* type to represent these
-documents. At the moment a *BsonDoc* is simply a tuple list of the
-type '[(ByteString, BsonValue)]'. Here's a BsonDoc which could represent
-a blog post:
+documents. In mongoDB we use the BSON *Document* type to represent
+these documents. A document is simply a list of *Field*s, where each field is
+a named value. A value is a basic type like Bool, Int, Float, String, Time;
+a special BSON value like Binary, Javascript, ObjectId; a (embedded)
+Document; or a list of values. Here's an example document which could
+represent a blog post:
 
-    > import Data.Time.Clock.POSIX
-    > now <- getPOSIXTime
+    > import Data.Time
+    > now <- getCurrentTime
     > :{
-      let post = [(fromString "author", BsonString $ fromString "Mike"),
-                  (fromString "text",
-                   BsonString $ fromString "My first blog post!"),
-                  (fromString "tags",
-                   BsonArray [BsonString $ fromString "mongodb",
-                              BsonString $ fromString "python",
-                              BsonString $ fromString "pymongo"]),
-                  (fromString "date", BsonDate now)]
-      :}
-
-With all the type wrappers and string conversion, it's hard to see
-what's actually going on. Fortunately the BSON library provides
-conversion functions *toBson* and *fromBson* for converting native
-between the wrapped BSON types and many native Haskell types. The
-functions *toBsonDoc* and *fromBsonDoc* help convert from tuple lists
-with plain *String* keys, or *Data.Map*.
-
-Here's the same BSON data structure using these conversion functions:
-
-    > :{
-      let post = toBsonDoc [("author", toBson "Mike"),
-                            ("text", toBson "My first blog post!"),
-                            ("tags", toBson ["mongoDB", "Haskell"]),
-                            ("date", BsonDate now)]
+      let post = ["author" =: "Mike",
+                  "text" =: "My first blog post!",
+                  "tags" =: ["mongoDB", "Haskell"],
+                  "date" =: now]
       :}
 
 Inserting a Document
@@ -136,11 +131,11 @@ Inserting a Document
 
 To insert a document into a collection we can use the *insert* function:
 
-    > insert con postsCol post
-    BsonObjectId 23400392795601893065744187392
+    > run $ insert "posts" post
+    Right (Oid 4c16d355 c80c560858000000)
 
-When a document is inserted a special key, *_id*, is automatically
-added if the document doesn't already contain an *_id* key. The value
+When a document is inserted a special field, *_id*, is automatically
+added if the document doesn't already contain that field. The value
 of *_id* must be unique across the collection. *insert* returns the
 value of *_id* for the inserted document. For more information, see
 the [documentation on _id](http://www.mongodb.org/display/DOCS/Object+IDs).
@@ -149,9 +144,7 @@ After inserting the first document, the posts collection has actually
 been created on the server. We can verify this by listing all of the
 collections in our database:
 
-    > cols <- collectionNames con (fromString "test")
-    > map toString cols
-    [u'postsCol', u'system.indexes']
+    > run allCollections
 
 * Note The system.indexes collection is a special internal collection
 that was created automatically.
@@ -166,11 +159,10 @@ only one matching document, or are only interested in the first
 match. Here we use *findOne* to get the first document from the posts
 collection:
 
-    > findOne con postsCol []
-    Just [(Chunk "_id" Empty,BsonObjectId (Chunk "K\151\153S9\CAN\138e\203X\182'" Empty)),(Chunk "author" Empty,BsonString (Chunk "Mike" Empty)),(Chunk "text" Empty,BsonString (Chunk "My first blog post!" Empty)),(Chunk "tags" Empty,BsonArray [BsonString (Chunk "mongoDB" Empty),BsonString (Chunk "Haskell" Empty)]),(Chunk "date" Empty,BsonDate 1268226361.753s)]
+    > run $ findOne (query [] "posts")
+    Right (Just [ _id: Oid 4c16d355 c80c560858000000, author: "Mike", text: "My first blog post!", tags: ["mongoDB","Haskell"], date: 2010-06-15 01:09:28.364 UTC])
 
-The result is a dictionary matching the one that we inserted
-previously.
+The result is a document matching the one that we inserted previously.
 
 * Note: The returned document contains an *_id*, which was automatically
 added on insert.
@@ -179,41 +171,42 @@ added on insert.
 resulting document must match. To limit our results to a document with
 author "Mike" we do:
 
-    > findOne con postsCol $ toBsonDoc [("author", toBson "Mike")]
-    Just [(Chunk "_id" Empty,BsonObjectId (Chunk "K\151\153S9\CAN\138e\203X\182'" Empty)),(Chunk "author" Empty,BsonString (Chunk "Mike" Empty)),(Chunk "text" Empty,BsonString (Chunk "My first blog post!" Empty)),(Chunk "tags" Empty,BsonArray [BsonString (Chunk "mongoDB" Empty),BsonString (Chunk "Haskell" Empty)]),(Chunk "date" Empty,BsonDate 1268226361.753s)]
+    > run $ findOne (query  ["author" =: "Mike"] "posts")
+    Right (Just [ _id: Oid 4c16d355 c80c560858000000, author: "Mike", text: "My first blog post!", tags: ["mongoDB","Haskell"], date: 2010-06-15 01:09:28.364 UTC])
 
 If we try with a different author, like "Eliot", we'll get no result:
 
-    > findOne con postsCol $ toBsonDoc [("author", toBson "Eliot")]
-    Nothing
+    > run $ findOne (query  ["author" =: "Eliot"] "posts")
+    Right Nothing
 
 Bulk Inserts
 ------------
 
 In order to make querying a little more interesting, let's insert a
 few more documents. In addition to inserting a single document, we can
-also perform bulk insert operations, by using the *insertMany* api
-which accepts a list of documents to be inserted. This will insert
-each document in the iterable, sending only a single command to the
-server:
+also perform bulk insert operations, by using the *insertMany* function
+which accepts a list of documents to be inserted. It send only a single
+command to the server:
 
-    > now <- getPOSIXTime
+    > now <- getCurrentTime
     > :{
-      let new_postsCol = [toBsonDoc [("author", toBson "Mike"),
-                                     ("text", toBson "Another post!"),
-                                     ("tags", toBson ["bulk", "insert"]),
-                                     ("date",  toBson now)],
-                          toBsonDoc [("author", toBson "Eliot"),
-                                     ("title", toBson "MongoDB is fun"),
-                                     ("text", toBson "and pretty easy too!"),
-                                     ("date", toBson now)]]
+      let post1 = ["author" =: "Mike",
+                   "text" =: "Another post!",
+                   "tags" =: ["bulk", "insert"],
+                   "date" =: now]
       :}
-    > insertMany con postsCol new_posts
-    [BsonObjectId 23400393883959793414607732737,BsonObjectId 23400398126710930368559579137]
+    > :{
+      let post2 = ["author" =: "Eliot",
+                   "title" =: "MongoDB is fun",
+                   "text" =: "and pretty easy too!",
+                   "date" =: now]
+      :}
+    > run $ insertMany "posts" [post1, post2]
+    Right [Oid 4c16d67e c80c560858000001,Oid 4c16d67e c80c560858000002]
 
-* Note that *new_posts !! 1* has a different shape than the other
-posts - there is no "tags" field and we've added a new field,
-"title". This is what we mean when we say that MongoDB is schema-free.
+* Note that post2 has a different shape than the other posts - there
+is no "tags" field and we've added a new field, "title". This is what we
+mean when we say that MongoDB is schema-free.
 
 Querying for More Than One Document
 ------------------------------------
@@ -221,43 +214,37 @@ Querying for More Than One Document
 To get more than a single document as the result of a query we use the
 *find* method. *find* returns a cursor instance, which allows us to
 iterate over all matching documents. There are several ways in which
-we can iterate: we can call *nextDoc* to get documents one at a time
-or we can get a lazy list of all the results by applying the cursor
-to *allDocs*:
+we can iterate: we can call *next* to get documents one at a time
+or we can get all the results by applying the cursor to *rest*:
 
-    > cursor <- find con postsCol $ toBsonDoc [("author", toBson "Mike")]
-    > allDocs cursor
+    > Right cursor <- run $ find (query ["author" =: "Mike"] "posts")
+    > run $ rest cursor
 
 Of course you can use bind (*>>=*) to combine these into one line:
 
-    > docs <- find con postsCol (toBsonDoc [("author", toBson "Mike")]) >>= allDocs
+    > run $ find (query ["author" =: "Mike"] "posts") >>= rest
 
-* Note: *nextDoc* automatically closes the cursor when the last
-document has been read out of it. Similarly, *allDocs* automatically
-closes the cursor when you've consumed to the end of the resulting
-list.
+* Note: *next* automatically closes the cursor when the last
+document has been read out of it. Similarly, *rest* automatically
+closes the cursor after returning all the results.
 
 Counting
 --------
 
 We can count how many documents are in an entire collection:
 
-    > num <- count con postsCol
+    > run $ count (query [] "posts")
 
-Or we can query for how many documents match a query:
+Or count how many documents match a query:
 
-    > num <- countMatching con postsCol (toBsonDoc [("author", toBson "Mike")])
+    > run $ count (query ["author" =: "Mike"] "posts")
 
 Range Queries
 -------------
 
-No non native sorting yet.
+To do
 
 Indexing
 --------
 
-WIP - coming soon.
-
-Something like...
-
-    > index <- createIndex con testcol [("author", Ascending)] True
+To do

@@ -1,33 +1,34 @@
 Name:                mongoDB
-Version:             0.4.2
+Version:             0.5.0
 License:             MIT
-Maintainer:          Scott Parish <srp@srparish.net>
-Author:              Scott Parish <srp@srparish.net>
-Copyright:           Copyright (c) 2010-2010 Scott Parish
+Maintainer:          Scott Parish <srp@srparish.net>, Tony Hannan <tony@10gen.com>
+Author:              Scott Parish <srp@srparish.net>, Tony Hannan <tony@10gen.com>
+Copyright:           Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
 homepage:            http://github.com/srp/mongoDB
 Category:            Database
 Synopsis:            A driver for MongoDB
 Description:         This module lets you connect to MongoDB, do inserts,
                      queries, updates, etc. Also has many convience functions
                      inspired by HDBC such as more easily converting between
-                     the BsonValue types and native Haskell types.
+                     the Bson.Value types and native Haskell types.
 Stability:           alpha
-Build-Depends:       base < 5,
-	             binary,
-		     bytestring,
-		     containers,
-		     data-binary-ieee754,
-		     network,
-		     random,
-		     time,
-		     unix,
-		     utf8-string,
-                     nano-md5
+Build-Depends:   base < 5,
+		containers,
+		mtl,
+		binary,
+		bytestring,
+		network,
+		nano-md5,
+		parsec,
+		bson
 Build-Type:          Simple
-Exposed-modules:     Database.MongoDB,
-		     Database.MongoDB.BSON
-Other-modules:       Database.MongoDB.Util
+Exposed-modules: 
+		Database.MongoDB.Util,
+		Database.MongoDB.Internal.Connection,
+		Database.MongoDB.Internal.Protocol,
+		Database.MongoDB.Connection,
+		Database.MongoDB.Query,
+		Database.MongoDB.Admin,
+		Database.MongoDB
 ghc-options:         -Wall -O2
-extensions:          FlexibleContexts, FlexibleInstances, MultiParamTypeClasses,
-		     TypeSynonymInstances
 cabal-version:       >= 1.4

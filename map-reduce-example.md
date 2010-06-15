@@ -17,21 +17,17 @@ map/reduce queries on:
     GHCi, version 6.12.1: http://www.haskell.org/ghc/  :? for help
     ...
     Prelude> :set prompt "> "
+    > :set -XOverloadedStrings
     > import Database.MongoDB
-    > import Database.MongoDB.BSON
-    > import Data.ByteString.Lazy.UTF8
-    > c <- connect "localhost" []
-    > let col = (fromString "test.mr1")
+    > Right conn <- connect (server "localhost")
+    > let run task = runTask task conn
+    > let runDb db dbTask = run $ useDb db dbTask
     > :{
-    insertMany c col [
-          (toBsonDoc [("x", BsonInt32 1),
-                      ("tags", toBson ["dog", "cat"])]),
-          (toBsonDoc [("x", BsonInt32 2),
-                      ("tags", toBson ["cat"])]),
-          (toBsonDoc [("x", BsonInt32 3),
-                      ("tags", toBson ["mouse", "cat", "doc"])]),
-          (toBsonDoc [("x", BsonInt32 4),
-                      ("tags", BsonArray [])])
+    runDb "test" $ insertMany "mr1" [
+          ["x" =: 1, "tags" =: ["dog", "cat"]],
+          ["x" =: 2, "tags" =: ["cat"]],
+          ["x" =: 3, "tags" =: ["mouse", "cat", "dog"]],
+          ["x" =: 4, "tags" =: ([] :: [String])]
     ]
     :}
 
@@ -47,7 +43,7 @@ Our map function just emits a single (key, 1) pair for each tag in the
 array:
 
     > :{
-    let mapFn = "
+    let mapFn = Javascript [] "
     function() {\n
       this.tags.forEach(function(z) {\n
         emit(z, 1);\n
@@ -59,7 +55,7 @@ The reduce function sums over all of the emitted values for a given
 key:
 
     > :{
-    let reduceFn = "
+    let reduceFn = Javascript [] "
     function (key, values) {\n
       var total = 0;\n
       for (var i = 0; i < values.length; i++) {\n
@@ -74,40 +70,16 @@ be called iteratively on the results of other reduce steps.
 
 Finally, we call map_reduce() and iterate over the result collection:
 
-    > mapReduce c col (fromString mapFn) (fromString reduceFn) [] >>= allDocs
-    [[(Chunk "_id" Empty,BsonString (Chunk "cat" Empty)),
-      (Chunk "value" Empty,BsonDouble 6.0)],
-     [(Chunk "_id" Empty,BsonString (Chunk "doc" Empty)),
-      (Chunk "value" Empty,BsonDouble 1.0)],
-     [(Chunk "_id" Empty,BsonString (Chunk "dog" Empty)),
-      (Chunk "value" Empty,BsonDouble 3.0)],
-     [(Chunk "_id" Empty,BsonString (Chunk "mouse" Empty)),
-      (Chunk "value" Empty,BsonDouble 2.0)]]
+    > runDb "test" $ runMR (mapReduce "mr1" mapFn reduceFn) >>= rest
+    Right [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]]
 
 Advanced Map/Reduce
 -------------------
 
-MongoDB returns additional information in the map/reduce results. To
-obtain them, use *runMapReduce*:
+MongoDB returns additional statistics in the map/reduce results. To
+obtain them, use *runMR'* instead:
 
-    > res <- runMapReduce c col (fromString mapFn) (fromString reduceFn) []
-    > res
-    [(Chunk "result" Empty, BsonString (Chunk "tmp.mr.mapreduce_1268105512_18" Empty)),
-     (Chunk "timeMillis" Empty, BsonInt32 90),
-     (Chunk "counts" Empty,
-      BsonDoc [(Chunk "input" Empty,BsonInt64 8),
-               (Chunk "emit" Empty,BsonInt64 12),
-               (Chunk "output" Empty,BsonInt64 4)]),
-     (Chunk "ok" Empty,BsonDouble 1.0)]
+    > runDb "test" $ runMR' (mapReduce "mr1" mapFn reduceFn)
+    Right [ result: "tmp.mr.mapreduce_1276482643_7", timeMillis: 379, counts: [ input: 4, emit: 6, output: 3], ok: 1.0]
 
-You can then obtain the results using *mapReduceResults*:
-
-    > mapReduceResults c (fromString "test") res >>= allDocs
-    [[(Chunk "_id" Empty,BsonString (Chunk "cat" Empty)),
-      (Chunk "value" Empty,BsonDouble 6.0)],
-     [(Chunk "_id" Empty,BsonString (Chunk "doc" Empty)),
-      (Chunk "value" Empty,BsonDouble 1.0)],
-     [(Chunk "_id" Empty,BsonString (Chunk "dog" Empty)),
-      (Chunk "value" Empty,BsonDouble 3.0)],
-     [(Chunk "_id" Empty,BsonString (Chunk "mouse" Empty)),
-      (Chunk "value" Empty,BsonDouble 2.0)]]
+You can then obtain the results from here by quering the result collection yourself. "runMR* (above) does this for you but discards the statistics.

@@ -15,74 +15,52 @@ BSON
 MongoDB
 -------
 + support full level 0
-  - handle query errors
-  - hint, explain, $where
-  - database profiling: set/get profiling level, get profiling info
-  - pair mode connection
-    - handle defunct servers
-    - connection fail over
+  - hint
   - operations on database objects
-    * getName
-    * getCollection
-    * add_son_manipulators
+    * add_son_manipulators?
     * dereference (dbref)
-    * error
-    * eval
-    * last_status
-    * reset_error_history
   - database admin
-    * getAdmin
-    * getProfilingLevel
-    * setProfilingLevel
     * getProfilingInfo
-  - collection
-    * modify
-    * replace
-    * repsert
-  - index operations
-    * ensureIndex / index existance caching
   - misc operations
     * explain
-    * getOptions
-    * getName
-    * close
-    * group
-    * distinct
+    * getCollectionOptions
   - cursor object
     * hasMore
 
-  orderby (sort)
+- Query attribute: timeout
+- CreateIndex attributes: background, min, max
+- CreateIndex Order [Asc, Dec, Geo2d]
+- FindAndModify
+- getIndexInfo
+- logout
+- collectionsInfo
+- databasesInfo
+- getLastError options
+- Update If Current (http://www.mongodb.org/display/DOCS/Atomic+Operations)
+- block write until written on N replicas
+- lazyRest on cursor, although lazy I/) is problematic and we may not want to support it.
 
   optional:
   - automatic reconnection
   - buffer pooling
-  - advanced connection management (master-server, replica pair)
-  - Tailable cursor support
-+ support safe operations
-+ auto-reconnection
-+ auto-destoy connection (how?/when?)
+  - connection pooling. Although may not be desired because each connection maintains seperate session state (open cursors and temp map/reduce collections) and switching between connections automatically would change session state without the user knowing.
++ support safe operations, although operation with exclusive connection access is available which can be used to getLastError and check for that previous write was safe (successful).
++ auto-destoy connection (how?/when?). Although, GHC will automatically close connection (Handle) when garbage collected.
 + don't read into cursor until needed, but have cursor send getMore before
   it is actually out of docs (so network is finished by the time we're ready
   to consume more)
-+ support a LIMITed quickFind
 
 Misc
 ----
 + learn more about haskelldb, anything we can learn from there
 + go through pymongo api and figure out what parts to adopt (also look
   at other languages?)
-  - database_names()
-  - collection_names()
-+ support for aggricated commands like listing collections
 + kill prefix on data types "eg QO_*"?
 + javascript
 + tailable cursor support
   - only close cursor when cursorID is 0
   - have to create loop that sleeps and retries
   - lazy list support
-+ error handling?
-+ concurrency (share connection?)
-+ is there a garbage collector hook that will let us free cursors and connections?
 
 Tests?
 Documentation
@@ -90,16 +68,17 @@ Documentation
 
 GridFS
 
-
-pretty printer
 deep "lookup" function (other deep Map functions?)
-how to make bytestrings less painful
-custom Show/Read instance that looks more like json
+Read instance for Documents that can read its Show representation
 make sure NULLs aren't in created table names
 
 update tutorial to match new python one
 
 + custom types (see python examples)
-+ support array conversions again
-+ better type conversion errors
 + make BSON an instance of Binary (eg get/put)
+
+Questions:
+- In Mongo shell, db.foo.totalSize fetches storageSize of each index but does not use it
+
+Notes:
+- Remember that in the new version of MongoDB (>= 1.6), "ok" field can be a number (0 or 1) or boolean (False or True). Use 'true1' function defined in Database.MongoDB.Util

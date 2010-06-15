@@ -8,7 +8,7 @@ A mongoDB driver for Haskell.
 
 This driver lets you connect to MongoDB, do inserts, queries, updates,
 etc. Also has many convience functions inspired by HDBC such as more
-easily converting between the BsonValue types and native Haskell
+easily converting between the Bson.Value types and native Haskell
 types.
 
 Links
