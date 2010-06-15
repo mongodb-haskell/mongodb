@@ -43,7 +43,7 @@ MongoDB
   optional:
   - automatic reconnection
   - buffer pooling
-  - connection pooling. Although may not be desired because each connection maintains seperate session state (open cursors and temp map/reduce collections) and switching between connections automatically would change session state without the user knowing.
+  - connection pooling. Unsafe to shrink pool and close connections because map/reduce temp tables that were created on the connection will get deleted. Note, other connections can access a map/reduce temp table as long as the original connection is still alive. Also, other connections can access cursors created on other connections, even if those die. Cursors will be deleted on server only if idle for more than 10 minutes. Accessing a deleted cursor returns an error.
 + support safe operations, although operation with exclusive connection access is available which can be used to getLastError and check for that previous write was safe (successful).
 + auto-destoy connection (how?/when?). Although, GHC will automatically close connection (Handle) when garbage collected.
 + don't read into cursor until needed, but have cursor send getMore before
@@ -82,3 +82,4 @@ Questions:
 
 Notes:
 - Remember that in the new version of MongoDB (>= 1.6), "ok" field can be a number (0 or 1) or boolean (False or True). Use 'true1' function defined in Database.MongoDB.Util
+- A cursor will die on the server if not accessed (by any connection) within past 10 minutes (unless NoCursorTimeout option set). Accessing a dead (or non-existent) cursor raises a ServerFailure exception.

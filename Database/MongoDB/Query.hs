@@ -269,7 +269,7 @@ distinct k (Select sel col) = at "values" <$> runCommand ["distinct" =: col, "ke
 -- *** Cursor
 
 data Cursor = Cursor FullCollection BatchSize (MVar CursorState)
--- ^ Iterator over results of a query. Use 'next' to iterate. Cursor remains open during current connection and is closed when connection is closed, cursor is closed, or cursor is garbage collected.
+-- ^ Iterator over results of a query. Use 'next' to iterate or 'rest' to get all results. A cursor is closed when it is explicitly closed, all results have been read from it, garbage collected, or not used for over 10 minutes (unless 'NoCursorTimeout' option was specified in 'Query'). Reading from a closed cursor raises a ServerFailure exception. Note, a cursor is not closed when the connection is closed, so you can open another connection to the same server and continue using the cursor.
 
 data CursorState = CS Limit CursorId [Document]
 -- ^ CursorId = 0 means cursor is finished. Documents is remaining documents to serve in current batch. Limit is remaining limit for next fetch.
@@ -293,7 +293,8 @@ newCursor db col batch cs = do
 	return (Cursor (db <.> col) batch var)
 
 next :: (Conn m) => Cursor -> m (Maybe Document)
--- ^ Return next document in query result, or Nothing if finished
+-- ^ Return next document in query result, or Nothing if finished.
+-- This can run inside or outside a 'Db' monad (a 'useDb' block), since @Conn m => ReaderT r m@ is an instance of the 'Conn' type class, along with @Task@ and @Op@
 next (Cursor fcol batch var) = runOp . exposeIO $ \h -> modifyMVar var $ \cs ->
 	-- Get lock on connection (runOp) first then get lock on cursor, otherwise you could get in deadlock if already inside an Op (connection locked), but another Task gets lock on cursor first and then tries runOp (deadlock).
 	either ((cs,) . Left) (fmap Right) <$> hideIO (nextState cs) h
@@ -361,8 +362,8 @@ data MapReduce = MapReduce {
 	rSelect :: Selector,  -- ^ Default is []
 	rSort :: Order,  -- ^ Default is [] meaning no sort
 	rLimit :: Limit,  -- ^ Default is 0 meaning no limit
-	rOut :: Maybe Collection,  -- ^ Output to permanent collection. Default is Nothing.
-	rKeepTemp :: Bool,  -- ^ If True, the generated collection is made permanent. If False, the generated collection persists for the life of the current connection only. Default is False. When out is specified, the collection is automatically made permanent.
+	rOut :: Maybe Collection,  -- ^ Output to given permanent collection, otherwise output to a new temporary collection whose name is returned.
+	rKeepTemp :: Bool,  -- ^ If True, the temporary output collection is made permanent. If False, the temporary output collection persists for the life of the current connection only, however, other connections may read from it while the original one is still alive. Note, reading from a temporary collection after its original connection dies returns an empty result (not an error). The default for this attribute is False, unless 'rOut' is specified, then the collection permanent.
 	rFinalize :: Maybe FinalizeFun,  -- ^ Function to apply to all the results when finished. Default is Nothing.
 	rScope :: Document,  -- ^ Variables (environment) that can be accessed from map/reduce/finalize. Default is [].
 	rVerbose :: Bool  -- ^ Provide statistics on job execution time. Default is False.

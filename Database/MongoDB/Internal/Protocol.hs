@@ -161,7 +161,7 @@ data Query = Query {
 data QueryOption =
 	TailableCursor |
 	SlaveOK |
-	NoCursorTimeout
+	NoCursorTimeout  -- Never timeout the cursor. When not set, the cursor will die if idle for more than 10 minutes.
 	deriving (Show, Eq)
 
 data GetMore = GetMore {
