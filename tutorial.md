@@ -63,31 +63,31 @@ it won't fail. If it does you will get a pattern match error.
 Task and Db monad
 -------------------
 
-The current connection is held in a Reader monad called "Task*, and the
-current database is held in a Reader monad on top of that. To run a task,
-supply it and a connection to *runTask*. Within a task, to access a database,
-wrap you operations in a *useDb*.
+The current connection is held in a Connected monad, and the current database
+is held in a Reader monad on top of that. To run a connected monad, supply
+it and a connection to *runConn*. To access a database within a connected
+monad, call *useDb*.
 
-But since we are working in ghci, which requires us to start from the
-IO monad every time, we'll define a convenient 'run' function that takes a
+Since we are working in ghci, which requires us to start from the
+IO monad every time, we'll define a convenient *run* function that takes a
 db-action and executes it against our "test" database on the server we
 just connected to:
 
-    > let run act = runTask (useDb "test" act) con
+    > let run act = runConn (useDb "test" act) con
 
-*run* (*runTask*) will return either Left Failure or Right result. Failure
+*run* (*runConn*) will return either Left Failure or Right result. Failure
 means the connection failed (eg. network problem) or the server failed
 (eg. disk full).
 
 Databases and Collections
 -----------------------------
 
-A MongoDB can store multiple databases--separate namespaces
+A MongoDB can store multiple databases -- separate namespaces
 under which collections reside.
 
 You can obtain the list of databases available on a connection:
 
-    > runTask allDatabases con
+    > runConn allDatabases con
 
 You can also use the *run* function we just created:
 
@@ -159,7 +159,7 @@ only one matching document, or are only interested in the first
 match. Here we use *findOne* to get the first document from the posts
 collection:
 
-    > run $ findOne (query [] "posts")
+    > run $ findOne (select [] "posts")
     Right (Just [ _id: Oid 4c16d355 c80c560858000000, author: "Mike", text: "My first blog post!", tags: ["mongoDB","Haskell"], date: 2010-06-15 01:09:28.364 UTC])
 
 The result is a document matching the one that we inserted previously.
@@ -171,12 +171,12 @@ added on insert.
 resulting document must match. To limit our results to a document with
 author "Mike" we do:
 
-    > run $ findOne (query  ["author" =: "Mike"] "posts")
+    > run $ findOne (select ["author" =: "Mike"] "posts")
     Right (Just [ _id: Oid 4c16d355 c80c560858000000, author: "Mike", text: "My first blog post!", tags: ["mongoDB","Haskell"], date: 2010-06-15 01:09:28.364 UTC])
 
 If we try with a different author, like "Eliot", we'll get no result:
 
-    > run $ findOne (query  ["author" =: "Eliot"] "posts")
+    > run $ findOne (select ["author" =: "Eliot"] "posts")
     Right Nothing
 
 Bulk Inserts
@@ -217,12 +217,12 @@ iterate over all matching documents. There are several ways in which
 we can iterate: we can call *next* to get documents one at a time
 or we can get all the results by applying the cursor to *rest*:
 
-    > Right cursor <- run $ find (query ["author" =: "Mike"] "posts")
+    > Right cursor <- run $ find (select ["author" =: "Mike"] "posts")
     > run $ rest cursor
 
 Of course you can use bind (*>>=*) to combine these into one line:
 
-    > run $ find (query ["author" =: "Mike"] "posts") >>= rest
+    > run $ find (select ["author" =: "Mike"] "posts") >>= rest
 
 * Note: *next* automatically closes the cursor when the last
 document has been read out of it. Similarly, *rest* automatically
@@ -233,11 +233,11 @@ Counting
 
 We can count how many documents are in an entire collection:
 
-    > run $ count (query [] "posts")
+    > run $ count (select [] "posts")
 
 Or count how many documents match a query:
 
-    > run $ count (query ["author" =: "Mike"] "posts")
+    > run $ count (select ["author" =: "Mike"] "posts")
 
 Range Queries
 -------------

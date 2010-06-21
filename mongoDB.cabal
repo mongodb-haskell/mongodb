@@ -1,5 +1,5 @@
 Name:                mongoDB
-Version:             0.5.0
+Version:             0.6
 License:             MIT
 Maintainer:          Scott Parish <srp@srparish.net>, Tony Hannan <tony@10gen.com>
 Author:              Scott Parish <srp@srparish.net>, Tony Hannan <tony@10gen.com>
@@ -23,8 +23,9 @@ Build-Depends:   base < 5,
 		bson
 Build-Type:          Simple
 Exposed-modules: 
-		Database.MongoDB.Util,
-		Database.MongoDB.Internal.Connection,
+		Control.Monad.Context,
+		Control.Pipeline,
+		Database.MongoDB.Internal.Util,
 		Database.MongoDB.Internal.Protocol,
 		Database.MongoDB.Connection,
 		Database.MongoDB.Query,

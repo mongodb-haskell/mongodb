@@ -4,23 +4,19 @@
 
 module Database.MongoDB.Connection (
 	-- * Server
-	I.Server(..), PortID(..), server, showHostPort, readHostPort, readHostPortF,
+	Server(..), PortID(..), server, showHostPort, readHostPort, readHostPortF,
 	-- * ReplicaSet
 	ReplicaSet, replicaSet, replicaServers,
 	MasterOrSlave(..), FailedToConnect, newConnection,
 	-- * Connection
-	I.Connection, I.connServer, I.showHandle,
-	connect, I.closeConnection, I.isClosed,
-	-- * Connected monad
-	I.Conn(..), I.Failure(..),
-	-- ** Task
-	I.Task, I.runTask,
-	-- ** Op
-	I.Op
+	Connection, connect,
+	-- * Resource
+	Resource(..)
 ) where
 
-import Database.MongoDB.Internal.Connection as I
-import Database.MongoDB.Query (useDb, runCommand1)
+import Database.MongoDB.Internal.Protocol (Connection, mkConnection)
+import Database.MongoDB.Query (Failure(..), Conn, runConn, useDb, runCommand1)
+import Control.Pipeline (Resource(..))
 import Control.Applicative ((<$>))
 import Control.Arrow ((+++), left)
 import Control.Exception (assert)
@@ -31,9 +27,11 @@ import Network (HostName, PortID(..), connectTo)
 import Data.Bson (Document, look, typed)
 import Text.ParserCombinators.Parsec as P (parse, many1, letter, digit, char, eof, spaces, try, (<|>))
 import Control.Monad.Identity
-import Database.MongoDB.Util (true1)  -- PortID instances
+import Database.MongoDB.Internal.Util (true1)  -- PortID instances
 
 -- * Server
+
+data Server = Server HostName PortID  deriving (Show, Eq, Ord)
 
 defaultPort :: PortID
 defaultPort = PortNumber 27017
@@ -101,17 +99,15 @@ sortedReplicas :: ReplicaInfo -> IO [Server]
 -- ^ All replicas in set sorted by distance from this client. TODO
 sortedReplicas = return . allReplicas
 
-getReplicaInfo' :: Connection -> IO (Either IOError ReplicaInfo)
+getReplicaInfo :: (Server, Connection) -> IO (Either IOError ReplicaInfo)
 -- ^ Get replica info of the connected server. Return Left IOError if connection fails
-getReplicaInfo' conn = left err <$> runTask getReplicaInfo conn  where
+getReplicaInfo (serv, conn) = left err <$> runConn (ReplicaInfo serv <$> getReplicaInfoDoc) conn where
 	err (ConnectionFailure e) = e
-	err (ServerFailure s) = userError s
+	err (ServerFailure e) = userError e
 
-getReplicaInfo :: (Conn m) => m ReplicaInfo
--- ^ Get replica info of connect server
-getReplicaInfo = do
-	c <- getConnection
-	ReplicaInfo (connServer c) <$> useDb "admin" (runCommand1 "ismaster")
+getReplicaInfoDoc :: (Conn m) => m Document
+-- ^ Get replica info of connected server
+getReplicaInfoDoc = useDb "admin" (runCommand1 "ismaster")
 
 -- * MasterOrSlave
 
@@ -154,19 +150,19 @@ connectFirst mos = connectFirst' ([], []) where
 	connectFirst' (fs, is) (s : ss) = do
 		e <- runErrorT $ do
 			c <- ErrorT (connect s)
-			i <- ErrorT (getReplicaInfo' c)
+			i <- ErrorT (getReplicaInfo (s, c))
 			return (c, i)
 		case e of
 			Left f -> connectFirst' ((s, f) : fs, is) ss
 			Right (c, i) -> if isMS mos i
 				then return $ Right (c, i)
 				else do
-					closeConnection c
+					close c
 					connectFirst' ((s, userError $ "not a " ++ show mos) : fs, i : is) ss
 
 connect :: Server -> IO (Either IOError Connection)
 -- ^ Create a connection to the given server (as opposed to connecting to some server in a replica set via 'newConnection'). Return Left IOError if failed to connect.
-connect s@(Server host port) = E.try (mkConnection s =<< connectTo host port)
+connect (Server host port) = E.try (mkConnection =<< connectTo host port)
 
 
 {- Authors: Tony Hannan <tony@10gen.com>

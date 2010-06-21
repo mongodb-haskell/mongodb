@@ -28,7 +28,7 @@ module Database.MongoDB.Admin (
 import Prelude hiding (lookup)
 import Control.Applicative ((<$>))
 import Database.MongoDB.Internal.Protocol (pwHash, pwKey)
-import Database.MongoDB.Connection (Server, showHostPort, Conn)
+import Database.MongoDB.Connection (Server, showHostPort)
 import Database.MongoDB.Query
 import Data.Bson
 import Data.UString (pack, unpack, append, intercalate)
@@ -38,7 +38,7 @@ import Data.IORef
 import qualified Data.Set as S
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent (forkIO, threadDelay)
-import Database.MongoDB.Util ((<.>), true1)
+import Database.MongoDB.Internal.Util ((<.>), true1)
 
 -- * Admin
 
@@ -51,16 +51,17 @@ coptElem Capped = "capped" =: True
 coptElem (MaxByteSize n) = "size" =: n
 coptElem (MaxItems n) = "max" =: n
 
-createCollection :: (Conn m) => [CollectionOption] -> Collection -> Db m Document
+createCollection :: (DbConn m) => [CollectionOption] -> Collection -> m Document
 -- ^ Create collection with given options. You only need to call this to set options, otherwise a collection is created automatically on first use with no options.
 createCollection opts col = runCommand $ ["create" =: col] ++ map coptElem opts
 
-renameCollection :: (Conn m) => Collection -> Collection -> Db m Document
+renameCollection :: (DbConn m) => Collection -> Collection -> m Document
 -- ^ Rename first collection to second collection
-renameCollection from to = ReaderT $ \db -> useDb "admin" $
-	runCommand ["renameCollection" =: db <.> from, "to" =: db <.> to, "dropTarget" =: True]
+renameCollection from to = do
+	db <- thisDatabase
+	useDb "admin" $ runCommand ["renameCollection" =: db <.> from, "to" =: db <.> to, "dropTarget" =: True]
 
-dropCollection :: (Conn m) => Collection -> Db m Bool
+dropCollection :: (DbConn m) => Collection -> m Bool
 -- ^ Delete the given collection! Return True if collection existed (and was deleted); return False if collection did not exist (and no action).
 dropCollection coll = do
 	resetIndexCache
@@ -69,7 +70,7 @@ dropCollection coll = do
 		if at "errmsg" r == ("ns not found" :: UString) then return False else
 			fail $ "dropCollection failed: " ++ show r
 
-validateCollection :: (Conn m) => Collection -> Db m Document
+validateCollection :: (DbConn m) => Collection -> m Document
 -- ^ This operation takes a while
 validateCollection coll = runCommand ["validate" =: coll]
 
@@ -101,35 +102,32 @@ genName :: Order -> IndexName
 genName keys = intercalate "_" (map f keys)  where
 	f (k := v) = k `append` "_" `append` pack (show v)
 
-ensureIndex :: (Conn m) => Index -> Db m ()
+ensureIndex :: (DbConn m) => Index -> m ()
 -- ^ Create index if we did not already create one. May be called repeatedly with practically no performance hit, because we remember if we already called this for the same index (although this memory gets wiped out every 15 minutes, in case another client drops the index and we want to create it again).
 ensureIndex idx = let k = (iColl idx, iName idx) in do
 	icache <- fetchIndexCache
 	set <- liftIO (readIORef icache)
-	unless (S.member k set) . runDbOp $ do
-		createIndex idx
-		me <- getLastError
-		case me of
-			Nothing -> liftIO $ writeIORef icache (S.insert k set)
-			Just (c, e) -> fail $ "createIndex failed: (" ++ show c ++ ") " ++ e
+	unless (S.member k set) $ do
+		writeMode Safe (createIndex idx)
+		liftIO $ writeIORef icache (S.insert k set)
 
-createIndex :: (Conn m) => Index -> Db m ()
+createIndex :: (DbConn m) => Index -> m ()
 -- ^ Create index on the server. This call goes to the server every time.
 createIndex idx = insert_ "system.indexes" . idxDocument idx =<< thisDatabase
 
-dropIndex :: (Conn m) => Collection -> IndexName -> Db m Document
+dropIndex :: (DbConn m) => Collection -> IndexName -> m Document
 -- ^ Remove the index
 dropIndex coll idxName = do
 	resetIndexCache
 	runCommand ["deleteIndexes" =: coll, "index" =: idxName]
 
-getIndexes :: (Conn m) => Collection -> Db m [Document]
+getIndexes :: (DbConn m) => Collection -> m [Document]
 -- ^ Get all indexes on this collection
 getIndexes coll = do
 	db <- thisDatabase
-	rest =<< find (query ["ns" =: db <.> coll] "system.indexes")
+	rest =<< find (select ["ns" =: db <.> coll] "system.indexes")
 
-dropIndexes :: (Conn m) => Collection -> Db m Document
+dropIndexes :: (DbConn m) => Collection -> m Document
 -- ^ Drop all indexes on this collection
 dropIndexes coll = do
 	resetIndexCache
@@ -155,18 +153,20 @@ clearDbIndexCache = do
 	keys <- map fst <$> T.toList dbIndexCache
 	mapM_ (T.delete dbIndexCache) keys
 
-fetchIndexCache :: (Conn m) => Db m IndexCache
+fetchIndexCache :: (DbConn m) => m IndexCache
 -- ^ Get index cache for current database
-fetchIndexCache = ReaderT $ \db -> liftIO $ do
-	mc <- T.lookup dbIndexCache db
-	maybe (newIdxCache db) return mc
+fetchIndexCache = do
+	db <- thisDatabase
+	liftIO $ do
+		mc <- T.lookup dbIndexCache db
+		maybe (newIdxCache db) return mc
  where
 	newIdxCache db = do
 		idx <- newIORef S.empty
 		T.insert dbIndexCache db idx
 		return idx
 
-resetIndexCache :: (Conn m) => Db m ()
+resetIndexCache :: (DbConn m) => m ()
 -- ^ reset index cache for current database
 resetIndexCache = do
 	icache <- fetchIndexCache
@@ -174,20 +174,20 @@ resetIndexCache = do
 
 -- ** User
 
-allUsers :: (Conn m) => Db m [Document]
+allUsers :: (DbConn m) => m [Document]
 -- ^ Fetch all users of this database
 allUsers = map (exclude ["_id"]) <$> (rest =<< find
-	(query [] "system.users") {sort = ["user" =: (1 :: Int)], project = ["user" =: (1 :: Int), "readOnly" =: (1 :: Int)]})
+	(select [] "system.users") {sort = ["user" =: (1 :: Int)], project = ["user" =: (1 :: Int), "readOnly" =: (1 :: Int)]})
 
-addUser :: (Conn m) => Bool -> Username -> Password -> Db m ()
+addUser :: (DbConn m) => Bool -> Username -> Password -> m ()
 -- ^ Add user with password with read-only access if bool is True or read-write access if bool is False
 addUser readOnly user pass = do
-	mu <- findOne (query ["user" =: user] "system.users")
+	mu <- findOne (select ["user" =: user] "system.users")
 	let u = merge ["readOnly" =: readOnly, "pwd" =: pwHash user pass] (maybe ["user" =: user] id mu)
 	save "system.users" u
 
-removeUser :: (Conn m) => Username -> Db m ()
-removeUser user = delete (Select ["user" =: user] "system.users")
+removeUser :: (DbConn m) => Username -> m ()
+removeUser user = delete (select ["user" =: user] "system.users")
 
 -- ** Database
 
@@ -225,19 +225,19 @@ serverVersion = at "version" <$> serverBuildInfo
 
 -- ** Collection
 
-collectionStats :: (Conn m) => Collection -> Db m Document
+collectionStats :: (DbConn m) => Collection -> m Document
 collectionStats coll = runCommand ["collstats" =: coll]
 
-dataSize :: (Conn m) => Collection -> Db m Int
+dataSize :: (DbConn m) => Collection -> m Int
 dataSize c = at "size" <$> collectionStats c
 
-storageSize :: (Conn m) => Collection -> Db m Int
+storageSize :: (DbConn m) => Collection -> m Int
 storageSize c = at "storageSize" <$> collectionStats c
 
-totalIndexSize :: (Conn m) => Collection -> Db m Int
+totalIndexSize :: (DbConn m) => Collection -> m Int
 totalIndexSize c = at "totalIndexSize" <$> collectionStats c
 
-totalSize :: (Conn m) => Collection -> Db m Int
+totalSize :: (DbConn m) => Collection -> m Int
 totalSize coll = do
 	x <- storageSize coll
 	xs <- mapM isize =<< getIndexes coll
@@ -249,28 +249,28 @@ totalSize coll = do
 
 data ProfilingLevel = Off | Slow | All  deriving (Show, Enum, Eq)
 
-getProfilingLevel :: (Conn m) => Db m ProfilingLevel
+getProfilingLevel :: (DbConn m) => m ProfilingLevel
 getProfilingLevel = toEnum . at "was" <$> runCommand ["profile" =: (-1 :: Int)]
 
 type MilliSec = Int
 
-setProfilingLevel :: (Conn m) => ProfilingLevel -> Maybe MilliSec -> Db m ()
+setProfilingLevel :: (DbConn m) => ProfilingLevel -> Maybe MilliSec -> m ()
 setProfilingLevel p mSlowMs =
 	runCommand (["profile" =: fromEnum p] ++ ("slowms" =? mSlowMs)) >> return ()
 
 -- ** Database
 
-dbStats :: (Conn m) => Db m Document
+dbStats :: (DbConn m) => m Document
 dbStats = runCommand ["dbstats" =: (1 :: Int)]
 
-currentOp :: (Conn m) => Db m (Maybe Document)
+currentOp :: (DbConn m) => m (Maybe Document)
 -- ^ See currently running operation on the database, if any
-currentOp = findOne (query [] "$cmd.sys.inprog")
+currentOp = findOne (select [] "$cmd.sys.inprog")
 
 type OpNum = Int
 
-killOp :: (Conn m) => OpNum -> Db m (Maybe Document)
-killOp op = findOne (query ["op" =: op] "$cmd.sys.killop")
+killOp :: (DbConn m) => OpNum -> m (Maybe Document)
+killOp op = findOne (select ["op" =: op] "$cmd.sys.killop")
 
 -- ** Server
 

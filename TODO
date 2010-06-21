@@ -3,6 +3,7 @@ TODO
 
 BSON
 ----
++ implement deprecated types (were left out)
 + on insert/update: reject keys that start with "$" or "."
 + data support for common mongo "$symbols"
 + convert from/to json
@@ -15,14 +16,12 @@ BSON
 MongoDB
 -------
 + support full level 0
-  - hint
   - operations on database objects
     * add_son_manipulators?
     * dereference (dbref)
   - database admin
     * getProfilingInfo
   - misc operations
-    * explain
     * getCollectionOptions
   - cursor object
     * hasMore
@@ -38,7 +37,7 @@ MongoDB
 - getLastError options
 - Update If Current (http://www.mongodb.org/display/DOCS/Atomic+Operations)
 - block write until written on N replicas
-- lazyRest on cursor, although lazy I/) is problematic and we may not want to support it.
+- lazyRest on cursor, although lazy I/O) is problematic and we may not want to support it.
 - Upon client exit, send killCursors for all open cursors, otherwise server will keep them open for 10 minutes and keep NoCursorTimeout cursors open for hours.
 -- Upon cursor finalize (garbage collect) send killCursor even if you have to create a new connection, because server keeps cursors open for 10 minutes (or more).
 
@@ -46,7 +45,6 @@ MongoDB
   - automatic reconnection
   - buffer pooling
   - connection pooling. Unsafe to shrink pool and close connections because map/reduce temp tables that were created on the connection will get deleted. Note, other connections can access a map/reduce temp table as long as the original connection is still alive. Also, other connections can access cursors created on other connections, even if those die. Cursors will be deleted on server only if idle for more than 10 minutes. Accessing a deleted cursor returns an error.
-+ support safe operations, although operation with exclusive connection access is available which can be used to getLastError and check for that previous write was safe (successful).
 + auto-destoy connection (how?/when?). Although, GHC will automatically close connection (Handle) when garbage collected.
 + don't read into cursor until needed, but have cursor send getMore before
   it is actually out of docs (so network is finished by the time we're ready

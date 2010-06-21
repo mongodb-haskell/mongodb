@@ -20,10 +20,9 @@ map/reduce queries on:
     > :set -XOverloadedStrings
     > import Database.MongoDB
     > Right conn <- connect (server "localhost")
-    > let run task = runTask task conn
-    > let runDb db dbTask = run $ useDb db dbTask
+    > let run act = runConn (useDb "test" act) con
     > :{
-    runDb "test" $ insertMany "mr1" [
+    run $ insertMany "mr1" [
           ["x" =: 1, "tags" =: ["dog", "cat"]],
           ["x" =: 2, "tags" =: ["cat"]],
           ["x" =: 3, "tags" =: ["mouse", "cat", "dog"]],
@@ -68,7 +67,7 @@ key:
 Note: We can't just return values.length as the reduce function might
 be called iteratively on the results of other reduce steps.
 
-Finally, we call map_reduce() and iterate over the result collection:
+Finally, we run mapReduce and iterate over the result collection:
 
     > runDb "test" $ runMR (mapReduce "mr1" mapFn reduceFn) >>= rest
     Right [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]]
@@ -82,4 +81,4 @@ obtain them, use *runMR'* instead:
     > runDb "test" $ runMR' (mapReduce "mr1" mapFn reduceFn)
     Right [ result: "tmp.mr.mapreduce_1276482643_7", timeMillis: 379, counts: [ input: 4, emit: 6, output: 3], ok: 1.0]
 
-You can then obtain the results from here by quering the result collection yourself. "runMR* (above) does this for you but discards the statistics.
+You can then obtain the results from here by quering the result collection yourself. *runMR* (above) does this for you but discards the statistics.
