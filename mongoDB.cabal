@@ -1,9 +1,9 @@
-Name:	mongoDB
+Name:		mongoDB
 Version:	0.6
 License:	OtherLicense
 License-file:	LICENSE
 Maintainer:	Tony Hannan <tony@10gen.com>
-Author:	Scott Parish <srp@srparish.net> & Tony Hannan <tony@10gen.com>
+Author:		Scott Parish <srp@srparish.net> & Tony Hannan <tony@10gen.com>
 Copyright:	Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
 homepage:	http://github.com/TonyGen/mongoDB
 Category:	Database
