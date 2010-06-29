@@ -1,15 +1,17 @@
-Name:                mongoDB
-Version:             0.6
-License:             OtherLicense
-Maintainer:          Tony Hannan <tony@10gen.com>
-Author:              Scott Parish <srp@srparish.net>, Tony Hannan <tony@10gen.com>
-Copyright:           Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
-homepage:            http://github.com/srp/mongoDB
-Category:            Database
-Synopsis:            A driver for MongoDB
-Description:         This module lets you connect to MongoDB, do inserts, queries, updates, etc.
-Stability:           alpha
-Build-Depends:   base < 5,
+Name:	mongoDB
+Version:	0.6
+License:	OtherLicense
+License-file:	LICENSE
+Maintainer:	Tony Hannan <tony@10gen.com>
+Author:	Scott Parish <srp@srparish.net> & Tony Hannan <tony@10gen.com>
+Copyright:	Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
+homepage:	http://github.com/TonyGen/mongoDB
+Category:	Database
+Synopsis:	A driver for MongoDB
+Description:	This module lets you connect to MongoDB, do inserts, queries, updates, etc.
+Stability:	alpha
+Build-Depends:
+		base < 5,
 		containers,
 		mtl,
 		binary,
@@ -18,7 +20,7 @@ Build-Depends:   base < 5,
 		nano-md5,
 		parsec,
 		bson
-Build-Type:          Simple
+Build-Type:	Simple
 Exposed-modules: 
 		Control.Monad.Context,
 		Control.Pipeline,
@@ -28,5 +30,5 @@ Exposed-modules:
 		Database.MongoDB.Query,
 		Database.MongoDB.Admin,
 		Database.MongoDB
-ghc-options:         -Wall -O2
-cabal-version:       >= 1.4
+ghc-options:	-Wall -O2
+cabal-version:	>= 1.4
