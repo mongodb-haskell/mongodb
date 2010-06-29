@@ -1,16 +1,13 @@
 Name:                mongoDB
 Version:             0.6
-License:             MIT
-Maintainer:          Scott Parish <srp@srparish.net>, Tony Hannan <tony@10gen.com>
+License:             OtherLicense
+Maintainer:          Tony Hannan <tony@10gen.com>
 Author:              Scott Parish <srp@srparish.net>, Tony Hannan <tony@10gen.com>
 Copyright:           Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
 homepage:            http://github.com/srp/mongoDB
 Category:            Database
 Synopsis:            A driver for MongoDB
-Description:         This module lets you connect to MongoDB, do inserts,
-                     queries, updates, etc. Also has many convience functions
-                     inspired by HDBC such as more easily converting between
-                     the Bson.Value types and native Haskell types.
+Description:         This module lets you connect to MongoDB, do inserts, queries, updates, etc.
 Stability:           alpha
 Build-Depends:   base < 5,
 		containers,
