@@ -15,7 +15,7 @@ module Database.MongoDB.Internal.Protocol (
 	-- ** Request
 	Request(..), QueryOption(..),
 	-- ** Reply
-	Reply(..),
+	Reply(..), ResponseFlag(..),
 	-- * Authentication
 	Username, Password, Nonce, pwHash, pwKey
 ) where
@@ -238,11 +238,17 @@ qBits = bitOr . map qBit
 
 -- | A reply is a message received in response to a 'Request'
 data Reply = Reply {
-	rResponseFlag :: Int32,  -- ^ 0 = success, non-zero = failure
+	rResponseFlags :: [ResponseFlag],
 	rCursorId :: CursorId,  -- ^ 0 = cursor finished
 	rStartingFrom :: Int32,
 	rDocuments :: [Document]
 	} deriving (Show, Eq)
+
+data ResponseFlag =
+	  CursorNotFound  -- ^ Set when getMore is called but the cursor id is not valid at the server. Returned with zero results.
+	| QueryError  -- ^ Server error. Results contains one document containing an "$err" field holding the error message.
+	| AwaitCapable  -- ^ For backward compatability: Set when the server supports the AwaitData query option. if it doesn't, a replica slave client should sleep a little between getMore's
+	deriving (Show, Eq, Enum)
 
 -- * Binary format
 
@@ -253,12 +259,20 @@ getReply :: Get (ResponseTo, Reply)
 getReply = do
 	(opcode, responseTo) <- getHeader
 	unless (opcode == replyOpcode) $ fail $ "expected reply opcode (1) but got " ++ show opcode
-	rResponseFlag <- getInt32
+	rResponseFlags <-  rFlags <$> getInt32
 	rCursorId <- getInt64
 	rStartingFrom <- getInt32
 	numDocs <- fromIntegral <$> getInt32
 	rDocuments <- replicateM numDocs getDocument
 	return (responseTo, Reply{..})
+
+rFlags :: Int32 -> [ResponseFlag]
+rFlags bits = filter (testBit bits . rBit) [CursorNotFound ..]
+
+rBit :: ResponseFlag -> Int
+rBit CursorNotFound = 0
+rBit QueryError = 1
+rBit AwaitCapable = 3
 
 -- * Authentication
 

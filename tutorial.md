@@ -55,12 +55,12 @@ Open up a connection to your DB instance, using the standard port:
 
 or for a non-standard port
 
-    > Right con <- connect $ server "127.0.0.1" (PortNumber 666)
+    > Right con <- connect $ Server "127.0.0.1" (PortNumber 666)
 
 *connect* returns Left IOError if connection fails. We are assuming above
 it won't fail. If it does you will get a pattern match error.
 
-Task and Db monad
+Connected monad
 -------------------
 
 The current connection is held in a Connected monad, and the current database
