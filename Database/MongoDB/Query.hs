@@ -364,8 +364,8 @@ runQuery :: (DbConn m) => Bool -> [Notice] -> Query -> m CursorState'
 -- ^ Send query request and return cursor state
 runQuery isExplain ns q = do
 	db <- thisDatabase
-	slaveOk <- context
-	call' ns (queryRequest isExplain slaveOk q db)
+	slaveOK <- context
+	call' ns (queryRequest isExplain slaveOK q db)
 
 find :: (DbConn m) => Query -> m Cursor
 -- ^ Fetch documents satisfying query

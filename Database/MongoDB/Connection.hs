@@ -156,10 +156,10 @@ newConnection mos (ReplicaSet vHosts) = throwLeft . liftIO $ left (userError . s
 		Left (fs, is) -> if null is
 			then return (Left fs)
 			else do
-				replicas <- sortedReplicas (head is)
-				writeIORef vHosts replicas
+				reps <- sortedReplicas (head is)
+				writeIORef vHosts reps
 				-- try again in case new replicas in info
-				(fst +++ fst) <$> connectFirst mos replicas
+				(fst +++ fst) <$> connectFirst mos reps
 
 connectFirst :: MasterOrSlaveOk -> [Host] -> IO (Either ([(Host, IOError)], [ReplicaInfo]) (Connection, ReplicaInfo))
 -- ^ Connect to first host that succeeds and is master/slave, otherwise return list of failed connections plus info of connections that succeeded but were not master/slave.
