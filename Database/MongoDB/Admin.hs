@@ -28,7 +28,7 @@ module Database.MongoDB.Admin (
 import Prelude hiding (lookup)
 import Control.Applicative ((<$>))
 import Database.MongoDB.Internal.Protocol (pwHash, pwKey)
-import Database.MongoDB.Connection (Server, showHostPort)
+import Database.MongoDB.Connection (Host, showHostPort)
 import Database.MongoDB.Query
 import Data.Bson
 import Data.UString (pack, unpack, append, intercalate)
@@ -191,12 +191,12 @@ removeUser user = delete (select ["user" =: user] "system.users")
 
 -- ** Database
 
-cloneDatabase :: (Conn m) => Database -> Server -> m Document
--- ^ Copy database from given server to the server I am connected to. Fails and returns @"ok" = 0@ if we don't have permission to read from given server (use copyDatabase in this case).
+cloneDatabase :: (Conn m) => Database -> Host -> m Document
+-- ^ Copy database from given host to the server I am connected to. Fails and returns @"ok" = 0@ if we don't have permission to read from given server (use copyDatabase in this case).
 cloneDatabase db fromHost = useDb db $ runCommand ["clone" =: showHostPort fromHost]
 
-copyDatabase :: (Conn m) => Database -> Server -> Maybe (Username, Password) -> Database -> m Document
--- ^ Copy database from given server to the server I am connected to. If username & password is supplied use them to read from given server.
+copyDatabase :: (Conn m) => Database -> Host -> Maybe (Username, Password) -> Database -> m Document
+-- ^ Copy database from given host to the server I am connected to. If username & password is supplied use them to read from given host.
 copyDatabase fromDb fromHost mup toDb = do
 	let c = ["copydb" =: (1 :: Int), "fromhost" =: showHostPort fromHost, "fromdb" =: fromDb, "todb" =: toDb]
 	useDb "admin" $ case mup of

@@ -1,11 +1,11 @@
 Name:		mongoDB
-Version:	0.6.1
+Version:	0.7
 License:	OtherLicense
 License-file:	LICENSE
 Maintainer:	Tony Hannan <tony@10gen.com>
 Author:		Scott Parish <srp@srparish.net> & Tony Hannan <tony@10gen.com>
 Copyright:	Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
-homepage:	http://github.com/TonyGen/mongoDB
+homepage:	http://github.com/TonyGen/mongoDB-haskell
 Category:	Database
 Synopsis:	A driver for MongoDB
 Description:	This module lets you connect to MongoDB, do inserts, queries, updates, etc.
@@ -23,6 +23,7 @@ Build-Depends:
 Build-Type:	Simple
 Exposed-modules: 
 		Control.Monad.Context,
+		Control.Monad.Throw,
 		Control.Pipeline,
 		Database.MongoDB.Internal.Util,
 		Database.MongoDB.Internal.Protocol,

@@ -17,7 +17,7 @@ import Prelude hiding (length)
 import Control.Applicative ((<$>))
 import Control.Monad (forever)
 import Control.Exception (assert)
-import System.IO.Error (try)
+import System.IO.Error (try, mkIOError, eofErrorType)
 import System.IO (Handle, hFlush, hClose, hIsClosed)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
@@ -43,7 +43,9 @@ instance Length L.ByteString where
 
 class Resource m r where
 	close :: r -> m ()
+	-- ^ Close resource
 	isClosed :: r -> m Bool
+	-- ^ Is resource closed
 
 instance Resource IO Handle where
 	close = hClose
@@ -64,16 +66,16 @@ class (Length bytes, Monoid bytes, Flush handle) => Stream handle bytes where
 	put :: handle -> bytes -> IO ()
 	-- ^ Write bytes to handle
 	get :: handle -> Int -> IO bytes
-	-- ^ Read up to N bytes from handle, block until at least 1 byte is available
+	-- ^ Read up to N bytes from handle; if EOF return empty bytes, otherwise block until at least 1 byte is available
 
 getN :: (Stream h b) => h -> Int -> IO b
--- ^ Read N bytes from hande, blocking until all N bytes are read. Unlike 'get' which only blocks if no bytes are available.
+-- ^ Read N bytes from hande, blocking until all N bytes are read. If EOF is reached before N bytes then throw EOF exception.
 getN h n = assert (n >= 0) $ do
 	bytes <- get h n
 	let x = length bytes
-	if x >= n then return bytes else do
-		remainingBytes <- getN h (n - x)
-		return (mappend bytes remainingBytes)
+	if x >= n then return bytes
+		else if x == 0 then ioError (mkIOError eofErrorType "Control.Pipeline" Nothing Nothing)
+			else mappend bytes <$> getN h (n - x)
 
 instance Stream Handle S.ByteString where
 	put = S.hPut

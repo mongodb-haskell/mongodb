@@ -51,14 +51,15 @@ Making A Connection
 -------------------
 Open up a connection to your DB instance, using the standard port:
 
-    > Right con <- connect $ server "127.0.0.1"
+    > Right conn <- runNet $ connect $ host "127.0.0.1"
 
 or for a non-standard port
 
-    > Right con <- connect $ Server "127.0.0.1" (PortNumber 666)
+    > Right conn <- runNet $ connect $ Host "127.0.0.1" (PortNumber 30000)
 
-*connect* returns Left IOError if connection fails. We are assuming above
-it won't fail. If it does you will get a pattern match error.
+*connect* throws IOError if connection fails and *runNet* catches IOError and
+returns it as Left. We are assuming above it won't fail. If it does you will get a
+pattern match error.
 
 Connected monad
 -------------------
@@ -73,11 +74,11 @@ IO monad every time, we'll define a convenient *run* function that takes a
 db-action and executes it against our "test" database on the server we
 just connected to:
 
-    > let run act = runConn (useDb "test" act) con
+    > let run action = runNet $ runConn (useDb "test" action) conn
 
-*run* (*runConn*) will return either Left Failure or Right result. Failure
-means the connection failed (eg. network problem) or the server failed
-(eg. disk full).
+*runConn* return either Left Failure or Right result. Failure
+means there was a read or write exception like cursor expired or duplicate key insert.
+This combined with *runNet* means our *run* returns *(Either IOError (Either Failure a))*.
 
 Databases and Collections
 -----------------------------
@@ -86,10 +87,6 @@ A MongoDB can store multiple databases -- separate namespaces
 under which collections reside.
 
 You can obtain the list of databases available on a connection:
-
-    > runConn allDatabases con
-
-You can also use the *run* function we just created:
 
     > run allDatabases
 
@@ -132,7 +129,6 @@ Inserting a Document
 To insert a document into a collection we can use the *insert* function:
 
     > run $ insert "posts" post
-    Right (Oid 4c16d355 c80c560858000000)
 
 When a document is inserted a special field, *_id*, is automatically
 added if the document doesn't already contain that field. The value
@@ -160,7 +156,6 @@ match. Here we use *findOne* to get the first document from the posts
 collection:
 
     > run $ findOne (select [] "posts")
-    Right (Just [ _id: Oid 4c16d355 c80c560858000000, author: "Mike", text: "My first blog post!", tags: ["mongoDB","Haskell"], date: 2010-06-15 01:09:28.364 UTC])
 
 The result is a document matching the one that we inserted previously.
 
@@ -172,12 +167,10 @@ resulting document must match. To limit our results to a document with
 author "Mike" we do:
 
     > run $ findOne (select ["author" =: "Mike"] "posts")
-    Right (Just [ _id: Oid 4c16d355 c80c560858000000, author: "Mike", text: "My first blog post!", tags: ["mongoDB","Haskell"], date: 2010-06-15 01:09:28.364 UTC])
 
 If we try with a different author, like "Eliot", we'll get no result:
 
     > run $ findOne (select ["author" =: "Eliot"] "posts")
-    Right Nothing
 
 Bulk Inserts
 ------------
@@ -202,7 +195,6 @@ command to the server:
                    "date" =: now]
       :}
     > run $ insertMany "posts" [post1, post2]
-    Right [Oid 4c16d67e c80c560858000001,Oid 4c16d67e c80c560858000002]
 
 * Note that post2 has a different shape than the other posts - there
 is no "tags" field and we've added a new field, "title". This is what we

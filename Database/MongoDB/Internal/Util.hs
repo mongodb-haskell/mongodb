@@ -1,6 +1,6 @@
 -- | Miscellaneous general functions
 
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE StandaloneDeriving, FlexibleInstances, UndecidableInstances #-}
 
 module Database.MongoDB.Internal.Util where
 
@@ -24,6 +24,9 @@ instance (Monad m) => Applicative (ReaderT r m) where
 instance (Monad m, Error e) => Applicative (ErrorT e m) where
 	pure = return
 	(<*>) = ap
+
+class (MonadIO m, Applicative m, Functor m) => MonadIO' m
+instance (MonadIO m, Applicative m, Functor m) => MonadIO' m
 
 ignore :: (Monad m) => a -> m ()
 ignore _ = return ()

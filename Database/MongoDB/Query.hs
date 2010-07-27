@@ -1,9 +1,9 @@
 -- | Query and update documents residing on a MongoDB server(s)
 
-{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, RankNTypes, ImpredicativeTypes #-}
 
 module Database.MongoDB.Query (
-	-- * Connection
+	-- * Connected
 	Connected, runConn, Conn, Failure(..),
 	-- * Database
 	Database, allDatabases, DbConn, useDb, thisDatabase,
@@ -24,8 +24,9 @@ module Database.MongoDB.Query (
 	-- ** Delete
 	delete, deleteOne,
 	-- * Read
+	slaveOk,
 	-- ** Query
-	Query(..), P.QueryOption(..), Projector, Limit, Order, BatchSize,
+	Query(..), QueryOption(..), Projector, Limit, Order, BatchSize,
 	explain, find, findOne, count, distinct,
 	-- *** Cursor
 	Cursor, next, nextN, rest,
@@ -40,64 +41,64 @@ module Database.MongoDB.Query (
 
 import Prelude as X hiding (lookup)
 import Control.Applicative ((<$>), Applicative(..))
-import Control.Arrow (left, first, second)
+import Control.Arrow (first)
 import Control.Monad.Context
 import Control.Monad.Reader
 import Control.Monad.Error
+import Control.Monad.Throw
 import System.IO.Error (try)
 import Control.Concurrent.MVar
 import Control.Pipeline (Resource(..))
 import qualified Database.MongoDB.Internal.Protocol as P
-import Database.MongoDB.Internal.Protocol hiding (Query, send, call)
+import Database.MongoDB.Internal.Protocol hiding (Query, QueryOption(..), send, call)
+import Database.MongoDB.Connection (MasterOrSlaveOk(..))
 import Data.Bson
 import Data.Word
 import Data.Int
-import Data.Maybe (listToMaybe, catMaybes, mapMaybe)
+import Data.Maybe (listToMaybe, catMaybes)
 import Data.UString as U (dropWhile, any, tail)
-import Database.MongoDB.Internal.Util (loop, (<.>), true1)  -- plus Applicative instances of ErrorT & ReaderT
+import Database.MongoDB.Internal.Util (loop, (<.>), true1, MonadIO')  -- plus Applicative instances of ErrorT & ReaderT
 
--- * Connected
+send :: (Context Connection m, Throw IOError m, MonadIO m) => [Notice] -> m ()
+-- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
+send ns = throwLeft . liftIO . try . flip P.send ns =<< context
 
-newtype Connected m a = Connected (ErrorT Failure (ReaderT WriteMode (ReaderT Connection m)) a)
-	deriving (Context Connection, Context WriteMode, MonadError Failure, MonadIO, Monad, Applicative, Functor)
--- ^ Monad with access to a 'Connection' and 'WriteMode' and throws a 'Failure' on connection or server failure
-
-instance MonadTrans Connected where
-	lift = Connected . lift . lift . lift
-
-runConn :: Connected m a -> Connection -> m (Either Failure a)
--- ^ Run action with access to connection. Return Left Failure if connection or server fails during execution.
-runConn (Connected action) = runReaderT (runReaderT (runErrorT action) Unsafe)
-
--- | A monad with access to a 'Connection' and 'WriteMode' and throws a 'Failure' on connection or server failure
-class (Context Connection m, Context WriteMode m, MonadError Failure m, MonadIO m, Applicative m, Functor m) => Conn m
-instance (Context Connection m, Context WriteMode m, MonadError Failure m, MonadIO m, Applicative m, Functor m) => Conn m
-
--- | Connection or Server failure like network problem or disk full
-data Failure =
-	ConnectionFailure IOError
-	-- ^ Error during sending or receiving bytes over a 'Connection'. The connection is not automatically closed when this error happens; the user must close it. Any other IOErrors raised during a Task or Op are not caught. The user is responsible for these other types of errors not related to sending/receiving bytes over the connection.
-	| ServerFailure String
-	-- ^ Failure on server, like disk full, which is usually observed using getLastError. Calling 'fail' inside a connected monad raises this failure. Do not call 'fail' unless it is a temporary server failure, like disk full. For example, receiving unexpected data from the server is not a server failure, rather it is a programming error (you should call 'error' in this case) because the client and server are incompatible and requires a programming change.
-	deriving (Show, Eq)
-
-instance Error Failure where strMsg = ServerFailure
-
-send :: (Conn m) => [Notice] -> m ()
--- ^ Send notices as a contiguous batch to server with no reply. Raise Failure if connection fails.
-send ns = do
-	conn <- context
-	e <- liftIO $ try (P.send conn ns)
-	either (throwError . ConnectionFailure) return e
-
-call :: (Conn m) => [Notice] -> Request -> m (IO (Either Failure Reply))
--- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will raise Failure if connection fails send, and promise will return Failure if connection fails receive.
+call :: (Context Connection m, Throw IOError m, MonadIO m) => [Notice] -> Request -> m (forall n. (Throw IOError n, MonadIO n) => n Reply)
+-- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw IOError if connection fails on send, and promise will throw IOError if connection fails on receive.
 call ns r = do
 	conn <- context
-	e <- liftIO $ try (P.call conn ns r)
-	case e of
-		Left err -> throwError (ConnectionFailure err)
-		Right promise -> return (left ConnectionFailure <$> try promise)
+	promise <- throwLeft . liftIO $ try (P.call conn ns r)
+	return (throwLeft . liftIO $ try promise)
+
+-- * Connected Monad
+
+newtype Connected m a = Connected (ErrorT Failure (ReaderT WriteMode (ReaderT MasterOrSlaveOk (ReaderT Connection m))) a)
+	deriving (Context Connection, Context MasterOrSlaveOk, Context WriteMode, Throw Failure, MonadIO, Monad, Applicative, Functor)
+-- ^ Monad with access to a 'Connection', 'MasterOrSlaveOk', and 'WriteMode', and throws a 'Failure' on read/write failure and IOError on connection failure
+
+deriving instance (Throw IOError m) => Throw IOError (Connected m)
+
+instance MonadTrans Connected where
+	lift = Connected . lift . lift . lift . lift
+
+runConn :: Connected m a -> Connection -> m (Either Failure a)
+-- ^ Run action with access to connection. It starts out assuming it is master (invoke 'slaveOk' inside it to change that) and that writes don't need to be check (invoke 'writeMode' to change that). Return Left Failure if error in execution. Throws IOError if connection fails during execution.
+runConn (Connected action) = runReaderT (runReaderT (runReaderT (runErrorT action) Unsafe) Master)
+
+-- | A monad with access to a 'Connection', 'MasterOrSlaveOk', and 'WriteMode', and throws 'Failure' on read/write failure and 'IOError' on connection failure
+class (Context Connection m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, Throw IOError m, MonadIO' m) => Conn m
+instance (Context Connection m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, Throw IOError m, MonadIO' m) => Conn m
+
+-- | Read or write exception like cursor expired or inserting a duplicate key.
+-- Note, unexpected data from the server is not a Failure, rather it is a programming error (you should call 'error' in this case) because the client and server are incompatible and requires a programming change.
+data Failure =
+	CursorNotFoundFailure CursorId  -- ^ Cursor expired because it wasn't accessed for over 10 minutes, or this cursor came from a different server that the one you are currently connected to (perhaps a fail over happen between servers in a replica set)
+	| QueryFailure String  -- ^ Query failed for some reason as described in the string
+	| WriteFailure ErrorCode String  -- ^ Error observed by getLastError after a write, error description is in string
+	deriving (Show, Eq)
+
+instance Error Failure where strMsg = error
+-- ^ 'fail' is treated the same as 'error'. In other words, don't use it.
 
 -- * Database
 
@@ -184,14 +185,14 @@ writeMode :: (Conn m) => WriteMode -> m a -> m a
 writeMode = push . const
 
 write :: (DbConn m) => Notice -> m ()
--- ^ Send write to server, and if write-mode is 'Safe' then include getLastError request and raise 'ServerFailure' if it reports an error.
+-- ^ Send write to server, and if write-mode is 'Safe' then include getLastError request and raise 'WriteFailure' if it reports an error.
 write notice = do
 	mode <- context
 	case mode of
 		Unsafe -> send [notice]
 		Safe -> do
 			me <- getLastError [notice]
-			maybe (return ()) (throwError . ServerFailure . show) me
+			maybe (return ()) (throw . uncurry WriteFailure) me
 
 type ErrorCode = Int
 -- ^ Error code from getLastError
@@ -281,6 +282,16 @@ delete' opts (Select sel col) = do
 
 -- * Read
 
+-- ** MasterOrSlaveOk
+
+slaveOk :: (Conn m) => m a -> m a
+-- ^ Ok to execute given action against slave, ie. eventually consistent reads
+slaveOk = push (const SlaveOk)
+
+msOption :: MasterOrSlaveOk -> [P.QueryOption]
+msOption Master = []
+msOption SlaveOk = [P.SlaveOK]
+
 -- ** Query
 
 -- | Use 'select' to create a basic query with defaults, then modify if desired. For example, @(select sel col) {limit = 10}@
@@ -295,6 +306,18 @@ data Query = Query {
 	batchSize :: BatchSize,  -- ^ The number of document to return in each batch response from the server. 0 means use Mongo default. Default = 0
 	hint :: Order  -- ^ Force MongoDB to use this index, [] = no hint. Default = []
 	} deriving (Show, Eq)
+
+data QueryOption =
+	  TailableCursor  -- ^ Tailable means cursor is not closed when the last data is retrieved. Rather, the cursor marks the final object's position. You can resume using the cursor later, from where it was located, if more data were received. Like any "latent cursor", the cursor may become invalid at some point – for example if the final object it references were deleted. Thus, you should be prepared to requery on CursorNotFound exception.
+	| NoCursorTimeout  -- The server normally times out idle cursors after an inactivity period (10 minutes) to prevent excess memory use. Set this option to prevent that.
+	| AwaitData  -- ^ Use with TailableCursor. If we are at the end of the data, block for a while rather than returning no data. After a timeout period, we do return as normal.
+	deriving (Show, Eq)
+
+pOption :: QueryOption -> P.QueryOption
+-- ^ Convert to protocol query option
+pOption TailableCursor = P.TailableCursor
+pOption NoCursorTimeout = P.NoCursorTimeout
+pOption AwaitData = P.AwaitData
 
 type Projector = Document
 -- ^ Fields to return, analogous to the select clause in SQL. @[]@ means return whole document (analogous to * in SQL). @[x =: 1, y =: 1]@ means return only @x@ and @y@ fields of each document. @[x =: 0]@ means return all fields except @x@.
@@ -322,10 +345,10 @@ batchSizeRemainingLimit batchSize limit = if limit == 0
  where batchSize' = if batchSize == 1 then 2 else batchSize
  	-- batchSize 1 is broken because server converts 1 to -1 meaning limit 1
 
-queryRequest :: Bool -> Query -> Database -> (Request, Limit)
+queryRequest :: Bool -> MasterOrSlaveOk -> Query -> Database -> (Request, Limit)
 -- ^ Translate Query to Protocol.Query. If first arg is true then add special $explain attribute.
-queryRequest isExplain Query{..} db = (P.Query{..}, remainingLimit) where
-	qOptions = options
+queryRequest isExplain mos Query{..} db = (P.Query{..}, remainingLimit) where
+	qOptions = msOption mos ++ map pOption options
 	qFullCollection = db <.> coll selection
 	qSkip = fromIntegral skip
 	(qBatchSize, remainingLimit) = batchSizeRemainingLimit batchSize limit
@@ -339,13 +362,10 @@ queryRequest isExplain Query{..} db = (P.Query{..}, remainingLimit) where
 
 runQuery :: (DbConn m) => Bool -> [Notice] -> Query -> m CursorState'
 -- ^ Send query request and return cursor state
-runQuery isExplain ns q = call' ns . queryRequest isExplain q =<< thisDatabase
-
-call' :: (Conn m) => [Notice] -> (Request, Limit) -> m CursorState'
--- ^ Send notices and request and return promised cursor state
-call' ns (req, remainingLimit) = do
-	promise <- call ns req
-	return $ Delayed (fmap (fromReply remainingLimit =<<) promise)
+runQuery isExplain ns q = do
+	db <- thisDatabase
+	slaveOk <- context
+	call' ns (queryRequest isExplain slaveOk q db)
 
 find :: (DbConn m) => Query -> m Cursor
 -- ^ Fetch documents satisfying query
@@ -383,43 +403,54 @@ distinct k (Select sel col) = at "values" <$> runCommand ["distinct" =: col, "ke
 -- *** Cursor
 
 data Cursor = Cursor FullCollection BatchSize (MVar CursorState')
--- ^ Iterator over results of a query. Use 'next' to iterate or 'rest' to get all results. A cursor is closed when it is explicitly closed, all results have been read from it, garbage collected, or not used for over 10 minutes (unless 'NoCursorTimeout' option was specified in 'Query'). Reading from a closed cursor raises a ServerFailure exception. Note, a cursor is not closed when the connection is closed, so you can open another connection to the same server and continue using the cursor.
+-- ^ Iterator over results of a query. Use 'next' to iterate or 'rest' to get all results. A cursor is closed when it is explicitly closed, all results have been read from it, garbage collected, or not used for over 10 minutes (unless 'NoCursorTimeout' option was specified in 'Query'). Reading from a closed cursor raises a 'CursorNotFoundFailure'. Note, a cursor is not closed when the connection is closed, so you can open another connection to the same server and continue using the cursor.
 
-modifyCursorState' :: (Conn m) => Cursor -> (FullCollection -> BatchSize -> CursorState' -> Connected IO (CursorState', a)) -> m a
+modifyCursorState' :: (Conn m) => Cursor -> (FullCollection -> BatchSize -> CursorState' -> Connected (ErrorT IOError IO) (CursorState', a)) -> m a
 -- ^ Analogous to 'modifyMVar' but with Conn monad
 modifyCursorState' (Cursor fcol batch var) act = do
 	conn <- context
-	e <- liftIO . modifyMVar var $ \cs' ->
-		either ((cs',) . Left) (second Right) <$> runConn (act fcol batch cs') conn
-	either throwError return e
+	e <- liftIO . modifyMVar var $ \cs' -> do
+		ee <- runErrorT $ runConn (act fcol batch cs') conn
+		return $ case ee of
+			Right (Right (cs'', a)) -> (cs'', Right a)
+			Right (Left failure) -> (cs', Left $ throw failure)
+			Left ioerror -> (cs', Left $ throw ioerror)
+	either id return e
 
 getCursorState :: (Conn m) => Cursor -> m CursorState
 -- ^ Extract current cursor status
 getCursorState (Cursor _ _ var) = cursorState =<< liftIO (readMVar var)
 
-data CursorState' = Delayed (IO (Either Failure CursorState)) | CursorState CursorState
+data CursorState' =
+	  Delayed (forall n. (Throw Failure n, Throw IOError n, MonadIO n) => n CursorState)
+	| CursorState CursorState
 -- ^ A cursor state or a promised cursor state which may fail
 
+call' :: (Conn m) => [Notice] -> (Request, Limit) -> m CursorState'
+-- ^ Send notices and request and return promised cursor state
+call' ns (req, remainingLimit) = do
+	promise <- call ns req
+	return $ Delayed (fromReply remainingLimit =<< promise)
+
 cursorState :: (Conn m) => CursorState' -> m CursorState
--- ^ Convert promised cursor state to cursor state or raise Failure
-cursorState (Delayed promise) = either throwError return =<< liftIO promise
+-- ^ Convert promised cursor state to cursor state or failure
+cursorState (Delayed promise) = promise
 cursorState (CursorState cs) = return cs
 
 data CursorState = CS Limit CursorId [Document]
 -- ^ CursorId = 0 means cursor is finished. Documents is remaining documents to serve in current batch. Limit is remaining limit for next fetch.
 
-fromReply :: Limit -> Reply -> Either Failure CursorState
+fromReply :: (Throw Failure m) => Limit -> Reply -> m CursorState
 -- ^ Convert Reply to CursorState or Failure
-fromReply limit Reply{..} = case mapMaybe fromResponseFlag rResponseFlags of
-	[] -> Right (CS limit rCursorId rDocuments)
-	err : _ -> Left err
+fromReply limit Reply{..} = do
+	mapM_ checkResponseFlag rResponseFlags
+	return (CS limit rCursorId rDocuments)
  where
-	fromResponseFlag :: ResponseFlag -> Maybe Failure
-	-- ^ If response flag indicate failure then Just Failure, otherwise Nothing
-	fromResponseFlag x = case x of
-		AwaitCapable -> Nothing
-		CursorNotFound -> Just . ServerFailure $ "Cursor " ++ show rCursorId ++ " not found"
-		QueryError -> Just . ServerFailure $ "Query failure " ++ show rDocuments
+	-- If response flag indicates failure then throw it, otherwise do nothing
+	checkResponseFlag flag = case flag of
+		AwaitCapable -> return ()
+		CursorNotFound -> throw (CursorNotFoundFailure rCursorId)
+		QueryError -> throw (QueryFailure $ at "$err" $ head rDocuments)
 
 newCursor :: (Conn m) => Database -> Collection -> BatchSize -> CursorState' -> m Cursor
 -- ^ Create new cursor. If you don't read all results then close it. Cursor will be closed automatically when all results are read from it or when eventually garbage collected.
@@ -427,14 +458,14 @@ newCursor db col batch cs = do
 	conn <- context
 	var <- liftIO (newMVar cs)
 	let cursor = Cursor (db <.> col) batch var
-	liftIO . addMVarFinalizer var $ runConn (close cursor) conn >> return ()
+	liftIO . addMVarFinalizer var $ runErrorT (runConn (close cursor) conn :: ErrorT IOError IO (Either Failure ())) >> return ()
 	return cursor
 
 next :: (Conn m) => Cursor -> m (Maybe Document)
 -- ^ Return next document in query result, or Nothing if finished.
 next cursor = modifyCursorState' cursor nextState where
 	-- Pre-fetch next batch promise from server when last one in current batch is returned.
-	nextState :: FullCollection -> BatchSize -> CursorState' -> Connected IO (CursorState', Maybe Document)
+	nextState :: FullCollection -> BatchSize -> CursorState' -> Connected (ErrorT IOError IO) (CursorState', Maybe Document)
 	nextState fcol batch cs' = do
 		CS limit cid docs <- cursorState cs'
 		case docs of

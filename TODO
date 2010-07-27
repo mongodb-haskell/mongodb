@@ -26,6 +26,9 @@ MongoDB
   - cursor object
     * hasMore
 
+- all commands listed on http://127.0.0.1:28017/_commands. (mongod --rest)
+- reIndex (http://www.mongodb.org/display/DOCS/Indexes#Indexes-ReIndex)
+- safe write to two or more replicas
 - Query attribute: timeout
 - CreateIndex attributes: background, min, max
 - CreateIndex Order [Asc, Dec, Geo2d]
@@ -40,6 +43,7 @@ MongoDB
 - lazyRest on cursor, although lazy I/O) is problematic and we may not want to support it.
 - Upon client exit, send killCursors for all open cursors, otherwise server will keep them open for 10 minutes and keep NoCursorTimeout cursors open for hours.
 -- Upon cursor finalize (garbage collect) send killCursor even if you have to create a new connection, because server keeps cursors open for 10 minutes (or more).
+-- Query option Exhaust
 
   optional:
   - automatic reconnection
