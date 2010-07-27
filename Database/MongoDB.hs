@@ -1,18 +1,19 @@
 {- |
 Client interface to MongoDB server(s).
 
-Simple example:
+Simple example below. Use with language extension /OvererloadedStrings/.
 
->
 > {-# LANGUAGE OverloadedStrings #-}
 >
 > import Database.MongoDB
+> import Data.UString (u)
+> import Control.Monad.Trans (liftIO)
 >
 > main = do
->    e <- connect (server "127.0.0.1")
->    conn <- either (fail . show) return e
->    e <- runConn run conn
->    either (fail . show) return e
+>    ee <- runNet $ do
+>       conn <- connect (host "127.0.0.1")
+>       runConn run conn
+>    print ee
 >
 > run = useDb "baseball" $ do
 >    clearTeams
@@ -24,16 +25,16 @@ Simple example:
 > clearTeams = delete (select [] "team")
 >
 > insertTeams = insertMany "team" [
->    ["name" =: "Yankees", "home" =: ["city" =: "New York", "state" =: "NY"], "league" =: "American"],
->    ["name" =: "Mets", "home" =: ["city" =: "New York", "state" =: "NY"], "league" =: "National"],
->    ["name" =: "Phillies", "home" =: ["city" =: "Philadelphia", "state" =: "PA"], "league" =: "National"],
->    ["name" =: "Red Sox", "home" =: ["city" =: "Boston", "state" =: "MA"], "league" =: "American"] ]
+>    ["name" =: u"Yankees", "home" =: ["city" =: u"New York", "state" =: u"NY"], "league" =: u"American"],
+>    ["name" =: u"Mets", "home" =: ["city" =: u"New York", "state" =: u"NY"], "league" =: u"National"],
+>    ["name" =: u"Phillies", "home" =: ["city" =: u"Philadelphia", "state" =: u"PA"], "league" =: u"National"],
+>    ["name" =: u"Red Sox", "home" =: ["city" =: u"Boston", "state" =: u"MA"], "league" =: u"American"] ]
 >
-> allTeams = rest =<< find (select [] "team") {sort = ["city" =: 1]}
+> allTeams = rest =<< find (select [] "team") {sort = ["city" =: (1 :: Int)]}
 >
-> nationalLeagueTeams = rest =<< find (select ["league" =: "National"] "team")
+> nationalLeagueTeams = rest =<< find (select ["league" =: u"National"] "team")
 >
-> newYorkTeams = rest =<< find (select ["home.state" =: "NY"] "team") {project = ["name" =: 1, "league" =: 1]}
+> newYorkTeams = rest =<< find (select ["home.state" =: u"NY"] "team") {project = ["name" =: (1 :: Int), "league" =: (1 :: Int)]}
 >
 > print' title docs = liftIO $ putStrLn title >> mapM_ print docs
 -}
