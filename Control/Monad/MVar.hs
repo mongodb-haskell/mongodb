@@ -47,8 +47,8 @@ class (MonadIO m) => MonadMVar m where
 
 modifyMVar_ :: (MonadMVar m) => MVar a -> (a -> m a) -> m ()
 modifyMVar_ var act = modifyMVar var $ \a -> do
-	a <- act a
-	return (a, ())
+	a' <- act a
+	return (a', ())
 
 withMVar :: (MonadMVar m) => MVar a -> (a -> m b) -> m b
 withMVar var act = modifyMVar var $ \a -> do
@@ -73,7 +73,7 @@ instance (MonadMVar m) => MonadMVar (ReaderT r m) where
 
 instance (MonadMVar m) => MonadMVar (StateT s m) where
 	modifyMVar var f = StateT $ \s -> modifyMVar var $ \a -> do
-		((a, b), s) <- runStateT (f a) s
-		return (a, (b, s))
+		((a', b), s') <- runStateT (f a) s
+		return (a', (b, s'))
 	addMVarFinalizer var (StateT act) = StateT $ \s ->
 		addMVarFinalizer var (act s >> return ()) >> return ((), s)

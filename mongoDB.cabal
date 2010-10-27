@@ -6,9 +6,18 @@ license: OtherLicense
 license-file: LICENSE
 copyright: Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
 maintainer: Tony Hannan <tony@10gen.com>
-build-depends: array -any, base <5, binary -any, bson -any,
-               bytestring -any, containers -any, mtl -any, nano-md5 -any,
-               network -any, parsec -any
+build-depends:
+    array -any,
+    base <5,
+    binary -any,
+    bson -any,
+    bytestring -any,
+    containers -any,
+    mtl -any,
+    nano-md5 -any,
+    network -any,
+    parsec -any,
+    random -any
 stability: alpha
 homepage: http://github.com/TonyGen/mongoDB-haskell
 package-url:
@@ -22,10 +31,19 @@ data-files:
 data-dir: ""
 extra-source-files:
 extra-tmp-files:
-exposed-modules: Control.Pipeline Control.Monad.Context
-                 Control.Monad.Throw Database.MongoDB Database.MongoDB.Admin
-                 Database.MongoDB.Connection Database.MongoDB.Query
-                 Database.MongoDB.Internal.Protocol Database.MongoDB.Internal.Util
+exposed-modules:
+    Control.Monad.Context
+    Control.Monad.MVar
+    Control.Monad.Throw
+    Control.Monad.Util
+    Control.Pipeline
+    Database.MongoDB
+    Database.MongoDB.Admin
+    Database.MongoDB.Connection
+    Database.MongoDB.Internal.Protocol
+    Database.MongoDB.Internal.Util
+    Database.MongoDB.Query
+    Var.Pool
 exposed: True
 buildable: True
 build-tools:

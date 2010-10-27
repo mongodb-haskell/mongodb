@@ -4,7 +4,7 @@
 
 module Var.Pool where
 
-import Control.Applicative ((<$>), (<*>))
+import Control.Applicative ((<$>))
 import Control.Monad.MVar
 import Data.Array.IO
 import Data.Maybe (catMaybes)
@@ -52,8 +52,8 @@ resize :: Pool e r -> Int -> IO ()
 -- ^ resize max size of pool. When shrinking some resource will be dropped without closing since they may still be in use. They are expected to close themselves when garbage collected.
 resize Pool{resources} n = modifyMVar_ resources $ \array -> do
 	rs <- take n <$> getElems array
-	array <- newListArray (0, n-1) (rs ++ repeat Nothing)
-	return array
+	array' <- newListArray (0, n-1) (rs ++ repeat Nothing)
+	return array'
 
 killAll :: Pool e r -> IO ()
 -- ^ Kill all resources in pool so subsequent access creates new ones

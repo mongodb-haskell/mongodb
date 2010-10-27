@@ -22,7 +22,6 @@ module Database.MongoDB.Internal.Protocol (
 
 import Prelude as X
 import Control.Applicative ((<$>))
-import Control.Monad (unless, replicateM)
 import System.IO (Handle)
 import Data.ByteString.Lazy (ByteString)
 import qualified Control.Pipeline as P
@@ -39,7 +38,6 @@ import Data.Digest.OpenSSL.MD5 (md5sum)
 import Data.UString as U (pack, append, toByteString)
 import System.IO.Error as E (try)
 import Control.Monad.Error
-import Control.Monad.Trans (MonadIO(..))
 
 -- * Pipe
 

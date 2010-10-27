@@ -10,25 +10,23 @@ module Database.MongoDB.Connection (
 	-- * MasterOrSlaveOk
 	MasterOrSlaveOk(..),
 	-- * Connection
-	Server(..),
+	Server(..), replicaSet
 ) where
 
 import Database.MongoDB.Internal.Protocol
 import Data.Bson ((=:), at, UString)
 import Control.Pipeline (Resource(..))
 import Control.Applicative ((<$>))
-import Control.Arrow ((+++), left)
 import Control.Exception (assert)
-import System.IO.Error as E (try, mkIOError, userErrorType)
+import System.IO.Error as E (try)
 import Control.Monad.Error
-import Control.Monad.Throw (throw, onException)
 import Control.Monad.MVar
 import Network (HostName, PortID(..), connectTo)
-import Data.Bson (Document, look, typed)
+import Data.Bson (Document, look)
 import Text.ParserCombinators.Parsec as T (parse, many1, letter, digit, char, eof, spaces, try, (<|>))
 import Control.Monad.Identity
 import Control.Monad.Util (MonadIO', untilSuccess)
-import Database.MongoDB.Internal.Util (true1)  -- PortID instances
+import Database.MongoDB.Internal.Util ()  -- PortID instances
 import Var.Pool
 import System.Random (newStdGen, randomRs)
 import Data.List (delete, find, nub)
@@ -100,20 +98,20 @@ getReplicaInfo :: Pipe -> ErrorT IOError IO ReplicaInfo
 getReplicaInfo pipe = do
 	promise <- call pipe [] (adminCommand ["ismaster" =: (1 :: Int)])
 	info <- commandReply "ismaster" <$> promise
-	look "hosts" info
-	look "primary" info
+	_ <- look "hosts" info
+	_ <- look "primary" info
 	return info
 
 type ReplicaInfo = Document
 -- ^ Configuration info of a host in a replica set. Contains all the hosts in the replica set plus its role in that set (master, slave, or arbiter)
 
-isPrimary :: ReplicaInfo -> Bool
+{- isPrimary :: ReplicaInfo -> Bool
 -- ^ Is the replica described by this info a master/primary (not slave or arbiter)?
 isPrimary = true1 "ismaster"
 
 isSecondary :: ReplicaInfo -> Bool
 -- ^ Is the replica described by this info a slave/secondary (not master or arbiter)
-isSecondary = true1 "secondary"
+isSecondary = true1 "secondary" -}
 
 replicas :: ReplicaInfo -> [Host]
 -- ^ All replicas in set according to this replica configuration info.
@@ -136,10 +134,10 @@ data MasterOrSlaveOk =
 	| SlaveOk  -- ^ connect to a slave, or master if no slave available
 	deriving (Show, Eq)
 
-isMS :: MasterOrSlaveOk -> ReplicaInfo -> Bool
+{- isMS :: MasterOrSlaveOk -> ReplicaInfo -> Bool
 -- ^ Does the host (as described by its replica-info) match the master/slave type
 isMS Master i = isPrimary i
-isMS SlaveOk i = isSecondary i || isPrimary i
+isMS SlaveOk i = isSecondary i || isPrimary i -}
 
 -- * Connection
 
@@ -161,7 +159,7 @@ class Server t where
 instance Server Host where
 	data Connection Host = HostConnection {connHost :: Host, connPool :: Pool' Pipe}
 	-- ^ A pool of TCP connections ('Pipe's) to a server, handed out in round-robin style.
-	connect poolSize host = liftIO (connectHost poolSize host)
+	connect poolSize' host' = liftIO (connectHost poolSize' host')
 	-- ^ Create a Connection (pool of TCP connections) to server (host or replica set)
 	getPipe _ = getHostPipe
 	-- ^ Return a TCP connection (Pipe). If SlaveOk, connect to a slave if available. Round-robin if multiple slaves are available. Throw IOError if failed to connect.
@@ -169,8 +167,8 @@ instance Server Host where
 
 connectHost :: Int -> Host -> IO (Connection Host)
 -- ^ Create a pool of N 'Pipe's (TCP connections) to server. 'getHostPipe' will return one of those pipes, round-robin style.
-connectHost poolSize host = HostConnection host <$> newPool Factory{..} poolSize where
-	newResource = tcpConnect host
+connectHost poolSize' host' = HostConnection host' <$> newPool Factory{..} poolSize' where
+	newResource = tcpConnect host'
 	killResource = close
 	isExpired = isClosed
 
@@ -188,7 +186,7 @@ instance Server ReplicaSet where
 	data Connection ReplicaSet = ReplicaSetConnection {
 		repsetName :: Name,
 		currentMembers :: MVar [Connection Host] }  -- master at head after a refresh
-	connect poolSize repset = liftIO (connectSet poolSize repset)
+	connect poolSize' repset = liftIO (connectSet poolSize' repset)
 	getPipe = getSetPipe
 	killPipes ReplicaSetConnection{..} = withMVar currentMembers (mapM_ killPipes)
 
@@ -198,14 +196,14 @@ replicaSet ReplicaSetConnection{..} = ReplicaSet repsetName . map connHost <$> r
 
 connectSet :: Int -> ReplicaSet -> IO (Connection ReplicaSet)
 -- ^ Create a connection to each member of the replica set.
-connectSet poolSize repset = assert (not . null $ seedHosts repset) $ do
-	currentMembers <- newMVar =<< mapM (connect poolSize) (seedHosts repset)
+connectSet poolSize' repset = assert (not . null $ seedHosts repset) $ do
+	currentMembers <- newMVar =<< mapM (connect poolSize') (seedHosts repset)
 	return $ ReplicaSetConnection (setName repset) currentMembers
 
 getMembers :: Name -> [Connection Host] -> ErrorT IOError IO [Host]
 -- ^ Get members of replica set, master first. Query supplied connections until config found.
 -- TODO: Verify config for request replica set name and not some other replica set. ismaster config should include replica set name in result but currently does not.
-getMembers repsetName connections = hosts <$> untilSuccess (getReplicaInfo <=< getHostPipe) connections
+getMembers _repsetName connections = hosts <$> untilSuccess (getReplicaInfo <=< getHostPipe) connections
 
 refreshMembers :: Name -> [Connection Host] -> ErrorT IOError IO [Connection Host]
 -- ^ Update current members with master at head. Reuse unchanged members. Throw IOError if can't connect to any and fetch config. Dropped connections are not closed in case they still have users; they will be closed when garbage collected.
@@ -213,12 +211,12 @@ refreshMembers repsetName connections = do
 	n <- liftIO . poolSize . connPool $ head connections
 	mapM (connection n) =<< getMembers repsetName connections
  where
-	connection n host = maybe (connect n host) return $ find ((host ==) . connHost) connections
+	connection n host' = maybe (connect n host') return $ find ((host' ==) . connHost) connections
 
 getSetPipe :: MasterOrSlaveOk -> Connection ReplicaSet -> ErrorT IOError IO Pipe
 -- ^ Return a pipe to primary or a random secondary in replica set. Use primary for SlaveOk if and only if no secondaries. Note, refreshes members each time (makes ismaster call to primary).
-getSetPipe mos ReplicaSetConnection{..} = modifyMVar currentMembers $ \connections -> do
-	connections <- refreshMembers repsetName connections  -- master at head after refresh
+getSetPipe mos ReplicaSetConnection{..} = modifyMVar currentMembers $ \conns -> do
+	connections <- refreshMembers repsetName conns  -- master at head after refresh
 	pipe <- case mos of
 		Master -> getHostPipe (head connections)
 		SlaveOk -> do

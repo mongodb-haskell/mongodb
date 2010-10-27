@@ -29,7 +29,7 @@ loop act = act >>= maybe (return []) (\a -> (a :) <$> loop act)
 
 untilJust :: (Monad m) => (a -> m (Maybe b)) -> [a] -> m (Maybe b)
 -- ^ Apply action to elements one at a time until one returns Just. Return Nothing if all return Nothing.
-untilJust f [] = return Nothing
+untilJust _ [] = return Nothing
 untilJust f (a:as) = f a >>= maybe (untilJust f as) (return . Just)
 
 untilSuccess :: (MonadError e m, Error e) => (a -> m b) -> [a] -> m b
@@ -38,7 +38,7 @@ untilSuccess = untilSuccess' (strMsg "empty untilSuccess")
 
 untilSuccess' :: (MonadError e m) => e -> (a -> m b) -> [a] -> m b
 -- ^ Apply action to elements one at a time until one succeeds. Throw last error if all fail. Throw given error if list is empty
-untilSuccess' e f [] = throwError e
+untilSuccess' e _ [] = throwError e
 untilSuccess' _ f (x : xs) = catchError (f x) (\e -> untilSuccess' e f xs)
 
 mapError :: (Functor m) => (e' -> e) -> ErrorT e' m a -> ErrorT e m a

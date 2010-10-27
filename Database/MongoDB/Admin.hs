@@ -191,8 +191,9 @@ removeUser user = delete (select ["user" =: user] "system.users")
 
 -- ** Database
 
-admin = Database "admin"
+admin :: Database
 -- ^ \"admin\" database
+admin = Database "admin"
 
 cloneDatabase :: (Access m) => Database -> Host -> m Document
 -- ^ Copy database from given host to the server I am connected to. Fails and returns @"ok" = 0@ if we don't have permission to read from given server (use copyDatabase in this case).

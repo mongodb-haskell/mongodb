@@ -46,7 +46,6 @@ import Control.Monad.Context
 import Control.Monad.Reader
 import Control.Monad.Error
 import Control.Monad.Throw
-import System.IO.Error (try)
 import Control.Concurrent.MVar
 import Control.Pipeline (Resource(..))
 import qualified Database.MongoDB.Internal.Protocol as P
