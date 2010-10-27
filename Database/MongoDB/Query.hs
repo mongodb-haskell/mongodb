@@ -3,10 +3,10 @@
 {-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, RankNTypes, ImpredicativeTypes #-}
 
 module Database.MongoDB.Query (
-	-- * Connected
-	Connected, runConn, Conn, Failure(..),
+	-- * Access
+	access, Access, Action, runAction, Failure(..),
 	-- * Database
-	Database, allDatabases, DbConn, useDb, thisDatabase,
+	Database(..), allDatabases, DbAccess, use, thisDatabase,
 	-- ** Authentication
 	P.Username, P.Password, auth,
 	-- * Collection
@@ -16,7 +16,7 @@ module Database.MongoDB.Query (
 	Select(select),
 	-- * Write
 	-- ** WriteMode
-	WriteMode(..), writeMode,
+	WriteMode(..), safe, GetLastError, writeMode,
 	-- ** Insert
 	insert, insert_, insertMany, insertMany_,
 	-- ** Update
@@ -51,48 +51,57 @@ import Control.Concurrent.MVar
 import Control.Pipeline (Resource(..))
 import qualified Database.MongoDB.Internal.Protocol as P
 import Database.MongoDB.Internal.Protocol hiding (Query, QueryOption(..), send, call)
-import Database.MongoDB.Connection (MasterOrSlaveOk(..))
+import Database.MongoDB.Connection (MasterOrSlaveOk(..), Server(..))
 import Data.Bson
 import Data.Word
 import Data.Int
 import Data.Maybe (listToMaybe, catMaybes)
-import Data.UString as U (dropWhile, any, tail)
-import Database.MongoDB.Internal.Util (loop, (<.>), true1, MonadIO')  -- plus Applicative instances of ErrorT & ReaderT
+import Data.UString as U (dropWhile, any, tail, unpack)
+import Control.Monad.Util (MonadIO', loop)  -- plus Applicative instances of ErrorT & ReaderT
+import Database.MongoDB.Internal.Util ((<.>), true1)
 
-send :: (Context Connection m, Throw IOError m, MonadIO m) => [Notice] -> m ()
--- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
-send ns = throwLeft . liftIO . try . flip P.send ns =<< context
+mapErrorIO :: (Throw e m, MonadIO m) => (e' -> e) -> ErrorT e' IO a -> m a
+mapErrorIO f = throwLeft' f . liftIO . runErrorT
 
-call :: (Context Connection m, Throw IOError m, MonadIO m) => [Notice] -> Request -> m (forall n. (Throw IOError n, MonadIO n) => n Reply)
--- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw IOError if connection fails on send, and promise will throw IOError if connection fails on receive.
+send :: (Context Pipe m, Throw Failure m, MonadIO m) => [Notice] -> m ()
+-- ^ Send notices as a contiguous batch to server with no reply. Throw 'ConnectionFailure' if pipe fails.
+send ns = mapErrorIO ConnectionFailure . flip P.send ns =<< context
+
+call :: (Context Pipe m, Throw Failure m, MonadIO m) => [Notice] -> Request -> m (forall n. (Throw Failure n, MonadIO n) => n Reply)
+-- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
 call ns r = do
-	conn <- context
-	promise <- throwLeft . liftIO $ try (P.call conn ns r)
-	return (throwLeft . liftIO $ try promise)
+	pipe <- context
+	promise <- mapErrorIO ConnectionFailure (P.call pipe ns r)
+	return (mapErrorIO ConnectionFailure promise)
 
--- * Connected Monad
+-- * Mongo Monad
 
-newtype Connected m a = Connected (ErrorT Failure (ReaderT WriteMode (ReaderT MasterOrSlaveOk (ReaderT Connection m))) a)
-	deriving (Context Connection, Context MasterOrSlaveOk, Context WriteMode, Throw Failure, MonadIO, Monad, Applicative, Functor)
--- ^ Monad with access to a 'Connection', 'MasterOrSlaveOk', and 'WriteMode', and throws a 'Failure' on read/write failure and IOError on connection failure
+access :: (Server s, MonadIO m) => WriteMode -> MasterOrSlaveOk -> Connection s -> Action m a -> m (Either Failure a)
+-- ^ Run action with access to server or replica set via one of the 'Pipe's (TCP connections) in given 'Connection' pool
+access w mos conn act = do
+	ePipe <- liftIO . runErrorT $ getPipe mos conn
+	either (return . Left . ConnectionFailure) (runAction act w mos) ePipe
 
-deriving instance (Throw IOError m) => Throw IOError (Connected m)
+-- | A monad with access to a 'Pipe', 'MasterOrSlaveOk', and 'WriteMode', and throws 'Failure' on read, write, or pipe failure
+class (Context Pipe m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, MonadIO' m) => Access m
+instance (Context Pipe m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, MonadIO' m) => Access m
 
-instance MonadTrans Connected where
-	lift = Connected . lift . lift . lift . lift
+newtype Action m a = Action (ErrorT Failure (ReaderT WriteMode (ReaderT MasterOrSlaveOk (ReaderT Pipe m))) a)
+	deriving (Context Pipe, Context MasterOrSlaveOk, Context WriteMode, Throw Failure, MonadIO, Monad, Applicative, Functor)
+-- ^ Monad with access to a 'Pipe', 'MasterOrSlaveOk', and 'WriteMode', and throws a 'Failure' on read, write or pipe failure
 
-runConn :: Connected m a -> Connection -> m (Either Failure a)
--- ^ Run action with access to connection. It starts out assuming it is master (invoke 'slaveOk' inside it to change that) and that writes don't need to be check (invoke 'writeMode' to change that). Return Left Failure if error in execution. Throws IOError if connection fails during execution.
-runConn (Connected action) = runReaderT (runReaderT (runReaderT (runErrorT action) Unsafe) Master)
+instance MonadTrans Action where
+	lift = Action . lift . lift . lift . lift
 
--- | A monad with access to a 'Connection', 'MasterOrSlaveOk', and 'WriteMode', and throws 'Failure' on read/write failure and 'IOError' on connection failure
-class (Context Connection m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, Throw IOError m, MonadIO' m) => Conn m
-instance (Context Connection m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, Throw IOError m, MonadIO' m) => Conn m
+runAction :: Action m a -> WriteMode -> MasterOrSlaveOk -> Pipe -> m (Either Failure a)
+-- ^ Run action with access to pipe. It starts out assuming it is master (invoke 'slaveOk' inside it to change that) and that writes don't need to be check (invoke 'writeMode' to change that). Return Left Failure if error in execution. Throws IOError if pipe fails during execution.
+runAction (Action action) w mos = runReaderT (runReaderT (runReaderT (runErrorT action) w) mos)
 
 -- | Read or write exception like cursor expired or inserting a duplicate key.
 -- Note, unexpected data from the server is not a Failure, rather it is a programming error (you should call 'error' in this case) because the client and server are incompatible and requires a programming change.
 data Failure =
-	CursorNotFoundFailure CursorId  -- ^ Cursor expired because it wasn't accessed for over 10 minutes, or this cursor came from a different server that the one you are currently connected to (perhaps a fail over happen between servers in a replica set)
+	 ConnectionFailure IOError  -- ^ TCP connection ('Pipe') failed. Make work if you try again on the same Mongo 'Connection' which will create a new Pipe.
+	| CursorNotFoundFailure CursorId  -- ^ Cursor expired because it wasn't accessed for over 10 minutes, or this cursor came from a different server that the one you are currently connected to (perhaps a fail over happen between servers in a replica set)
 	| QueryFailure String  -- ^ Query failed for some reason as described in the string
 	| WriteFailure ErrorCode String  -- ^ Error observed by getLastError after a write, error description is in string
 	deriving (Show, Eq)
@@ -102,29 +111,31 @@ instance Error Failure where strMsg = error
 
 -- * Database
 
-type Database = UString
+newtype Database = Database {databaseName :: UString}  deriving (Eq, Ord)
 -- ^ Database name
 
--- | A 'Conn' monad with access to a 'Database'
-class (Context Database m, Conn m) => DbConn m
-instance (Context Database m, Conn m) => DbConn m
+instance Show Database where show (Database x) = unpack x
 
-allDatabases :: (Conn m) => m [Database]
+-- | As 'Access' monad with access to a particular 'Database'
+class (Context Database m, Access m) => DbAccess m
+instance (Context Database m, Access m) => DbAccess m
+
+allDatabases :: (Access m) => m [Database]
 -- ^ List all databases residing on server
-allDatabases = map (at "name") . at "databases" <$> useDb "admin" (runCommand1 "listDatabases")
+allDatabases = map (Database . at "name") . at "databases" <$> use (Database "admin") (runCommand1 "listDatabases")
 
-useDb :: Database -> ReaderT Database m a -> m a
+use :: Database -> ReaderT Database m a -> m a
 -- ^ Run Db action against given database
-useDb = flip runReaderT
+use = flip runReaderT
 
-thisDatabase :: (DbConn m) => m Database
+thisDatabase :: (DbAccess m) => m Database
 -- ^ Current database in use
 thisDatabase = context
 
 -- * Authentication
 
-auth :: (DbConn m) => Username -> Password -> m Bool
--- ^ Authenticate with the database (if server is running in secure mode). Return whether authentication was successful or not. Reauthentication is required for every new connection.
+auth :: (DbAccess m) => Username -> Password -> m Bool
+-- ^ Authenticate with the database (if server is running in secure mode). Return whether authentication was successful or not. Reauthentication is required for every new pipe.
 auth u p = do
 	n <- at "nonce" <$> runCommand ["getnonce" =: (1 :: Int)]
 	true1 "ok" <$> runCommand ["authenticate" =: (1 :: Int), "user" =: u, "nonce" =: n, "key" =: pwKey n u p]
@@ -134,7 +145,7 @@ auth u p = do
 type Collection = UString
 -- ^ Collection name (not prefixed with database)
 
-allCollections :: (DbConn m) => m [Collection]
+allCollections :: (DbAccess m) => m [Collection]
 -- ^ List all collections in this database
 allCollections = do
 	db <- thisDatabase
@@ -142,16 +153,12 @@ allCollections = do
 	return . filter (not . isSpecial db) . map dropDbPrefix $ map (at "name") docs
  where
  	dropDbPrefix = U.tail . U.dropWhile (/= '.')
- 	isSpecial db col = U.any (== '$') col && db <.> col /= "local.oplog.$main"
+ 	isSpecial (Database db) col = U.any (== '$') col && db <.> col /= "local.oplog.$main"
 
 -- * Selection
 
 data Selection = Select {selector :: Selector, coll :: Collection}  deriving (Show, Eq)
 -- ^ Selects documents in collection that match selector
-
-{-select :: Selector -> Collection -> Selection
--- ^ Synonym for 'Select'
-select = Select-}
 
 type Selector = Document
 -- ^ Filter for a query, analogous to the where clause in SQL. @[]@ matches all documents in collection. @[x =: a, y =: b]@ is analogous to @where x = a and y = b@ in SQL. See <http://www.mongodb.org/display/DOCS/Querying> for full selector syntax.
@@ -177,30 +184,37 @@ instance Select Query where
 -- | Default write-mode is 'Unsafe'
 data WriteMode =
 	  Unsafe  -- ^ Submit writes without receiving acknowledgments. Fast. Assumes writes succeed even though they may not.
-	| Safe  -- ^ Receive an acknowledgment after every write, and raise exception if one says the write failed.
+	| Safe GetLastError  -- ^ Receive an acknowledgment after every write, and raise exception if one says the write failed. This is acomplished by sending the getLastError command, with given 'GetLastError' parameters, after every write.
 	deriving (Show, Eq)
 
-writeMode :: (Conn m) => WriteMode -> m a -> m a
+type GetLastError = Document
+-- ^ Parameters for getLastError command. For example ["w" =: 2] tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See "http://www.mongodb.org/display/DOCS/Last+Error+Commands" for more options.
+
+safe :: WriteMode
+-- ^ Safe []
+safe = Safe []
+
+writeMode :: (Access m) => WriteMode -> m a -> m a
 -- ^ Run action with given 'WriteMode'
 writeMode = push . const
 
-write :: (DbConn m) => Notice -> m ()
+write :: (DbAccess m) => Notice -> m ()
 -- ^ Send write to server, and if write-mode is 'Safe' then include getLastError request and raise 'WriteFailure' if it reports an error.
 write notice = do
 	mode <- context
 	case mode of
 		Unsafe -> send [notice]
-		Safe -> do
-			me <- getLastError [notice]
+		Safe params -> do
+			me <- getLastError [notice] params
 			maybe (return ()) (throw . uncurry WriteFailure) me
 
 type ErrorCode = Int
 -- ^ Error code from getLastError
 
-getLastError :: (DbConn m) => [Notice] -> m (Maybe (ErrorCode, String))
+getLastError :: (DbAccess m) => [Notice] -> GetLastError -> m (Maybe (ErrorCode, String))
 -- ^ Send notices (writes) then fetch what the last error was, Nothing means no error
-getLastError writes = do
-	r <- runCommand' writes ["getlasterror" =: (1 :: Int)]
+getLastError writes params = do
+	r <- runCommand' writes $ ("getlasterror" =: (1 :: Int)) : params
 	return $ (at "code" r,) <$> lookup "err" r
 
 {-resetLastError :: (DbConn m) => m ()
@@ -209,23 +223,23 @@ resetLastError = runCommand1 "reseterror" >> return ()-}
 
 -- ** Insert
 
-insert :: (DbConn m) => Collection -> Document -> m Value
+insert :: (DbAccess m) => Collection -> Document -> m Value
 -- ^ Insert document into collection and return its \"_id\" value, which is created automatically if not supplied
 insert col doc = head <$> insertMany col [doc]
 
-insert_ :: (DbConn m) => Collection -> Document -> m ()
+insert_ :: (DbAccess m) => Collection -> Document -> m ()
 -- ^ Same as 'insert' except don't return _id
 insert_ col doc = insert col doc >> return ()
 
-insertMany :: (DbConn m) => Collection -> [Document] -> m [Value]
+insertMany :: (DbAccess m) => Collection -> [Document] -> m [Value]
 -- ^ Insert documents into collection and return their \"_id\" values, which are created automatically if not supplied
 insertMany col docs = do
-	db <- thisDatabase
+	Database db <- thisDatabase
 	docs' <- liftIO $ mapM assignId docs
 	write (Insert (db <.> col) docs')
 	mapM (look "_id") docs'
 
-insertMany_ :: (DbConn m) => Collection -> [Document] -> m ()
+insertMany_ :: (DbAccess m) => Collection -> [Document] -> m ()
 -- ^ Same as 'insertMany' except don't return _ids
 insertMany_ col docs = insertMany col docs >> return ()
 
@@ -237,54 +251,54 @@ assignId doc = if X.any (("_id" ==) . label) doc
 
 -- ** Update 
 
-save :: (DbConn m) => Collection -> Document -> m ()
+save :: (DbAccess m) => Collection -> Document -> m ()
 -- ^ Save document to collection, meaning insert it if its new (has no \"_id\" field) or update it if its not new (has \"_id\" field)
 save col doc = case look "_id" doc of
 	Nothing -> insert_ col doc
 	Just i -> repsert (Select ["_id" := i] col) doc
 
-replace :: (DbConn m) => Selection -> Document -> m ()
+replace :: (DbAccess m) => Selection -> Document -> m ()
 -- ^ Replace first document in selection with given document
 replace = update []
 
-repsert :: (DbConn m) => Selection -> Document -> m ()
+repsert :: (DbAccess m) => Selection -> Document -> m ()
 -- ^ Replace first document in selection with given document, or insert document if selection is empty
 repsert = update [Upsert]
 
 type Modifier = Document
 -- ^ Update operations on fields in a document. See <http://www.mongodb.org/display/DOCS/Updating#Updating-ModifierOperations>
 
-modify :: (DbConn m) => Selection -> Modifier -> m ()
+modify :: (DbAccess m) => Selection -> Modifier -> m ()
 -- ^ Update all documents in selection using given modifier
 modify = update [MultiUpdate]
 
-update :: (DbConn m) => [UpdateOption] -> Selection -> Document -> m ()
+update :: (DbAccess m) => [UpdateOption] -> Selection -> Document -> m ()
 -- ^ Update first document in selection using updater document, unless 'MultiUpdate' option is supplied then update all documents in selection. If 'Upsert' option is supplied then treat updater as document and insert it if selection is empty.
 update opts (Select sel col) up = do
-	db <- thisDatabase
+	Database db <- thisDatabase
 	write (Update (db <.> col) opts sel up)
 
 -- ** Delete
 
-delete :: (DbConn m) => Selection -> m ()
+delete :: (DbAccess m) => Selection -> m ()
 -- ^ Delete all documents in selection
 delete = delete' []
 
-deleteOne :: (DbConn m) => Selection -> m ()
+deleteOne :: (DbAccess m) => Selection -> m ()
 -- ^ Delete first document in selection
 deleteOne = delete' [SingleRemove]
 
-delete' :: (DbConn m) => [DeleteOption] -> Selection -> m ()
+delete' :: (DbAccess m) => [DeleteOption] -> Selection -> m ()
 -- ^ Delete all documents in selection unless 'SingleRemove' option is given then only delete first document in selection
 delete' opts (Select sel col) = do
-	db <- thisDatabase
+	Database db <- thisDatabase
 	write (Delete (db <.> col) opts sel)
 
 -- * Read
 
 -- ** MasterOrSlaveOk
 
-slaveOk :: (Conn m) => m a -> m a
+slaveOk :: (Access m) => m a -> m a
 -- ^ Ok to execute given action against slave, ie. eventually consistent reads
 slaveOk = push (const SlaveOk)
 
@@ -347,7 +361,7 @@ batchSizeRemainingLimit batchSize limit = if limit == 0
 
 queryRequest :: Bool -> MasterOrSlaveOk -> Query -> Database -> (Request, Limit)
 -- ^ Translate Query to Protocol.Query. If first arg is true then add special $explain attribute.
-queryRequest isExplain mos Query{..} db = (P.Query{..}, remainingLimit) where
+queryRequest isExplain mos Query{..} (Database db) = (P.Query{..}, remainingLimit) where
 	qOptions = msOption mos ++ map pOption options
 	qFullCollection = db <.> coll selection
 	qSkip = fromIntegral skip
@@ -360,79 +374,80 @@ queryRequest isExplain mos Query{..} db = (P.Query{..}, remainingLimit) where
 	special = catMaybes [mOrder, mSnapshot, mHint, mExplain]
 	qSelector = if null special then s else ("$query" =: s) : special where s = selector selection
 
-runQuery :: (DbConn m) => Bool -> [Notice] -> Query -> m CursorState'
+runQuery :: (DbAccess m) => Bool -> [Notice] -> Query -> m CursorState'
 -- ^ Send query request and return cursor state
 runQuery isExplain ns q = do
 	db <- thisDatabase
 	slaveOK <- context
 	call' ns (queryRequest isExplain slaveOK q db)
 
-find :: (DbConn m) => Query -> m Cursor
+find :: (DbAccess m) => Query -> m Cursor
 -- ^ Fetch documents satisfying query
 find q@Query{selection, batchSize} = do
 	db <- thisDatabase
 	cs' <- runQuery False [] q
 	newCursor db (coll selection) batchSize cs'
 
-findOne' :: (DbConn m) => [Notice] -> Query -> m (Maybe Document)
+findOne' :: (DbAccess m) => [Notice] -> Query -> m (Maybe Document)
 -- ^ Send notices and fetch first document satisfying query or Nothing if none satisfy it
 findOne' ns q = do
 	CS _ _ docs <- cursorState =<< runQuery False ns q {limit = 1}
 	return (listToMaybe docs)
 
-findOne :: (DbConn m) => Query -> m (Maybe Document)
+findOne :: (DbAccess m) => Query -> m (Maybe Document)
 -- ^ Fetch first document satisfying query or Nothing if none satisfy it
 findOne = findOne' []
 
-explain :: (DbConn m) => Query -> m Document
+explain :: (DbAccess m) => Query -> m Document
 -- ^ Return performance stats of query execution
 explain q = do  -- same as findOne but with explain set to true
 	CS _ _ docs <- cursorState =<< runQuery True [] q {limit = 1}
 	return $ if null docs then error ("no explain: " ++ show q) else head docs
 
-count :: (DbConn m) => Query -> m Int
+count :: (DbAccess m) => Query -> m Int
 -- ^ Fetch number of documents satisfying query (including effect of skip and/or limit if present)
 count Query{selection = Select sel col, skip, limit} = at "n" <$> runCommand
 	(["count" =: col, "query" =: sel, "skip" =: (fromIntegral skip :: Int32)]
 		++ ("limit" =? if limit == 0 then Nothing else Just (fromIntegral limit :: Int32)))
 
-distinct :: (DbConn m) => Label -> Selection -> m [Value]
+distinct :: (DbAccess m) => Label -> Selection -> m [Value]
 -- ^ Fetch distinct values of field in selected documents
 distinct k (Select sel col) = at "values" <$> runCommand ["distinct" =: col, "key" =: k, "query" =: sel]
 
 -- *** Cursor
 
 data Cursor = Cursor FullCollection BatchSize (MVar CursorState')
--- ^ Iterator over results of a query. Use 'next' to iterate or 'rest' to get all results. A cursor is closed when it is explicitly closed, all results have been read from it, garbage collected, or not used for over 10 minutes (unless 'NoCursorTimeout' option was specified in 'Query'). Reading from a closed cursor raises a 'CursorNotFoundFailure'. Note, a cursor is not closed when the connection is closed, so you can open another connection to the same server and continue using the cursor.
+-- ^ Iterator over results of a query. Use 'next' to iterate or 'rest' to get all results. A cursor is closed when it is explicitly closed, all results have been read from it, garbage collected, or not used for over 10 minutes (unless 'NoCursorTimeout' option was specified in 'Query'). Reading from a closed cursor raises a 'CursorNotFoundFailure'. Note, a cursor is not closed when the pipe is closed, so you can open another pipe to the same server and continue using the cursor.
 
-modifyCursorState' :: (Conn m) => Cursor -> (FullCollection -> BatchSize -> CursorState' -> Connected (ErrorT IOError IO) (CursorState', a)) -> m a
+modifyCursorState' :: (Access m) => Cursor -> (FullCollection -> BatchSize -> CursorState' -> Action IO (CursorState', a)) -> m a
 -- ^ Analogous to 'modifyMVar' but with Conn monad
 modifyCursorState' (Cursor fcol batch var) act = do
-	conn <- context
+	wr <- context
+	mos <- context
+	pipe <- context
 	e <- liftIO . modifyMVar var $ \cs' -> do
-		ee <- runErrorT $ runConn (act fcol batch cs') conn
-		return $ case ee of
-			Right (Right (cs'', a)) -> (cs'', Right a)
-			Right (Left failure) -> (cs', Left $ throw failure)
-			Left ioerror -> (cs', Left $ throw ioerror)
+		e' <- runAction (act fcol batch cs') wr mos pipe
+		return $ case e' of
+			Right (cs'', a) -> (cs'', Right a)
+			Left failure -> (cs', Left $ throw failure)
 	either id return e
 
-getCursorState :: (Conn m) => Cursor -> m CursorState
+getCursorState :: (Access m) => Cursor -> m CursorState
 -- ^ Extract current cursor status
 getCursorState (Cursor _ _ var) = cursorState =<< liftIO (readMVar var)
 
 data CursorState' =
-	  Delayed (forall n. (Throw Failure n, Throw IOError n, MonadIO n) => n CursorState)
+	  Delayed (forall n. (Throw Failure n, MonadIO n) => n CursorState)
 	| CursorState CursorState
 -- ^ A cursor state or a promised cursor state which may fail
 
-call' :: (Conn m) => [Notice] -> (Request, Limit) -> m CursorState'
+call' :: (Access m) => [Notice] -> (Request, Limit) -> m CursorState'
 -- ^ Send notices and request and return promised cursor state
 call' ns (req, remainingLimit) = do
 	promise <- call ns req
 	return $ Delayed (fromReply remainingLimit =<< promise)
 
-cursorState :: (Conn m) => CursorState' -> m CursorState
+cursorState :: (Access m) => CursorState' -> m CursorState
 -- ^ Convert promised cursor state to cursor state or failure
 cursorState (Delayed promise) = promise
 cursorState (CursorState cs) = return cs
@@ -452,20 +467,22 @@ fromReply limit Reply{..} = do
 		CursorNotFound -> throw (CursorNotFoundFailure rCursorId)
 		QueryError -> throw (QueryFailure $ at "$err" $ head rDocuments)
 
-newCursor :: (Conn m) => Database -> Collection -> BatchSize -> CursorState' -> m Cursor
+newCursor :: (Access m) => Database -> Collection -> BatchSize -> CursorState' -> m Cursor
 -- ^ Create new cursor. If you don't read all results then close it. Cursor will be closed automatically when all results are read from it or when eventually garbage collected.
-newCursor db col batch cs = do
-	conn <- context
+newCursor (Database db) col batch cs = do
+	wr <- context
+	mos <- context
+	pipe <- context
 	var <- liftIO (newMVar cs)
 	let cursor = Cursor (db <.> col) batch var
-	liftIO . addMVarFinalizer var $ runErrorT (runConn (close cursor) conn :: ErrorT IOError IO (Either Failure ())) >> return ()
+	liftIO . addMVarFinalizer var $ runAction (close cursor) wr mos pipe >> return ()
 	return cursor
 
-next :: (Conn m) => Cursor -> m (Maybe Document)
+next :: (Access m) => Cursor -> m (Maybe Document)
 -- ^ Return next document in query result, or Nothing if finished.
 next cursor = modifyCursorState' cursor nextState where
 	-- Pre-fetch next batch promise from server when last one in current batch is returned.
-	nextState :: FullCollection -> BatchSize -> CursorState' -> Connected (ErrorT IOError IO) (CursorState', Maybe Document)
+	nextState :: FullCollection -> BatchSize -> CursorState' -> Action IO (CursorState', Maybe Document)
 	nextState fcol batch cs' = do
 		CS limit cid docs <- cursorState cs'
 		case docs of
@@ -480,15 +497,15 @@ next cursor = modifyCursorState' cursor nextState where
 	nextBatch fcol batch limit cid = call' [] (GetMore fcol batchSize cid, remLimit)
 		where (batchSize, remLimit) = batchSizeRemainingLimit batch limit
 
-nextN :: (Conn m) => Int -> Cursor -> m [Document]
+nextN :: (Access m) => Int -> Cursor -> m [Document]
 -- ^ Return next N documents or less if end is reached
 nextN n c = catMaybes <$> replicateM n (next c)
 
-rest :: (Conn m) => Cursor -> m [Document]
+rest :: (Access m) => Cursor -> m [Document]
 -- ^ Return remaining documents in query result
 rest c = loop (next c)
 
-instance (Conn m) => Resource m Cursor where
+instance (Access m) => Resource m Cursor where
 	close cursor = modifyCursorState' cursor kill' where
  		kill' _ _ cs' = first CursorState <$> (kill =<< cursorState cs')
 		kill (CS _ cid _) = (CS 0 0 [],) <$> if cid == 0 then return () else send [KillCursors [cid]]
@@ -521,13 +538,13 @@ groupDocument Group{..} =
 	"initial" =: gInitial,
 	"cond" =: gCond ]
 
-group :: (DbConn m) => Group -> m [Document]
+group :: (DbAccess m) => Group -> m [Document]
 -- ^ Execute group query and return resulting aggregate value for each distinct key
 group g = at "retval" <$> runCommand ["group" =: groupDocument g]
 
 -- ** MapReduce
 
--- | Maps every document in collection to a list of (key, value) pairs, then for each unique key reduces all its associated values from all lists to a single result. There are additional parameters that may be set to tweak this basic operation.
+-- | Maps every document in collection to a list of (key, value) pairs, then for each unique key reduces all its associated values to a single result. There are additional parameters that may be set to tweak this basic operation.
 data MapReduce = MapReduce {
 	rColl :: Collection,
 	rMap :: MapFun,
@@ -536,7 +553,7 @@ data MapReduce = MapReduce {
 	rSort :: Order,  -- ^ Default is [] meaning no sort
 	rLimit :: Limit,  -- ^ Default is 0 meaning no limit
 	rOut :: Maybe Collection,  -- ^ Output to given permanent collection, otherwise output to a new temporary collection whose name is returned.
-	rKeepTemp :: Bool,  -- ^ If True, the temporary output collection is made permanent. If False, the temporary output collection persists for the life of the current connection only, however, other connections may read from it while the original one is still alive. Note, reading from a temporary collection after its original connection dies returns an empty result (not an error). The default for this attribute is False, unless 'rOut' is specified, then the collection permanent.
+	rKeepTemp :: Bool,  -- ^ If True, the temporary output collection is made permanent. If False, the temporary output collection persists for the life of the current pipe only, however, other pipes may read from it while the original one is still alive. Note, reading from a temporary collection after its original pipe dies returns an empty result (not an error). The default for this attribute is False, unless 'rOut' is specified, then the collection permanent.
 	rFinalize :: Maybe FinalizeFun,  -- ^ Function to apply to all the results when finished. Default is Nothing.
 	rScope :: Document,  -- ^ Variables (environment) that can be accessed from map/reduce/finalize. Default is [].
 	rVerbose :: Bool  -- ^ Provide statistics on job execution time. Default is False.
@@ -546,7 +563,7 @@ type MapFun = Javascript
 -- ^ @() -> void@. The map function references the variable @this@ to inspect the current object under consideration. The function must call @emit(key,value)@ at least once, but may be invoked any number of times, as may be appropriate.
 
 type ReduceFun = Javascript
--- ^ @(key, value_array) -> value@. The reduce function receives a key and an array of values and returns an aggregate result value. The MapReduce engine may invoke reduce functions iteratively; thus, these functions must be idempotent.  That is, the following must hold for your reduce function: @for all k, vals : reduce(k, [reduce(k,vals)]) == reduce(k,vals)@. If you need to perform an operation only once, use a finalize function. The output of emit (the 2nd param) and reduce should be the same format to make iterative reduce possible.
+-- ^ @(key, [value]) -> value@. The reduce function receives a key and an array of values and returns an aggregate result value. The MapReduce engine may invoke reduce functions iteratively; thus, these functions must be idempotent.  That is, the following must hold for your reduce function: @reduce(k, [reduce(k,vs)]) == reduce(k,vs)@. If you need to perform an operation only once, use a finalize function. The output of emit (the 2nd param) and reduce should be the same format to make iterative reduce possible.
 
 type FinalizeFun = Javascript
 -- ^ @(key, value) -> final_value@. A finalize function may be run after reduction.  Such a function is optional and is not necessary for many map/reduce cases.  The finalize function takes a key and a value, and returns a finalized value.
@@ -570,36 +587,36 @@ mapReduce :: Collection -> MapFun -> ReduceFun -> MapReduce
 -- ^ MapReduce on collection with given map and reduce functions. Remaining attributes are set to their defaults, which are stated in their comments.
 mapReduce col map' red = MapReduce col map' red [] [] 0 Nothing False Nothing [] False
 
-runMR :: (DbConn m) => MapReduce -> m Cursor
+runMR :: (DbAccess m) => MapReduce -> m Cursor
 -- ^ Run MapReduce and return cursor of results. Error if map/reduce fails (because of bad Javascript)
--- TODO: Delete temp result collection when cursor closes. Until then, it will be deleted by the server when connection closes.
+-- TODO: Delete temp result collection when cursor closes. Until then, it will be deleted by the server when pipe closes.
 runMR mr = find . query [] =<< (at "result" <$> runMR' mr)
 
-runMR' :: (DbConn m) => MapReduce -> m Document
+runMR' :: (DbAccess m) => MapReduce -> m Document
 -- ^ Run MapReduce and return a result document containing a "result" field holding the output Collection and additional statistic fields. Error if the map/reduce failed (because of bad Javascript).
 runMR' mr = do
 	doc <- runCommand (mrDocument mr)
-	return $ if true1 "ok" doc then doc else error $ at "errmsg" doc ++ " in:\n" ++ show mr
+	return $ if true1 "ok" doc then doc else error $ "mapReduce error:\n" ++ show doc ++ "\nin:\n" ++ show mr
 
 -- * Command
 
 type Command = Document
 -- ^ A command is a special query or action against the database. See <http://www.mongodb.org/display/DOCS/Commands> for details.
 
-runCommand' :: (DbConn m) => [Notice] -> Command -> m Document
+runCommand' :: (DbAccess m) => [Notice] -> Command -> m Document
 -- ^ Send notices then run command and return its result
 runCommand' ns c = maybe err id <$> findOne' ns (query c "$cmd") where
 	err = error $ "Nothing returned for command: " ++ show c
 
-runCommand :: (DbConn m) => Command -> m Document
+runCommand :: (DbAccess m) => Command -> m Document
 -- ^ Run command against the database and return its result
 runCommand = runCommand' []
 
-runCommand1 :: (DbConn m) => UString -> m Document
+runCommand1 :: (DbAccess m) => UString -> m Document
 -- ^ @runCommand1 foo = runCommand [foo =: 1]@
 runCommand1 c = runCommand [c =: (1 :: Int)]
 
-eval :: (DbConn m) => Javascript -> m Document
+eval :: (DbAccess m) => Javascript -> m Document
 -- ^ Run code on server
 eval code = at "retval" <$> runCommand ["$eval" =: code]
 

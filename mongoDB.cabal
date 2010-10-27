@@ -1,35 +1,51 @@
-Name:		mongoDB
-Version:	0.7.1
-License:	OtherLicense
-License-file:	LICENSE
-Maintainer:	Tony Hannan <tony@10gen.com>
-Author:		Scott Parish <srp@srparish.net> & Tony Hannan <tony@10gen.com>
-Copyright:	Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
-homepage:	http://github.com/TonyGen/mongoDB-haskell
-Category:	Database
-Synopsis:	A driver for MongoDB
-Description:	This module lets you connect to MongoDB, do inserts, queries, updates, etc.
-Stability:	alpha
-Build-Depends:
-		base < 5,
-		containers,
-		mtl,
-		binary,
-		bytestring,
-		network,
-		nano-md5,
-		parsec,
-		bson
-Build-Type:	Simple
-Exposed-modules: 
-		Control.Monad.Context,
-		Control.Monad.Throw,
-		Control.Pipeline,
-		Database.MongoDB.Internal.Util,
-		Database.MongoDB.Internal.Protocol,
-		Database.MongoDB.Connection,
-		Database.MongoDB.Query,
-		Database.MongoDB.Admin,
-		Database.MongoDB
-ghc-options:	-Wall -O2
-cabal-version:	>= 1.4
+name: mongoDB
+version: 0.8
+cabal-version: >=1.4
+build-type: Simple
+license: OtherLicense
+license-file: LICENSE
+copyright: Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
+maintainer: Tony Hannan <tony@10gen.com>
+build-depends: array -any, base <5, binary -any, bson -any,
+               bytestring -any, containers -any, mtl -any, nano-md5 -any,
+               network -any, parsec -any
+stability: alpha
+homepage: http://github.com/TonyGen/mongoDB-haskell
+package-url:
+bug-reports:
+synopsis: A driver for MongoDB
+description: This module lets you connect to MongoDB, do inserts, queries, updates, etc.
+category: Database
+author: Scott Parish <srp@srparish.net> & Tony Hannan <tony@10gen.com>
+tested-with:
+data-files:
+data-dir: ""
+extra-source-files:
+extra-tmp-files:
+exposed-modules: Control.Pipeline Control.Monad.Context
+                 Control.Monad.Throw Database.MongoDB Database.MongoDB.Admin
+                 Database.MongoDB.Connection Database.MongoDB.Query
+                 Database.MongoDB.Internal.Protocol Database.MongoDB.Internal.Util
+exposed: True
+buildable: True
+build-tools:
+cpp-options:
+cc-options:
+ld-options:
+pkgconfig-depends:
+frameworks:
+c-sources:
+extensions:
+extra-libraries:
+extra-lib-dirs:
+includes:
+install-includes:
+include-dirs:
+hs-source-dirs: .
+other-modules:
+ghc-prof-options:
+ghc-shared-options:
+ghc-options: -Wall -O2
+hugs-options:
+nhc98-options:
+jhc-options:

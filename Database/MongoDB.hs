@@ -1,5 +1,5 @@
 {- |
-Client interface to MongoDB server(s).
+Client interface to MongoDB database management system.
 
 Simple example below. Use with language extension /OvererloadedStrings/.
 
@@ -10,12 +10,11 @@ Simple example below. Use with language extension /OvererloadedStrings/.
 > import Control.Monad.Trans (liftIO)
 >
 > main = do
->    ee <- runNet $ do
->       conn <- connect (host "127.0.0.1")
->       runConn run conn
->    print ee
+>    conn <- connect 1 (host "127.0.0.1")
+>    e <- access safe Master conn run
+>    print e
 >
-> run = useDb "baseball" $ do
+> run = use (Database "baseball") $ do
 >    clearTeams
 >    insertTeams
 >    print' "All Teams" =<< allTeams
@@ -30,13 +29,13 @@ Simple example below. Use with language extension /OvererloadedStrings/.
 >    ["name" =: u"Phillies", "home" =: ["city" =: u"Philadelphia", "state" =: u"PA"], "league" =: u"National"],
 >    ["name" =: u"Red Sox", "home" =: ["city" =: u"Boston", "state" =: u"MA"], "league" =: u"American"] ]
 >
-> allTeams = rest =<< find (select [] "team") {sort = ["city" =: (1 :: Int)]}
+> allTeams = rest =<< find (select [] "team") {sort = ["home.city" =: (1 :: Int)]}
 >
 > nationalLeagueTeams = rest =<< find (select ["league" =: u"National"] "team")
 >
 > newYorkTeams = rest =<< find (select ["home.state" =: u"NY"] "team") {project = ["name" =: (1 :: Int), "league" =: (1 :: Int)]}
 >
-> print' title docs = liftIO $ putStrLn title >> mapM_ print docs
+> print' title docs = liftIO $ putStrLn title >> mapM_ (print . exclude ["_id"]) docs
 -}
 
 module Database.MongoDB (

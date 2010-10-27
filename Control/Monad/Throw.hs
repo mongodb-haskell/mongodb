@@ -1,6 +1,6 @@
 {- | This is just like "Control.Monad.Error.Class" except you can throw/catch the error of any ErrorT in the monad stack instead of just the top one as long as the error types are different. If two or more ErrorTs in the stack have the same error type you get the error of the top one. -}
 
-{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, OverlappingInstances #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, OverlappingInstances, UndecidableInstances #-}
 
 module Control.Monad.Throw where
 
@@ -17,7 +17,15 @@ class (Monad m) => Throw e m where
 
 throwLeft :: (Throw e m) => m (Either e a) -> m a
 -- ^ Execute action and throw exception if result is Left, otherwise return the Right result
-throwLeft = (either throw return =<<)
+throwLeft = throwLeft' id
+
+throwLeft' :: (Throw e m) => (x -> e) -> m (Either x a) -> m a
+-- ^ Execute action and throw transformed exception if result is Left, otherwise return Right result
+throwLeft' f = (either (throw . f) return =<<)
+
+onException :: (Throw e m) => m a -> (e -> m b) -> m a
+-- ^ If first action throws an exception then run second action then re-throw
+onException action releaser = catch action $ \e -> releaser e >> throw e
 
 instance (Error e) => Throw e (Either e) where
 	throw = throwError

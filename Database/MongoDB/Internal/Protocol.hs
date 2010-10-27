@@ -1,12 +1,12 @@
-{-| Low-level messaging between this client and the MongoDB server. See Mongo Wire Protocol (<http://www.mongodb.org/display/DOCS/Mongo+Wire+Protocol>).
+{-| Low-level messaging between this client and the MongoDB server, see Mongo Wire Protocol (<http://www.mongodb.org/display/DOCS/Mongo+Wire+Protocol>).
 
 This module is not intended for direct use. Use the high-level interface at "Database.MongoDB.Query" and "Database.MongoDB.Connection" instead. -}
 
-{-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings, FlexibleContexts #-}
 
 module Database.MongoDB.Internal.Protocol (
-	-- * Connection
-	Connection, mkConnection,
+	-- * Pipe
+	Pipe, mkPipe,
 	send, call,
 	-- * Message
 	FullCollection,
@@ -37,30 +37,33 @@ import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Digest.OpenSSL.MD5 (md5sum)
 import Data.UString as U (pack, append, toByteString)
+import System.IO.Error as E (try)
+import Control.Monad.Error
+import Control.Monad.Trans (MonadIO(..))
 
--- * Connection
+-- * Pipe
 
-type Connection = P.Pipe Handle ByteString
+type Pipe = P.Pipeline Handle ByteString
 -- ^ Thread-safe TCP connection to server with pipelined requests
 
-mkConnection :: Handle -> IO Connection
+mkPipe :: Handle -> IO Pipe
 -- ^ New thread-safe pipelined connection over handle
-mkConnection = P.newPipe encodeSize decodeSize where
+mkPipe = P.newPipeline encodeSize decodeSize where
 	encodeSize = runPut . putInt32 . toEnum . (+ 4)
 	decodeSize = subtract 4 . fromEnum . runGet getInt32
 
-send :: Connection -> [Notice] -> IO ()
--- ^ Send notices as a contiguous batch to server with no reply. Raise IOError if connection fails.
-send conn notices = P.send conn =<< mapM noticeBytes notices
+send :: Pipe -> [Notice] -> ErrorT IOError IO ()
+-- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
+send conn notices = ErrorT . E.try $ P.send conn =<< mapM noticeBytes notices
 
-call :: Connection -> [Notice] -> Request -> IO (IO Reply)
--- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call and resulting promise will raise IOError if connection fails.
-call conn notices request = do
+call :: Pipe -> [Notice] -> Request -> ErrorT IOError IO (ErrorT IOError IO Reply)
+-- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call and resulting promise will throw IOError if connection fails.
+call conn notices request = ErrorT . E.try $ do
 	nMessages <- mapM noticeBytes notices
 	requestId <- genRequestId
 	let rMessage = runPut (putRequest request requestId)
 	promise <- P.call conn (nMessages ++ [rMessage])
-	return (bytesReply requestId <$> promise)
+	return (ErrorT . E.try $ bytesReply requestId <$> promise)
 
 noticeBytes :: Notice -> IO ByteString
 noticeBytes notice = runPut . putNotice notice <$> genRequestId

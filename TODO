@@ -1,89 +1,53 @@
 TODO
 ====
 
-BSON
+Bson
 ----
 + implement deprecated types (were left out)
-+ on insert/update: reject keys that start with "$" or "."
-+ data support for common mongo "$symbols"
 + convert from/to json
-+ tie in with native regex like python does?
-  - on outgoing uncompile?
-  - on incoming automatically compile
-+ more time convertibles
-+ map operations for BsonDoc (or should it be applicative?)
++ tie regex type to type in regex library
++ Read instance for Documents that can read its Show representation
 
 MongoDB
 -------
-+ support full level 0
-  - operations on database objects
-    * add_son_manipulators?
-    * dereference (dbref)
-  - database admin
-    * getProfilingInfo
-  - misc operations
-    * getCollectionOptions
-  - cursor object
-    * hasMore
-
-- all commands listed on http://127.0.0.1:28017/_commands. (mongod --rest)
-- reIndex (http://www.mongodb.org/display/DOCS/Indexes#Indexes-ReIndex)
-- safe write to two or more replicas
-- Query attribute: timeout
-- CreateIndex attributes: background, min, max
-- CreateIndex Order [Asc, Dec, Geo2d]
-- FindAndModify
-- getIndexInfo
-- logout
-- collectionsInfo
-- databasesInfo
-- getLastError options
-- Update If Current (http://www.mongodb.org/display/DOCS/Atomic+Operations)
-- block write until written on N replicas
-- lazyRest on cursor, although lazy I/O) is problematic and we may not want to support it.
-- Upon client exit, send killCursors for all open cursors, otherwise server will keep them open for 10 minutes and keep NoCursorTimeout cursors open for hours.
--- Upon cursor finalize (garbage collect) send killCursor even if you have to create a new connection, because server keeps cursors open for 10 minutes (or more).
--- Query option Exhaust
-
-  optional:
-  - automatic reconnection
-  - buffer pooling
-  - connection pooling. Unsafe to shrink pool and close connections because map/reduce temp tables that were created on the connection will get deleted. Note, other connections can access a map/reduce temp table as long as the original connection is still alive. Also, other connections can access cursors created on other connections, even if those die. Cursors will be deleted on server only if idle for more than 10 minutes. Accessing a deleted cursor returns an error.
-+ auto-destoy connection (how?/when?). Although, GHC will automatically close connection (Handle) when garbage collected.
-+ don't read into cursor until needed, but have cursor send getMore before
-  it is actually out of docs (so network is finished by the time we're ready
-  to consume more)
-
-Misc
-----
-+ learn more about haskelldb, anything we can learn from there
-+ go through pymongo api and figure out what parts to adopt (also look
-  at other languages?)
-+ kill prefix on data types "eg QO_*"?
-+ javascript
++ When one connection in a pool fails, close all other since they will likely fail too
++ on insert/update: reject keys that start with "$" or "."
++ dereference dbref
++ functions for every command, eg.
+	- findAndModify
+	- reIndex (http://www.mongodb.org/display/DOCS/Indexes#Indexes-ReIndex)
+	- createIndex attributes: background, min, max
+	- createIndex Order [Asc, Dec, Geo2d]
+	- getIndexInfo
+	- logout
+	- collectionsInfo
+	- databasesInfo
+	- getProfileInfo
++ Query attribute: timeout
++ Update If Current (http://www.mongodb.org/display/DOCS/Atomic+Operations)
++ Upon client exit, send killCursors for all open cursors, otherwise server will keep them open for 10 minutes and keep NoCursorTimeout cursors open for hours.
++ Upon cursor finalize (garbage collect) send killCursor even if you have to create a new connection, because server keeps cursors open for 10 minutes (or more).
++ Query option Exhaust
++ Reconnect on replica set primary stepdown, so no exception raised to user
++ Reconnect on query ioerror re-query, so no exception raised to user. Can't be done for writes because it is not safe to re-execute a write.
 + tailable cursor support
   - only close cursor when cursorID is 0
   - have to create loop that sleeps and retries
   - lazy list support
++ GridFS
 
-Tests?
-Documentation
-  - ref
+Tests - none currently
 
-GridFS
-
-deep "lookup" function (other deep Map functions?)
-Read instance for Documents that can read its Show representation
-make sure NULLs aren't in created table names
-
-update tutorial to match new python one
-
+Misc
+----
++ javascript DSL
++ update tutorial to match new python one
 + custom types (see python examples)
-+ make BSON an instance of Binary (eg get/put)
 
 Questions:
 - In Mongo shell, db.foo.totalSize fetches storageSize of each index but does not use it
 
 Notes:
 - Remember that in the new version of MongoDB (>= 1.6), "ok" field can be a number (0 or 1) or boolean (False or True). Use 'true1' function defined in Database.MongoDB.Util
-- A cursor will die on the server if not accessed (by any connection) within past 10 minutes (unless NoCursorTimeout option set). Accessing a dead (or non-existent) cursor raises a ServerFailure exception.
+- A cursor will die on the server if not accessed (by any connection) within past 10 minutes (unless NoCursorTimeout option set). Accessing a dead (or non-existent) cursor raises a CursorNotFoundFailure.
+- Unsafe to shrink pool and close connections because map/reduce temp tables that were created on the connection will get deleted. Note, other connections can access a map/reduce temp table as long as the original connection is still alive. Also, other connections can access cursors created on other connections, even if those die. Cursors will be deleted on server only if idle for more than 10 minutes. Accessing a deleted cursor returns an error.

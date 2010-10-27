@@ -19,8 +19,8 @@ map/reduce queries on:
     Prelude> :set prompt "> "
     > :set -XOverloadedStrings
     > import Database.MongoDB
-    > Right conn <- runNet $ connect $ host "localhost"
-    > let run act = runNet $ runConn (useDb "test" act) con
+    > conn <- connect 1 $ host "localhost"
+    > let run act = runConn safe Master conn $ use (Database "test") act
     > :{
     run $ insertMany "mr1" [
           ["x" =: 1, "tags" =: ["dog", "cat"]],

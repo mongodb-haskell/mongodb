@@ -1,10 +1,12 @@
-{- | Pipelining is sending multiple requests over a socket and receiving the responses later, in the same order. This is faster than sending one request, waiting for the response, then sending the next request, and so on. This implementation returns a /promise (future)/ response for each request that when invoked waits for the response if not already arrived. Multiple threads can send on the same pipe (and get promises back); the pipe will pipeline each thread's request right away without waiting. -}
+{- | Pipelining is sending multiple requests over a socket and receiving the responses later, in the same order. This is faster than sending one request, waiting for the response, then sending the next request, and so on. This implementation returns a /promise (future)/ response for each request that when invoked waits for the response if not already arrived. Multiple threads can send on the same pipeline (and get promises back); it will pipeline each thread's request right away without waiting.
+
+A pipeline closes itself when a read or write causes an error, so you can detect a broken pipeline by checking isClosed. -}
 
 {-# LANGUAGE DoRec, RecordWildCards, MultiParamTypeClasses, FlexibleContexts #-}
 
 module Control.Pipeline (
-	-- * Pipe
-	Pipe, newPipe, send, call,
+	-- * Pipeline
+	Pipeline, newPipeline, send, call,
 	-- * Util
 	Size,
 	Length(..),
@@ -16,7 +18,7 @@ module Control.Pipeline (
 import Prelude hiding (length)
 import Control.Applicative ((<$>))
 import Control.Monad (forever)
-import Control.Exception (assert)
+import Control.Exception (assert, onException)
 import System.IO.Error (try, mkIOError, eofErrorType)
 import System.IO (Handle, hFlush, hClose, hIsClosed)
 import qualified Data.ByteString as S
@@ -85,10 +87,10 @@ instance Stream Handle L.ByteString where
 	put = L.hPut
 	get = L.hGet
 
--- * Pipe
+-- * Pipeline
 
 -- | Thread-safe and pipelined socket
-data Pipe handle bytes = Pipe {
+data Pipeline handle bytes = Pipeline {
 	encodeSize :: Size -> bytes,
 	decodeSize :: bytes -> Size,
 	vHandle :: MVar handle,  -- ^ Mutex on handle, so only one thread at a time can write to it
@@ -96,33 +98,33 @@ data Pipe handle bytes = Pipe {
 	listenThread :: ThreadId
 	}
 
--- | Create new Pipe with given encodeInt, decodeInt, and handle. You should 'close' pipe when finished, which will also close handle. If pipe is not closed but eventually garbage collected, it will be closed along with handle.
-newPipe :: (Stream h b, Resource IO h) =>
+-- | Create new Pipeline with given encodeInt, decodeInt, and handle. You should 'close' pipeline when finished, which will also close handle. If pipeline is not closed but eventually garbage collected, it will be closed along with handle.
+newPipeline :: (Stream h b, Resource IO h) =>
 	(Size -> b)  -- ^ Convert Size to bytes of fixed length. Every Int must translate to same number of bytes.
 	-> (b -> Size)  -- ^ Convert bytes of fixed length to Size. Must be exact inverse of encodeSize.
-	-> h  -- ^ Underlying socket (handle) this pipe will read/write from
-	-> IO (Pipe h b)
-newPipe encodeSize decodeSize handle = do
+	-> h  -- ^ Underlying socket (handle) this pipeline will read/write from
+	-> IO (Pipeline h b)
+newPipeline encodeSize decodeSize handle = do
 	vHandle <- newMVar handle
 	responseQueue <- newChan
 	rec
-		let pipe = Pipe{..}
+		let pipe = Pipeline{..}
 		listenThread <- forkIO (listen pipe)
 	addMVarFinalizer vHandle $ do
 		killThread listenThread
 		close handle
 	return pipe
 
-instance (Resource IO h) => Resource IO (Pipe h b) where
+instance (Resource IO h) => Resource IO (Pipeline h b) where
 	-- | Close pipe and underlying socket (handle)
-	close Pipe{..} = do
+	close Pipeline{..} = do
 		killThread listenThread
 		close =<< readMVar vHandle
-	isClosed Pipe{..} = isClosed =<< readMVar vHandle
+	isClosed Pipeline{..} = isClosed =<< readMVar vHandle
 
-listen :: (Stream h b) => Pipe h b -> IO ()
+listen :: (Stream h b, Resource IO h) => Pipeline h b -> IO ()
 -- ^ Listen for responses and supply them to waiting threads in order
-listen Pipe{..} = do
+listen Pipeline{..} = do
 	let n = length (encodeSize 0)
 	h <- readMVar vHandle
 	forever $ do
@@ -131,23 +133,30 @@ listen Pipe{..} = do
 			getN h len
 		var <- readChan responseQueue
 		putMVar var e
+		case e of
+			Left err -> close h >> fail (show err)  -- close and stop looping
+			Right _ -> return ()
 
-send :: (Stream h b) => Pipe h b -> [b] -> IO ()
+send :: (Stream h b, Resource IO h) => Pipeline h b -> [b] -> IO ()
 -- ^ Send messages all together to destination (no messages will be interleaved between them). None of the messages can induce a response, i.e. the destination must not reply to any of these messages (otherwise future 'call's will get these responses instead of their own).
 -- Each message is preceeded by its length when written to socket.
-send Pipe{..} messages = withMVar vHandle $ \h -> do
-	mapM_ (write encodeSize h) messages
-	flush h
+-- Raises IOError and closes pipeline if send fails
+send Pipeline{..} messages = withMVar vHandle (writeAll listenThread encodeSize messages)
 
-call :: (Stream h b) => Pipe h b -> [b] -> IO (IO b)
+call :: (Stream h b, Resource IO h) => Pipeline h b -> [b] -> IO (IO b)
 -- ^ Send messages all together to destination (no messages will be interleaved between them), and return /promise/ of response from one message only. One and only one message in the list must induce a response, i.e. the destination must reply to exactly one message only (otherwise promises will have the wrong responses in them).
 -- Each message is preceeded by its length when written to socket. Likewise, the response must be preceeded by its length.
-call Pipe{..} messages = withMVar vHandle $ \h -> do
-	mapM_ (write encodeSize h) messages
-	flush h
+-- Raises IOError and closes pipeline if send fails, likewise for reply.
+call Pipeline{..} messages = withMVar vHandle $ \h -> do
+	writeAll listenThread encodeSize messages h
 	var <- newEmptyMVar
 	writeChan responseQueue var
 	return (either ioError return =<< readMVar var)  -- return promise
 
-write :: (Stream h b, Monoid b, Length b) => (Size -> b) -> h -> b -> IO ()
-write encodeSize h bytes = put h (mappend lenBytes bytes) where lenBytes = encodeSize (length bytes)
+writeAll :: (Stream h b, Monoid b, Length b, Resource IO h) => ThreadId -> (Size -> b) -> [b] -> h -> IO ()
+-- ^ Write messages to stream. On error, close pipeline and raise IOError.
+writeAll listenThread encodeSize messages h = onException
+	(mapM_ write messages >> flush h)
+	(killThread listenThread >> close h)
+  where
+	write bytes = put h (mappend lenBytes bytes) where lenBytes = encodeSize (length bytes)

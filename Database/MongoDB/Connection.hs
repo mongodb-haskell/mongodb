@@ -1,41 +1,39 @@
-{- | A replica set is a set of servers that mirror each other (a non-replicated server can act like a replica set of one). One server in a replica set is the master and the rest are slaves. When the master goes down, one of the slaves becomes master. The ReplicaSet object in this client maintains a list of servers that it currently knows are in the set. It refreshes this list every time it establishes a new connection with one of the servers in the set. Each server in the set knows who the other member in the set are, and who is master. The user asks the ReplicaSet object for a new master or slave connection. When a connection fails, the user must ask the ReplicaSet for a new connection (which most likely will connect to another server since the previous one failed). When connecting to a new server you loose all session state that was stored with the old server, which includes open cursors and temporary map-reduce output collections. Attempting to read from a lost cursor on a new server will raise a ServerFailure exception. Attempting to read a lost map-reduce temp output on a new server will return an empty set (not an error, like it maybe should). -}
+{- | A Mongo connection is a pool of TCP connections to a single server or a replica set of servers. -}
 
-{-# LANGUAGE OverloadedStrings, ScopedTypeVariables, RecordWildCards, MultiParamTypeClasses, FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings, ScopedTypeVariables, RecordWildCards, MultiParamTypeClasses, FlexibleContexts, TypeFamilies, DoRec, RankNTypes #-}
 
 module Database.MongoDB.Connection (
-	runNet,
 	-- * Host
 	Host(..), PortID(..), host, showHostPort, readHostPort, readHostPortM,
 	-- * ReplicaSet
-	ReplicaSet, replicaSet, replicas,
-	newConnection,
+	ReplicaSet(..),
 	-- * MasterOrSlaveOk
 	MasterOrSlaveOk(..),
 	-- * Connection
-	Connection, connect,
-	-- * Resource
-	Resource(..)
+	Server(..),
 ) where
 
 import Database.MongoDB.Internal.Protocol
-import Data.Bson ((=:), at)
+import Data.Bson ((=:), at, UString)
 import Control.Pipeline (Resource(..))
 import Control.Applicative ((<$>))
 import Control.Arrow ((+++), left)
 import Control.Exception (assert)
-import System.IO.Error as E (try)
+import System.IO.Error as E (try, mkIOError, userErrorType)
 import Control.Monad.Error
-import Control.Monad.Throw
-import Data.IORef
+import Control.Monad.Throw (throw, onException)
+import Control.Monad.MVar
 import Network (HostName, PortID(..), connectTo)
 import Data.Bson (Document, look, typed)
 import Text.ParserCombinators.Parsec as T (parse, many1, letter, digit, char, eof, spaces, try, (<|>))
 import Control.Monad.Identity
-import Database.MongoDB.Internal.Util (true1, MonadIO')  -- PortID instances
+import Control.Monad.Util (MonadIO', untilSuccess)
+import Database.MongoDB.Internal.Util (true1)  -- PortID instances
+import Var.Pool
+import System.Random (newStdGen, randomRs)
+import Data.List (delete, find, nub)
 
-runNet :: ErrorT IOError m a -> m (Either IOError a)
--- ^ Execute action that raises IOError only on network problem. Other IOErrors like file access errors are not caught by this.
-runNet = runErrorT
+type Name = UString
 
 adminCommand :: Document -> Request
 -- ^ Convert command to request
@@ -88,46 +86,48 @@ readHostPort :: String -> Host
 -- ^ Read string \"hostname:port\" as @Host hostname port@ or \"hostname\" as @host hostname@ (default port). Error if string does not match either syntax.
 readHostPort = runIdentity . readHostPortM
 
--- ** Replica Set
+-- * Replica Set
 
-newtype ReplicaSet = ReplicaSet (IORef [Host])
--- ^ Reference to a replica set of hosts. Ok if really not a replica set and just a stand-alone server, in which case it acts like a replica set of one.
+data ReplicaSet = ReplicaSet {setName :: Name, seedHosts :: [Host]}  deriving (Show)
+-- ^ Replica set of hosts identified by set name. At least one of the seed hosts must be an active member of the set. However, this list is not used to identify the set, just the set name.
 
-replicaSet :: [Host] -> IO ReplicaSet
--- ^ Create a reference to a replica set with given hosts as the initial seed list (a subset of the hosts in the replica set)
-replicaSet s = assert (not $ null s) (ReplicaSet <$> newIORef s)
+instance Eq ReplicaSet where ReplicaSet x _ == ReplicaSet y _ = x == y
 
-replicas :: ReplicaSet -> IO [Host]
--- ^ Return current list of known hosts in replica set. This list is updated on every 'newConnection'.
-replicas (ReplicaSet ref) = readIORef ref
+-- ** Replica Info
 
--- * Replica Info
+getReplicaInfo :: Pipe -> ErrorT IOError IO ReplicaInfo
+-- ^ Get replica info of the connected host. Throw IOError if connection fails or host is not part of a replica set (no /hosts/ and /primary/ field).
+getReplicaInfo pipe = do
+	promise <- call pipe [] (adminCommand ["ismaster" =: (1 :: Int)])
+	info <- commandReply "ismaster" <$> promise
+	look "hosts" info
+	look "primary" info
+	return info
 
-data ReplicaInfo = ReplicaInfo Host Document  deriving (Show, Eq)
+type ReplicaInfo = Document
 -- ^ Configuration info of a host in a replica set. Contains all the hosts in the replica set plus its role in that set (master, slave, or arbiter)
 
-isMaster :: ReplicaInfo -> Bool
+isPrimary :: ReplicaInfo -> Bool
 -- ^ Is the replica described by this info a master/primary (not slave or arbiter)?
-isMaster (ReplicaInfo _ i) = true1 "ismaster" i
+isPrimary = true1 "ismaster"
 
-isSlave :: ReplicaInfo -> Bool
+isSecondary :: ReplicaInfo -> Bool
 -- ^ Is the replica described by this info a slave/secondary (not master or arbiter)
-isSlave = not . isMaster  -- TODO: distinguish between slave and arbiter
+isSecondary = true1 "secondary"
 
-allReplicas :: ReplicaInfo -> [Host]
+replicas :: ReplicaInfo -> [Host]
 -- ^ All replicas in set according to this replica configuration info.
--- If host is stand-alone then it won't have \"hosts\" in its configuration, in which case we return the host by itself.
-allReplicas (ReplicaInfo h i) = maybe [h] (map readHostPort . typed) (look "hosts" i)
+replicas = map readHostPort . at "hosts"
 
-sortedReplicas :: ReplicaInfo -> IO [Host]
--- ^ All replicas in set sorted by distance from this client. TODO
-sortedReplicas = return . allReplicas
+primary :: ReplicaInfo -> Host
+-- ^ Read primary from configuration info
+primary = readHostPort . at "primary"
 
-getReplicaInfo :: (Throw IOError m, MonadIO' m) => Host -> Connection -> m ReplicaInfo
--- ^ Get replica info of the connected host. Throw IOError if connection fails.
-getReplicaInfo host' conn = do
-	promise <- throwLeft . liftIO . E.try $ call conn [] (adminCommand ["ismaster" =: (1 :: Int)])
-	fmap (ReplicaInfo host' . commandReply "ismaster") . throwLeft . liftIO $ E.try promise
+hosts :: ReplicaInfo -> [Host]
+-- ^ replicas with primary at head
+hosts info = master : delete master members  where
+	members = replicas info
+	master = primary info
 
 -- * MasterOrSlaveOk
 
@@ -138,49 +138,94 @@ data MasterOrSlaveOk =
 
 isMS :: MasterOrSlaveOk -> ReplicaInfo -> Bool
 -- ^ Does the host (as described by its replica-info) match the master/slave type
-isMS Master i = isMaster i
-isMS SlaveOk i = isSlave i || isMaster i
+isMS Master i = isPrimary i
+isMS SlaveOk i = isSecondary i || isPrimary i
 
 -- * Connection
 
-newConnection :: (Throw IOError m, MonadIO' m) => MasterOrSlaveOk -> ReplicaSet -> m Connection
--- ^ Create a connection to a master or slave in the replica set. Throw IOError if failed to connect to any host in replica set that is the right master/slave type. 'close' connection when you are done using it even if a failure is raised. Garbage collected connections will be closed automatically (but don't rely on this when creating many connections).
--- TODO: prefer slave over master when SlaveOk and both are available.
-newConnection mos (ReplicaSet vHosts) = throwLeft . liftIO $ left (userError . show) <$> do
-	hosts <- readIORef vHosts
-	e <- connectFirst mos hosts
-	case e of
-		Right (conn, info) -> do
-			writeIORef vHosts =<< sortedReplicas info
-			return (Right conn)
-		Left (fs, is) -> if null is
-			then return (Left fs)
-			else do
-				reps <- sortedReplicas (head is)
-				writeIORef vHosts reps
-				-- try again in case new replicas in info
-				(fst +++ fst) <$> connectFirst mos reps
+type Pool' = Pool IOError
 
-connectFirst :: MasterOrSlaveOk -> [Host] -> IO (Either ([(Host, IOError)], [ReplicaInfo]) (Connection, ReplicaInfo))
--- ^ Connect to first host that succeeds and is master/slave, otherwise return list of failed connections plus info of connections that succeeded but were not master/slave.
-connectFirst mos = connectFirst' ([], []) where
-	connectFirst' (fs, is) [] = return $ Left (fs, is)
-	connectFirst' (fs, is) (h : hs) = do
-		e <- runErrorT $ do
-			c <- connect h
-			i <- getReplicaInfo h c
-			return (c, i)
-		case e of
-			Left f -> connectFirst' ((h, f) : fs, is) hs
-			Right (c, i) -> if isMS mos i
-				then return $ Right (c, i)
-				else do
-					close c
-					connectFirst' ((h, userError $ "not a " ++ show mos) : fs, i : is) hs
+-- | A Server is a single server ('Host') or a replica set of servers ('ReplicaSet')
+class Server t where
+	data Connection t
+	-- ^ A Mongo connection is a pool of TCP connections to a host or a replica set of hosts
+	connect :: (MonadIO' m) => Int -> t -> m (Connection t)
+	-- ^ Create a Mongo Connection to a host or a replica set of hosts. Actual TCP connection is not attempted until 'getPipe' request, so no IOError can be raised here. Up to N TCP connections will be established to each host.
+	getPipe :: MasterOrSlaveOk -> Connection t -> ErrorT IOError IO Pipe
+	-- ^ Return a TCP connection (Pipe) to the master or a slave in the server. Master must connect to the master, SlaveOk may connect to a slave or master. To spread the load, SlaveOk requests are distributed amongst all hosts in the server. Throw IOError if failed to connect to right type of host (Master/SlaveOk).
+	killPipes :: Connection t -> IO ()
+	-- ^ Kill all open pipes (TCP Connections). Will cause any users of them to fail. Alternatively you can let them die on their own when this Connection is garbage collected.
 
-connect :: (Throw IOError m, MonadIO' m) => Host -> m Connection
--- ^ Create a connection to the given host (as opposed to connecting to some host in a replica set via 'newConnection'). Throw IOError if can't connect.
-connect (Host hostname port) = throwLeft . liftIO $ E.try (mkConnection =<< connectTo hostname port)
+-- ** Connection Host
+
+instance Server Host where
+	data Connection Host = HostConnection {connHost :: Host, connPool :: Pool' Pipe}
+	-- ^ A pool of TCP connections ('Pipe's) to a server, handed out in round-robin style.
+	connect poolSize host = liftIO (connectHost poolSize host)
+	-- ^ Create a Connection (pool of TCP connections) to server (host or replica set)
+	getPipe _ = getHostPipe
+	-- ^ Return a TCP connection (Pipe). If SlaveOk, connect to a slave if available. Round-robin if multiple slaves are available. Throw IOError if failed to connect.
+	killPipes (HostConnection _ pool) = killAll pool
+
+connectHost :: Int -> Host -> IO (Connection Host)
+-- ^ Create a pool of N 'Pipe's (TCP connections) to server. 'getHostPipe' will return one of those pipes, round-robin style.
+connectHost poolSize host = HostConnection host <$> newPool Factory{..} poolSize where
+	newResource = tcpConnect host
+	killResource = close
+	isExpired = isClosed
+
+getHostPipe :: Connection Host -> ErrorT IOError IO Pipe
+-- ^ Return next pipe (TCP connection) in connection pool, round-robin style. Throw IOError if can't connect to host.
+getHostPipe (HostConnection _ pool) = aResource pool
+
+tcpConnect :: Host -> ErrorT IOError IO Pipe
+-- ^ Create a TCP connection (Pipe) to the given host. Throw IOError if can't connect.
+tcpConnect (Host hostname port) = ErrorT . E.try $ mkPipe =<< connectTo hostname port
+
+-- ** Connection ReplicaSet
+
+instance Server ReplicaSet where
+	data Connection ReplicaSet = ReplicaSetConnection {
+		repsetName :: Name,
+		currentMembers :: MVar [Connection Host] }  -- master at head after a refresh
+	connect poolSize repset = liftIO (connectSet poolSize repset)
+	getPipe = getSetPipe
+	killPipes ReplicaSetConnection{..} = withMVar currentMembers (mapM_ killPipes)
+
+replicaSet :: (MonadIO' m) => Connection ReplicaSet -> m ReplicaSet
+-- ^ Set name with current members as seed list
+replicaSet ReplicaSetConnection{..} = ReplicaSet repsetName . map connHost <$> readMVar currentMembers
+
+connectSet :: Int -> ReplicaSet -> IO (Connection ReplicaSet)
+-- ^ Create a connection to each member of the replica set.
+connectSet poolSize repset = assert (not . null $ seedHosts repset) $ do
+	currentMembers <- newMVar =<< mapM (connect poolSize) (seedHosts repset)
+	return $ ReplicaSetConnection (setName repset) currentMembers
+
+getMembers :: Name -> [Connection Host] -> ErrorT IOError IO [Host]
+-- ^ Get members of replica set, master first. Query supplied connections until config found.
+-- TODO: Verify config for request replica set name and not some other replica set. ismaster config should include replica set name in result but currently does not.
+getMembers repsetName connections = hosts <$> untilSuccess (getReplicaInfo <=< getHostPipe) connections
+
+refreshMembers :: Name -> [Connection Host] -> ErrorT IOError IO [Connection Host]
+-- ^ Update current members with master at head. Reuse unchanged members. Throw IOError if can't connect to any and fetch config. Dropped connections are not closed in case they still have users; they will be closed when garbage collected.
+refreshMembers repsetName connections = do
+	n <- liftIO . poolSize . connPool $ head connections
+	mapM (connection n) =<< getMembers repsetName connections
+ where
+	connection n host = maybe (connect n host) return $ find ((host ==) . connHost) connections
+
+getSetPipe :: MasterOrSlaveOk -> Connection ReplicaSet -> ErrorT IOError IO Pipe
+-- ^ Return a pipe to primary or a random secondary in replica set. Use primary for SlaveOk if and only if no secondaries. Note, refreshes members each time (makes ismaster call to primary).
+getSetPipe mos ReplicaSetConnection{..} = modifyMVar currentMembers $ \connections -> do
+	connections <- refreshMembers repsetName connections  -- master at head after refresh
+	pipe <- case mos of
+		Master -> getHostPipe (head connections)
+		SlaveOk -> do
+			let n = length connections - 1
+			is <- take (max 1 n) . nub . randomRs (min 1 n, n) <$> liftIO newStdGen
+			untilSuccess (getHostPipe . (connections !!)) is
+	return (connections, pipe)
 
 
 {- Authors: Tony Hannan <tony@10gen.com>

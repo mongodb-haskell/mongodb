@@ -9,7 +9,7 @@ This is a mini tutorial to get you up and going with the basics
 of the Haskell mongoDB drivers. It is modeled after the
 [pymongo tutorial](http://api.mongodb.org/python/1.4%2B/tutorial.html).
 
-You will need the mongoDB bindings installed as well as mongo itself installed.
+You will need the mongoDB driver installed as well as mongo itself installed.
 
     $ = command line prompt
     > = ghci repl prompt
@@ -35,13 +35,13 @@ Getting Ready
 
 Start a MongoDB instance for us to play with:
 
-    $ mongod
+    $ mongod --dbpath <directory where Mongo will store the data>
 
 Start up a haskell repl:
 
     $ ghci
 
-Now we'll need to bring in the MongoDB/BSON bindings and set
+Now we'll need to bring in the MongoDB/Bson bindings and set
 OverloadedStrings so literal strings are converted to UTF-8 automatically.
 
     > import Database.MongoDB
@@ -49,48 +49,58 @@ OverloadedStrings so literal strings are converted to UTF-8 automatically.
 
 Making A Connection
 -------------------
-Open up a connection to your DB instance, using the standard port:
+Open up a connection to your mongo server, using the standard port (27017):
 
-    > Right conn <- runNet $ connect $ host "127.0.0.1"
+    > conn <- connect 1 $ host "127.0.0.1"
 
 or for a non-standard port
 
-    > Right conn <- runNet $ connect $ Host "127.0.0.1" (PortNumber 30000)
+    > conn <- connect 1 $ Host "127.0.0.1" (PortNumber 30000)
 
-*connect* throws IOError if connection fails and *runNet* catches IOError and
-returns it as Left. We are assuming above it won't fail. If it does you will get a
-pattern match error.
+*connect* takes the connection pool size and the host to connect to. It returns
+a *Connection*, which is really a pool of TCP connections, initially created on demand.
+So it is not possible to get a connection error until you try to use it.
 
-Connected monad
+Plain IO code in this driver never raises an exception unless it invokes third party IO
+code that does. Driver code that may throw an exception says so in its Monad type,
+for example, *ErrorT IOError IO a*.
+
+Access monad
 -------------------
 
-The current connection is held in a Connected monad, and the current database
-is held in a Reader monad on top of that. To run a connected monad, supply
-it and a connection to *runConn*. To access a database within a connected
-monad, call *useDb*.
+A mongo query/update executes in an *Access* monad, which has access to a
+*Pipe*, *WriteMode*, and *MasterSlaveOk* mode, and may throw a *Failure*. A Pipe
+is a single TCP connection, while a Connection is a pool of Pipes.
+
+To run an Access action (monad), supply WriteMode, MasterOrSlaveOk, Connection,
+and action to *access*. For example, to get a list of all the database on the server:
+
+    > access safe Master conn allDatabases
 
 Since we are working in ghci, which requires us to start from the
-IO monad every time, we'll define a convenient *run* function that takes a
-db-action and executes it against our "test" database on the server we
+IO monad every time, we'll define a convenient *run* function that takes an
+action and executes it against our "test" database on the server we
 just connected to:
 
-    > let run action = runNet $ runConn (useDb "test" action) conn
+    > let run action = access safe Master conn $ use (Database "test") action
 
-*runConn* return either Left Failure or Right result. Failure
-means there was a read or write exception like cursor expired or duplicate key insert.
-This combined with *runNet* means our *run* returns *(Either IOError (Either Failure a))*.
+*access* return either Left Failure or Right result. Failure means there was a connection failure,
+or a read or write exception like cursor expired or duplicate key insert.
+
+*use* adds a *Database* to the action context, so query/update operations know which
+database to operate on.
 
 Databases and Collections
 -----------------------------
 
-A MongoDB can store multiple databases -- separate namespaces
+MongoDB can store multiple databases -- separate namespaces
 under which collections reside.
 
 You can obtain the list of databases available on a connection:
 
     > run allDatabases
 
-The "test" database is ignored in this case because *allDatabases*
+The "test" database in context is ignored in this case because *allDatabases*
 is not a query on a specific database but on the server as a whole.
 
 Databases and collections do not need to be created, just start using
