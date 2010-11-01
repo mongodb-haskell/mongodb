@@ -1,5 +1,5 @@
 name: mongoDB
-version: 0.8
+version: 0.8.1
 build-type: Simple
 license: OtherLicense
 license-file: LICENSE
@@ -12,7 +12,7 @@ build-depends:
     bson -any,
     bytestring -any,
     containers -any,
-    mtl -any,
+    mtl >= 2,
     nano-md5 -any,
     network -any,
     parsec -any,

@@ -9,14 +9,7 @@ import Control.Arrow ((+++))
 import Control.Monad.Reader
 import Control.Monad.Error
 
-instance (Monad m) => Applicative (ReaderT r m) where
-	pure = return
-	(<*>) = ap
-
-instance (Monad m, Error e) => Applicative (ErrorT e m) where
-	pure = return
-	(<*>) = ap
-
+-- | MonadIO with extra Applicative and Functor superclasses
 class (MonadIO m, Applicative m, Functor m) => MonadIO' m
 instance (MonadIO m, Applicative m, Functor m) => MonadIO' m
 
