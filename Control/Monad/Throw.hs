@@ -7,6 +7,8 @@ module Control.Monad.Throw where
 import Prelude hiding (catch)
 import Control.Monad.Reader
 import Control.Monad.Error
+import Control.Arrow ((+++))
+import Control.Applicative ((<$>))
 
 -- | Same as 'MonadError' but without functional dependency so the same monad can have multiple errors with different types
 class (Monad m) => Throw e m where
@@ -42,3 +44,7 @@ instance (Error e, Throw e m, Error x) => Throw e (ErrorT x m) where
 instance (Throw e m) => Throw e (ReaderT x m) where
 	throw = lift . throw
 	catch a h = ReaderT $ \x -> catch (runReaderT a x) (flip runReaderT x . h)
+
+mapError :: (Functor m) => (e -> e') -> ErrorT e m a -> ErrorT e' m a
+-- ^ Convert error type
+mapError f (ErrorT m) = ErrorT $ (f +++ id) <$> m
