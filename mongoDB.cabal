@@ -1,6 +1,5 @@
 name: mongoDB
 version: 0.8
-cabal-version: >=1.4
 build-type: Simple
 license: OtherLicense
 license-file: LICENSE
