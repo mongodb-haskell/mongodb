@@ -10,6 +10,7 @@ import Data.Array.IO
 import Data.Maybe (catMaybes)
 import Control.Monad.Error
 import System.Random (randomRIO)
+import Control.Exception (assert)
 
 -- | Creator, destroyer, and checker of resources of type r. Creator may throw error or type e.
 data Factory e r = Factory {
@@ -18,8 +19,8 @@ data Factory e r = Factory {
 	isExpired :: r -> IO Bool }
 
 newPool :: Factory e r -> Int -> IO (Pool e r)
--- ^ Create new pool of initial max size
-newPool f n = do
+-- ^ Create new pool of initial max size, which must be >= 1
+newPool f n = assert (n > 0) $ do
 	arr <- newArray (0, n-1) Nothing
 	var <- newMVar arr
 	return (Pool f var)

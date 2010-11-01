@@ -10,8 +10,8 @@ Simple example below. Use with language extension /OvererloadedStrings/.
 > import Control.Monad.Trans (liftIO)
 >
 > main = do
->    conn <- connect 1 (host "127.0.0.1")
->    e <- access safe Master conn run
+>    pool <- newConnPool 1 (host "127.0.0.1")
+>    e <- access safe Master pool run
 >    print e
 >
 > run = use (Database "baseball") $ do

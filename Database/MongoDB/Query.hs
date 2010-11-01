@@ -1,4 +1,4 @@
--- | Query and update documents residing on a MongoDB server(s)
+-- | Query and update documents
 
 {-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, RankNTypes, ImpredicativeTypes #-}
 
@@ -24,7 +24,7 @@ module Database.MongoDB.Query (
 	-- ** Delete
 	delete, deleteOne,
 	-- * Read
-	slaveOk,
+	readMode,
 	-- ** Query
 	Query(..), QueryOption(..), Projector, Limit, Order, BatchSize,
 	explain, find, findOne, count, distinct,
@@ -62,23 +62,12 @@ import Database.MongoDB.Internal.Util ((<.>), true1)
 mapErrorIO :: (Throw e m, MonadIO m) => (e' -> e) -> ErrorT e' IO a -> m a
 mapErrorIO f = throwLeft' f . liftIO . runErrorT
 
-send :: (Context Pipe m, Throw Failure m, MonadIO m) => [Notice] -> m ()
--- ^ Send notices as a contiguous batch to server with no reply. Throw 'ConnectionFailure' if pipe fails.
-send ns = mapErrorIO ConnectionFailure . flip P.send ns =<< context
-
-call :: (Context Pipe m, Throw Failure m, MonadIO m) => [Notice] -> Request -> m (forall n. (Throw Failure n, MonadIO n) => n Reply)
--- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
-call ns r = do
-	pipe <- context
-	promise <- mapErrorIO ConnectionFailure (P.call pipe ns r)
-	return (mapErrorIO ConnectionFailure promise)
-
 -- * Mongo Monad
 
-access :: (Server s, MonadIO m) => WriteMode -> MasterOrSlaveOk -> Connection s -> Action m a -> m (Either Failure a)
--- ^ Run action with access to server or replica set via one of the 'Pipe's (TCP connections) in given 'Connection' pool
-access w mos conn act = do
-	ePipe <- liftIO . runErrorT $ getPipe mos conn
+access :: (Server s, MonadIO m) => WriteMode -> MasterOrSlaveOk -> ConnPool s -> Action m a -> m (Either Failure a)
+-- ^ Run action under given write and read mode against the server or replicaSet behind given connection pool. Return Left Failure if there is a connection failure or read/write error.
+access w mos pool act = do
+	ePipe <- liftIO . runErrorT $ getPipe mos pool
 	either (return . Left . ConnectionFailure) (runAction act w mos) ePipe
 
 -- | A monad with access to a 'Pipe', 'MasterOrSlaveOk', and 'WriteMode', and throws 'Failure' on read, write, or pipe failure
@@ -93,10 +82,11 @@ instance MonadTrans Action where
 	lift = Action . lift . lift . lift . lift
 
 runAction :: Action m a -> WriteMode -> MasterOrSlaveOk -> Pipe -> m (Either Failure a)
--- ^ Run action with access to pipe. It starts out assuming it is master (invoke 'slaveOk' inside it to change that) and that writes don't need to be check (invoke 'writeMode' to change that). Return Left Failure if error in execution. Throws IOError if pipe fails during execution.
+-- ^ Run action with given write mode and read mode (master or slave-ok) against given pipe (TCP connection). Return Left Failure if read/write error or connection failure.
+-- 'access' calls runAction. Use this directly if you want to use the same connection and not take from the pool again. However, the connection may still be used by other threads at the same time. For instance, the pool will still hand this connection out.
 runAction (Action action) w mos = runReaderT (runReaderT (runReaderT (runErrorT action) w) mos)
 
--- | Read or write exception like cursor expired or inserting a duplicate key.
+-- | A connection failure, or a read or write exception like cursor expired or inserting a duplicate key.
 -- Note, unexpected data from the server is not a Failure, rather it is a programming error (you should call 'error' in this case) because the client and server are incompatible and requires a programming change.
 data Failure =
 	 ConnectionFailure IOError  -- ^ TCP connection ('Pipe') failed. Make work if you try again on the same Mongo 'Connection' which will create a new Pipe.
@@ -115,7 +105,7 @@ newtype Database = Database {databaseName :: UString}  deriving (Eq, Ord)
 
 instance Show Database where show (Database x) = unpack x
 
--- | As 'Access' monad with access to a particular 'Database'
+-- | 'Access' monad with a particular 'Database' in context
 class (Context Database m, Access m) => DbAccess m
 instance (Context Database m, Access m) => DbAccess m
 
@@ -124,7 +114,7 @@ allDatabases :: (Access m) => m [Database]
 allDatabases = map (Database . at "name") . at "databases" <$> use (Database "admin") (runCommand1 "listDatabases")
 
 use :: Database -> ReaderT Database m a -> m a
--- ^ Run Db action against given database
+-- ^ Run action against given database
 use = flip runReaderT
 
 thisDatabase :: (DbAccess m) => m Database
@@ -297,9 +287,9 @@ delete' opts (Select sel col) = do
 
 -- ** MasterOrSlaveOk
 
-slaveOk :: (Access m) => m a -> m a
--- ^ Ok to execute given action against slave, ie. eventually consistent reads
-slaveOk = push (const SlaveOk)
+readMode :: (Access m) => MasterOrSlaveOk -> m a -> m a
+-- ^ Execute action using given read mode. Master = consistent reads, SlaveOk = eventually consistent reads.
+readMode = push . const
 
 msOption :: MasterOrSlaveOk -> [P.QueryOption]
 msOption Master = []
@@ -618,6 +608,19 @@ runCommand1 c = runCommand [c =: (1 :: Int)]
 eval :: (DbAccess m) => Javascript -> m Document
 -- ^ Run code on server
 eval code = at "retval" <$> runCommand ["$eval" =: code]
+
+-- * Primitives
+
+send :: (Context Pipe m, Throw Failure m, MonadIO m) => [Notice] -> m ()
+-- ^ Send notices as a contiguous batch to server with no reply. Throw 'ConnectionFailure' if pipe fails.
+send ns = mapErrorIO ConnectionFailure . flip P.send ns =<< context
+
+call :: (Context Pipe m, Throw Failure m, MonadIO m) => [Notice] -> Request -> m (forall n. (Throw Failure n, MonadIO n) => n Reply)
+-- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
+call ns r = do
+	pipe <- context
+	promise <- mapErrorIO ConnectionFailure (P.call pipe ns r)
+	return (mapErrorIO ConnectionFailure promise)
 
 
 {- Authors: Tony Hannan <tony@10gen.com>

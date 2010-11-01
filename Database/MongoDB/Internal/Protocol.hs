@@ -42,7 +42,7 @@ import Control.Monad.Error
 -- * Pipe
 
 type Pipe = P.Pipeline Handle ByteString
--- ^ Thread-safe TCP connection to server with pipelined requests
+-- ^ Thread-safe TCP connection with pipelined requests
 
 mkPipe :: Handle -> IO Pipe
 -- ^ New thread-safe pipelined connection over handle

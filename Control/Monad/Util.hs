@@ -20,9 +20,6 @@ instance (Monad m, Error e) => Applicative (ErrorT e m) where
 class (MonadIO m, Applicative m, Functor m) => MonadIO' m
 instance (MonadIO m, Applicative m, Functor m) => MonadIO' m
 
-ignore :: (Monad m) => a -> m ()
-ignore _ = return ()
-
 loop :: (Functor m, Monad m) => m (Maybe a) -> m [a]
 -- ^ Repeatedy execute action, collecting results, until it returns Nothing
 loop act = act >>= maybe (return []) (\a -> (a :) <$> loop act)

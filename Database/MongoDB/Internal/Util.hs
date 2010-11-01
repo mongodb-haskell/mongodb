@@ -1,4 +1,4 @@
--- | Miscellaneous general functions
+-- | Miscellaneous general functions and Show, Eq, and Ord instances for PortID
 
 {-# LANGUAGE StandaloneDeriving #-}
 
@@ -13,12 +13,6 @@ import Data.Bson
 deriving instance Show PortID
 deriving instance Eq PortID
 deriving instance Ord PortID
-
-snoc :: [a] -> a -> [a]
--- ^ add element to end of list (/snoc/ is reverse of /cons/, which adds to front of list)
-snoc list a = list ++ [a]
-
-type Secs = Float
 
 bitOr :: (Bits a) => [a] -> a
 -- ^ bit-or all numbers together
