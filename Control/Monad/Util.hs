@@ -34,3 +34,6 @@ untilSuccess' _ f (x : xs) = catchError (f x) (\e -> untilSuccess' e f xs)
 mapError :: (Functor m) => (e' -> e) -> ErrorT e' m a -> ErrorT e m a
 -- ^ Convert error type thrown
 mapError f (ErrorT m) = ErrorT $ (f +++ id) <$> m
+
+whenJust :: (Monad m) => Maybe a -> (a -> m ()) -> m ()
+whenJust mVal act = maybe (return ()) act mVal

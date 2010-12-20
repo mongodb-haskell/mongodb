@@ -2,12 +2,13 @@
 
 This module is not intended for direct use. Use the high-level interface at "Database.MongoDB.Query" and "Database.MongoDB.Connection" instead. -}
 
-{-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings, FlexibleContexts #-}
+{-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings, FlexibleContexts, TupleSections, TypeSynonymInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
 
 module Database.MongoDB.Internal.Protocol (
+	-- * Network
+	Network', ANetwork', Internet(..),
 	-- * Pipe
-	Pipe, mkPipe,
-	send, call,
+	Pipe, send, call,
 	-- * Message
 	FullCollection,
 	-- ** Notice
@@ -22,8 +23,9 @@ module Database.MongoDB.Internal.Protocol (
 
 import Prelude as X
 import Control.Applicative ((<$>))
+import Control.Arrow ((***))
 import System.IO (Handle)
-import Data.ByteString.Lazy (ByteString)
+import Data.ByteString.Lazy as B (length, hPut)
 import qualified Control.Pipeline as P
 import Data.Bson (Document, UString)
 import Data.Bson.Binary
@@ -31,45 +33,83 @@ import Data.Binary.Put
 import Data.Binary.Get
 import Data.Int
 import Data.Bits
-import Database.MongoDB.Internal.Util (bitOr)
 import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Digest.OpenSSL.MD5 (md5sum)
 import Data.UString as U (pack, append, toByteString)
 import System.IO.Error as E (try)
 import Control.Monad.Error
+import Control.Monad.Util (whenJust)
+import Network.Abstract (IOE, ANetwork, Network(..), Connection(Connection))
+import Network (connectTo)
+import System.IO (hFlush, hClose)
+import Database.MongoDB.Internal.Util (hGetN, bitOr)
+
+-- * Network
+
+-- Network -> Server -> (Sink, Source)
+-- (Sink, Source) -> Pipeline
+
+type Message = ([Notice], Maybe (Request, RequestId))
+-- ^ Write notice(s), write notice(s) with getLastError request, or just query request
+-- Note, that requestId will be out of order because request ids will be generated for notices, after the request id supplied was generated. This is ok because the mongo server does not care about order they are just used as unique identifiers.
+
+type Response = (ResponseTo, Reply)
+
+class (Network n Message Response) => Network' n
+instance (Network n Message Response) => Network' n
+
+type ANetwork' = ANetwork Message Response
+
+data Internet = Internet
+-- ^ Normal Network instance, i.e. no logging or replay
+
+-- | Connect to server. Write messages and receive replies; not thread-safe!
+instance Network Internet Message Response where
+	connect _ (hostname, portid) = ErrorT . E.try $ do
+		handle <- connectTo hostname portid
+		return $ Connection (sink handle) (source handle) (hClose handle)
+	 where
+		sink h (notices, mRequest) = ErrorT . E.try $ do
+			forM_ notices $ \n -> writeReq h . (Left n,) =<< genRequestId
+			whenJust mRequest $ writeReq h . (Right *** id)
+			hFlush h
+		source h = ErrorT . E.try $ readResp h
+				
+writeReq :: Handle -> (Either Notice Request, RequestId) -> IO ()
+writeReq handle (e, requestId) = do
+	hPut handle lenBytes
+	hPut handle bytes
+ where
+	bytes = runPut $ (either putNotice putRequest e) requestId
+	lenBytes = encodeSize . toEnum . fromEnum $ B.length bytes
+	encodeSize = runPut . putInt32 . (+ 4)
+
+readResp :: Handle -> IO (ResponseTo, Reply)
+readResp handle = do
+	len <- fromEnum . decodeSize <$> hGetN handle 4
+	runGet getReply <$> hGetN handle len
+ where
+	decodeSize = subtract 4 . runGet getInt32
 
 -- * Pipe
 
-type Pipe = P.Pipeline Handle ByteString
+type Pipe = P.Pipeline Message Response
 -- ^ Thread-safe TCP connection with pipelined requests
 
-mkPipe :: Handle -> IO Pipe
--- ^ New thread-safe pipelined connection over handle
-mkPipe = P.newPipeline encodeSize decodeSize where
-	encodeSize = runPut . putInt32 . toEnum . (+ 4)
-	decodeSize = subtract 4 . fromEnum . runGet getInt32
-
-send :: Pipe -> [Notice] -> ErrorT IOError IO ()
+send :: Pipe -> [Notice] -> IOE ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
-send conn notices = ErrorT . E.try $ P.send conn =<< mapM noticeBytes notices
+send pipe notices = P.send pipe (notices, Nothing)
 
-call :: Pipe -> [Notice] -> Request -> ErrorT IOError IO (ErrorT IOError IO Reply)
+call :: Pipe -> [Notice] -> Request -> IOE (IOE Reply)
 -- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call and resulting promise will throw IOError if connection fails.
-call conn notices request = ErrorT . E.try $ do
-	nMessages <- mapM noticeBytes notices
+call pipe notices request = do
 	requestId <- genRequestId
-	let rMessage = runPut (putRequest request requestId)
-	promise <- P.call conn (nMessages ++ [rMessage])
-	return (ErrorT . E.try $ bytesReply requestId <$> promise)
-
-noticeBytes :: Notice -> IO ByteString
-noticeBytes notice = runPut . putNotice notice <$> genRequestId
-
-bytesReply :: RequestId -> ByteString -> Reply
-bytesReply requestId bytes = if requestId == responseTo then reply else err where
-	(responseTo, reply) = runGet getReply bytes
-	err = error $ "expected response id (" ++ show responseTo ++ ") to match request id (" ++ show requestId ++ ")"
+	promise <- P.call pipe (notices, Just (request, requestId))
+	return $ check requestId <$> promise
+ where
+	check requestId (responseTo, reply) = if requestId == responseTo then reply else
+		error $ "expected response id (" ++ show responseTo ++ ") to match request id (" ++ show requestId ++ ")"
 
 -- * Messages
 
@@ -85,9 +125,9 @@ type RequestId = Int32
 
 type ResponseTo = RequestId
 
-genRequestId :: IO RequestId
+genRequestId :: (MonadIO m) => m RequestId
 -- ^ Generate fresh request id
-genRequestId = atomicModifyIORef counter $ \n -> (n + 1, n) where
+genRequestId = liftIO $ atomicModifyIORef counter $ \n -> (n + 1, n) where
 	counter :: IORef RequestId
 	counter = unsafePerformIO (newIORef 0)
 	{-# NOINLINE counter #-}

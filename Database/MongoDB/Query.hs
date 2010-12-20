@@ -1,6 +1,6 @@
 -- | Query and update documents
 
-{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, RankNTypes, ImpredicativeTypes #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, RankNTypes #-}
 
 module Database.MongoDB.Query (
 	-- * Access
@@ -29,7 +29,7 @@ module Database.MongoDB.Query (
 	Query(..), QueryOption(..), Projector, Limit, Order, BatchSize,
 	explain, find, findOne, count, distinct,
 	-- *** Cursor
-	Cursor, next, nextN, rest,
+	Cursor, next, nextN, rest, closeCursor, isCursorClosed,
 	-- ** Group
 	Group(..), GroupKey(..), group,
 	-- ** MapReduce
@@ -47,7 +47,6 @@ import Control.Monad.Reader
 import Control.Monad.Error
 import Control.Monad.Throw
 import Control.Monad.MVar
-import Control.Pipeline (Resource(..))
 import qualified Database.MongoDB.Internal.Protocol as P
 import Database.MongoDB.Internal.Protocol hiding (Query, QueryOption(..), send, call)
 import Database.MongoDB.Connection (MasterOrSlaveOk(..), Server(..))
@@ -441,7 +440,7 @@ newCursor :: (Access m) => Database -> Collection -> BatchSize -> DelayedCursorS
 newCursor (Database db) col batch cs = do
 	var <- newMVar cs
 	let cursor = Cursor (db <.> col) batch var
-	addMVarFinalizer var (close cursor)
+	addMVarFinalizer var (closeCursor cursor)
 	return cursor
 
 next :: (Access m) => Cursor -> m (Maybe Document)
@@ -470,11 +469,13 @@ rest :: (Access m) => Cursor -> m [Document]
 -- ^ Return remaining documents in query result
 rest c = loop (next c)
 
-instance (Access m) => Resource m Cursor where
-	close (Cursor _ _ var) = modifyMVar var kill' where
- 		kill' dcs = first return <$> (kill =<< mapErrorIO id dcs)
-		kill (CS _ cid _) = (CS 0 0 [],) <$> if cid == 0 then return () else send [KillCursors [cid]]
-	isClosed cursor = do
+closeCursor :: (Access m) => Cursor -> m ()
+closeCursor (Cursor _ _ var) = modifyMVar var kill' where
+ 	kill' dcs = first return <$> (kill =<< mapErrorIO id dcs)
+	kill (CS _ cid _) = (CS 0 0 [],) <$> if cid == 0 then return () else send [KillCursors [cid]]
+
+isCursorClosed :: (Access m) => Cursor -> m Bool
+isCursorClosed cursor = do
 		CS _ cid docs <- getCursorState cursor
 		return (cid == 0 && null docs)
 
@@ -593,7 +594,8 @@ send ns = do
 	pipe <- context
 	mapErrorIO ConnectionFailure (P.send pipe ns)
 
-call :: (Context Pipe m, Throw Failure m, MonadIO m) => [Notice] -> Request -> m (forall n. (Throw Failure n, MonadIO n) => n Reply)
+call :: (Context Pipe m, Throw Failure m, MonadIO m, Throw Failure n, MonadIO n) =>
+	[Notice] -> Request -> m (n Reply)
 -- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
 call ns r = do
 	pipe <- context

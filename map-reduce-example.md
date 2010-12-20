@@ -19,8 +19,8 @@ map/reduce queries on:
     Prelude> :set prompt "> "
     > :set -XOverloadedStrings
     > import Database.MongoDB
-    > conn <- connect 1 $ host "localhost"
-    > let run act = runConn safe Master conn $ use (Database "test") act
+    > conn <- newConnPool Internet 1 (host "localhost")
+    > let run act = access safe Master conn $ use (Database "test") act
     > :{
     run $ insertMany "mr1" [
           ["x" =: 1, "tags" =: ["dog", "cat"]],
@@ -70,7 +70,7 @@ be called iteratively on the results of other reduce steps.
 Finally, we run mapReduce and iterate over the result collection:
 
     > run $ runMR (mapReduce "mr1" mapFn reduceFn) >>= rest
-    Right (Right [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]])
+    Right [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]]
 
 Advanced Map/Reduce
 -------------------
@@ -79,6 +79,6 @@ MongoDB returns additional statistics in the map/reduce results. To
 obtain them, use *runMR'* instead:
 
     > run $ runMR' (mapReduce "mr1" mapFn reduceFn)
-    Right (Right [ result: "tmp.mr.mapreduce_1276482643_7", timeMillis: 379, counts: [ input: 4, emit: 6, output: 3], ok: 1.0])
+    Right [ result: "tmp.mr.mapreduce_1276482643_7", timeMillis: 379, counts: [ input: 4, emit: 6, output: 3], ok: 1.0]
 
 You can then obtain the results from here by quering the result collection yourself. *runMR* (above) does this for you but discards the statistics.

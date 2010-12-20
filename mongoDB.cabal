@@ -1,9 +1,9 @@
 name: mongoDB
-version: 0.8.2
+version: 0.9
 build-type: Simple
 license: OtherLicense
 license-file: LICENSE
-copyright: Copyright (c) 2010-2010 Scott Parish & 10gen Inc.
+copyright: Copyright (c) 2010-2010 10gen Inc. & Scott Parish
 maintainer: Tony Hannan <tony@10gen.com>
 build-depends:
     array -any,
@@ -24,7 +24,7 @@ bug-reports:
 synopsis: A driver for MongoDB
 description: This module lets you connect to MongoDB (www.mongodb.org) and do inserts, queries, updates, etc.
 category: Database
-author: Scott Parish <srp@srparish.net> & Tony Hannan <tony@10gen.com>
+author: Tony Hannan <tony@10gen.com> & Scott Parish <srp@srparish.net>
 tested-with:
 data-files:
 data-dir: ""
@@ -42,6 +42,7 @@ exposed-modules:
     Database.MongoDB.Internal.Protocol
     Database.MongoDB.Internal.Util
     Database.MongoDB.Query
+    Network.Abstract
     Var.Pool
 exposed: True
 buildable: True
