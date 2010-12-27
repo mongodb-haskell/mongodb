@@ -49,12 +49,12 @@ import Control.Monad.Throw
 import Control.Monad.MVar
 import qualified Database.MongoDB.Internal.Protocol as P
 import Database.MongoDB.Internal.Protocol hiding (Query, QueryOption(..), send, call)
-import Database.MongoDB.Connection (MasterOrSlaveOk(..), Server(..))
+import Database.MongoDB.Connection (MasterOrSlaveOk(..), Service(..))
 import Data.Bson
 import Data.Word
 import Data.Int
 import Data.Maybe (listToMaybe, catMaybes)
-import Data.UString as U (dropWhile, any, tail, unpack)
+import Data.UString as U (dropWhile, any, tail)
 import Control.Monad.Util (MonadIO', loop)
 import Database.MongoDB.Internal.Util ((<.>), true1)
 
@@ -63,7 +63,7 @@ mapErrorIO f = throwLeft' f . liftIO . runErrorT
 
 -- * Mongo Monad
 
-access :: (Server s, MonadIO m) => WriteMode -> MasterOrSlaveOk -> ConnPool s -> Action m a -> m (Either Failure a)
+access :: (Service s, MonadIO m) => WriteMode -> MasterOrSlaveOk -> ConnPool s -> Action m a -> m (Either Failure a)
 -- ^ Run action under given write and read mode against the server or replicaSet behind given connection pool. Return Left Failure if there is a connection failure or read/write error.
 access w mos pool act = do
 	ePipe <- liftIO . runErrorT $ getPipe mos pool
@@ -124,9 +124,9 @@ thisDatabase = context
 
 auth :: (DbAccess m) => Username -> Password -> m Bool
 -- ^ Authenticate with the database (if server is running in secure mode). Return whether authentication was successful or not. Reauthentication is required for every new pipe.
-auth u p = do
+auth usr pss = do
 	n <- at "nonce" <$> runCommand ["getnonce" =: (1 :: Int)]
-	true1 "ok" <$> runCommand ["authenticate" =: (1 :: Int), "user" =: u, "nonce" =: n, "key" =: pwKey n u p]
+	true1 "ok" <$> runCommand ["authenticate" =: (1 :: Int), "user" =: usr, "nonce" =: n, "key" =: pwKey n usr pss]
 
 -- * Collection
 

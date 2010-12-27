@@ -10,6 +10,7 @@ Bson
 
 MongoDB
 -------
++ Support MapReduce 1.8 version
 + When one connection in a pool fails, close all other since they will likely fail too
 + on insert/update: reject keys that start with "$" or "."
 + dereference dbref

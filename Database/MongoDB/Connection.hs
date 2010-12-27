@@ -3,8 +3,8 @@
 {-# LANGUAGE OverloadedStrings, ScopedTypeVariables, RecordWildCards, NamedFieldPuns, MultiParamTypeClasses, FlexibleContexts, TypeFamilies, DoRec, RankNTypes, FlexibleInstances #-}
 
 module Database.MongoDB.Connection (
-	-- * Network
-	Network', ANetwork', Internet(..),
+	-- * Pipe
+	Pipe,
 	-- * Host
 	Host(..), PortID(..), host, showHostPort, readHostPort, readHostPortM,
 	-- * ReplicaSet
@@ -12,19 +12,19 @@ module Database.MongoDB.Connection (
 	-- * MasterOrSlaveOk
 	MasterOrSlaveOk(..),
 	-- * Connection Pool
-	Server(..), newConnPool',
+	Service(..),
 	connHost, replicaSet
 ) where
 
 import Database.MongoDB.Internal.Protocol as X
-import Network.Abstract (IOE, connect, ANetwork(..))
+import qualified Network.Abstract as C
+import Network.Abstract (IOE, NetworkIO, ANetwork)
 import Data.Bson ((=:), at, UString)
 import Control.Pipeline as P
 import Control.Applicative ((<$>))
 import Control.Exception (assert)
 import Control.Monad.Error
 import Control.Monad.MVar
-import Control.Monad.Context
 import Network (HostName, PortID(..))
 import Data.Bson (Document, look)
 import Text.ParserCombinators.Parsec as T (parse, many1, letter, digit, char, eof, spaces, try, (<|>))
@@ -148,26 +148,23 @@ isMS SlaveOk i = isSecondary i || isPrimary i -}
 
 type Pool' = Pool IOError
 
--- | A Server is a single server ('Host') or a replica set of servers ('ReplicaSet')
-class Server t where
+-- | A Service is a single server ('Host') or a replica set of servers ('ReplicaSet')
+class Service t where
 	data ConnPool t
 	-- ^ A pool of TCP connections ('Pipe's) to a host or a replica set of hosts
-	newConnPool :: (Network' n, MonadIO' m) => n -> Int -> t -> m (ConnPool t)
+	newConnPool :: (NetworkIO m) => Int -> t -> m (ConnPool t)
 	-- ^ Create a ConnectionPool to a host or a replica set of hosts. Actual TCP connection is not attempted until 'getPipe' request, so no IOError can be raised here. Up to N TCP connections will be established to each host.
 	getPipe :: MasterOrSlaveOk -> ConnPool t -> IOE Pipe
 	-- ^ Return a TCP connection (Pipe) to the master or a slave in the server. Master must connect to the master, SlaveOk may connect to a slave or master. To spread the load, SlaveOk requests are distributed amongst all hosts in the server. Throw IOError if failed to connect to right type of host (Master/SlaveOk).
 	killPipes :: ConnPool t -> IO ()
 	-- ^ Kill all open pipes (TCP Connections). Will cause any users of them to fail. Alternatively you can let them die on their own when they get garbage collected.
 
-newConnPool' :: (Server t, MonadIO' m, Context ANetwork' m) => Int -> t -> m (ConnPool t)
-newConnPool' poolSize' host' = context >>= \(ANetwork net :: ANetwork') -> newConnPool net poolSize' host'
-
 -- ** ConnectionPool Host
 
-instance Server Host where
+instance Service Host where
 	data ConnPool Host = HostConnPool {connHost :: Host, connPool :: Pool' Pipe}
 	-- ^ A pool of TCP connections ('Pipe's) to a server, handed out in round-robin style.
-	newConnPool net poolSize' host' = liftIO $ newHostConnPool (ANetwork net) poolSize' host'
+	newConnPool poolSize' host' = liftIO . newHostConnPool poolSize' host' =<< C.network
 	-- ^ Create a connection pool to server (host or replica set)
 	getPipe _ = getHostPipe
 	-- ^ Return a TCP connection (Pipe). If SlaveOk, connect to a slave if available. Round-robin if multiple slaves are available. Throw IOError if failed to connect.
@@ -176,9 +173,9 @@ instance Server Host where
 instance Show (ConnPool Host) where
 	show HostConnPool{connHost} = "ConnPool " ++ show connHost
 
-newHostConnPool :: ANetwork' -> Int -> Host -> IO (ConnPool Host)
+newHostConnPool :: Int -> Host -> ANetwork -> IO (ConnPool Host)
 -- ^ Create a pool of N 'Pipe's (TCP connections) to server. 'getHostPipe' will return one of those pipes, round-robin style.
-newHostConnPool net poolSize' host' = HostConnPool host' <$> newPool Factory{..} poolSize' where
+newHostConnPool poolSize' host' net = HostConnPool host' <$> newPool Factory{..} poolSize' where
 	newResource = tcpConnect net host'
 	killResource = P.close
 	isExpired = P.isClosed
@@ -187,18 +184,18 @@ getHostPipe :: ConnPool Host -> IOE Pipe
 -- ^ Return next pipe (TCP connection) in connection pool, round-robin style. Throw IOError if can't connect to host.
 getHostPipe (HostConnPool _ pool) = aResource pool
 
-tcpConnect :: ANetwork' -> Host -> IOE Pipe
+tcpConnect :: ANetwork -> Host -> IOE Pipe
 -- ^ Create a TCP connection (Pipe) to the given host. Throw IOError if can't connect.
-tcpConnect net (Host hostname port) = newPipeline =<< connect net (hostname, port)
+tcpConnect net (Host hostname port) = newPipeline =<< C.connect net (C.Server hostname port)
 
 -- ** Connection ReplicaSet
 
-instance Server ReplicaSet where
+instance Service ReplicaSet where
 	data ConnPool ReplicaSet = ReplicaSetConnPool {
-		network :: ANetwork',
+		network :: ANetwork,
 		repsetName :: Name,
 		currentMembers :: MVar [ConnPool Host] }  -- master at head after a refresh
-	newConnPool net poolSize' repset = liftIO $ newSetConnPool (ANetwork net) poolSize' repset
+	newConnPool poolSize' repset = liftIO . newSetConnPool poolSize' repset =<< C.network
 	getPipe = getSetPipe
 	killPipes ReplicaSetConnPool{..} = withMVar currentMembers (mapM_ killPipes)
 
@@ -209,10 +206,10 @@ replicaSet :: (MonadIO' m) => ConnPool ReplicaSet -> m ReplicaSet
 -- ^ Return replicas set name with current members as seed list
 replicaSet ReplicaSetConnPool{..} = ReplicaSet repsetName . map connHost <$> readMVar currentMembers
 
-newSetConnPool :: ANetwork' -> Int -> ReplicaSet -> IO (ConnPool ReplicaSet)
+newSetConnPool :: Int -> ReplicaSet -> ANetwork -> IO (ConnPool ReplicaSet)
 -- ^ Create a connection pool to each member of the replica set.
-newSetConnPool net poolSize' repset = assert (not . null $ seedHosts repset) $ do
-	currentMembers <- newMVar =<< mapM (newHostConnPool net poolSize') (seedHosts repset)
+newSetConnPool poolSize' repset net = assert (not . null $ seedHosts repset) $ do
+	currentMembers <- newMVar =<< mapM (\h -> newHostConnPool poolSize' h net) (seedHosts repset)
 	return $ ReplicaSetConnPool net (setName repset) currentMembers
 
 getMembers :: Name -> [ConnPool Host] -> IOE [Host]
@@ -220,13 +217,13 @@ getMembers :: Name -> [ConnPool Host] -> IOE [Host]
 -- TODO: Verify config for request replica set name and not some other replica set. ismaster config should include replica set name in result but currently does not.
 getMembers _repsetName connections = hosts <$> untilSuccess (getReplicaInfo <=< getHostPipe) connections
 
-refreshMembers :: ANetwork' -> Name -> [ConnPool Host] -> IOE [ConnPool Host]
+refreshMembers :: ANetwork -> Name -> [ConnPool Host] -> IOE [ConnPool Host]
 -- ^ Update current members with master at head. Reuse unchanged members. Throw IOError if can't connect to any and fetch config. Dropped connections are not closed in case they still have users; they will be closed when garbage collected.
 refreshMembers net repsetName connections = do
 	n <- liftIO . poolSize . connPool $ head connections
 	mapM (liftIO . connection n) =<< getMembers repsetName connections
  where
-	connection n host' = maybe (newHostConnPool net n host') return mc  where
+	connection n host' = maybe (newHostConnPool n host' net) return mc  where
 		mc = find ((host' ==) . connHost) connections
 		
 

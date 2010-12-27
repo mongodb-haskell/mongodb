@@ -5,8 +5,6 @@ This module is not intended for direct use. Use the high-level interface at "Dat
 {-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings, FlexibleContexts, TupleSections, TypeSynonymInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
 
 module Database.MongoDB.Internal.Protocol (
-	-- * Network
-	Network', ANetwork', Internet(..),
 	-- * Pipe
 	Pipe, send, call,
 	-- * Message
@@ -24,7 +22,6 @@ module Database.MongoDB.Internal.Protocol (
 import Prelude as X
 import Control.Applicative ((<$>))
 import Control.Arrow ((***))
-import System.IO (Handle)
 import Data.ByteString.Lazy as B (length, hPut)
 import qualified Control.Pipeline as P
 import Data.Bson (Document, UString)
@@ -40,57 +37,12 @@ import Data.UString as U (pack, append, toByteString)
 import System.IO.Error as E (try)
 import Control.Monad.Error
 import Control.Monad.Util (whenJust)
-import Network.Abstract (IOE, ANetwork, Network(..), Connection(Connection))
-import Network (connectTo)
-import System.IO (hFlush, hClose)
+import Network.Abstract hiding (send)
+import System.IO (hFlush)
 import Database.MongoDB.Internal.Util (hGetN, bitOr)
-
--- * Network
 
 -- Network -> Server -> (Sink, Source)
 -- (Sink, Source) -> Pipeline
-
-type Message = ([Notice], Maybe (Request, RequestId))
--- ^ Write notice(s), write notice(s) with getLastError request, or just query request
--- Note, that requestId will be out of order because request ids will be generated for notices, after the request id supplied was generated. This is ok because the mongo server does not care about order they are just used as unique identifiers.
-
-type Response = (ResponseTo, Reply)
-
-class (Network n Message Response) => Network' n
-instance (Network n Message Response) => Network' n
-
-type ANetwork' = ANetwork Message Response
-
-data Internet = Internet
--- ^ Normal Network instance, i.e. no logging or replay
-
--- | Connect to server. Write messages and receive replies; not thread-safe!
-instance Network Internet Message Response where
-	connect _ (hostname, portid) = ErrorT . E.try $ do
-		handle <- connectTo hostname portid
-		return $ Connection (sink handle) (source handle) (hClose handle)
-	 where
-		sink h (notices, mRequest) = ErrorT . E.try $ do
-			forM_ notices $ \n -> writeReq h . (Left n,) =<< genRequestId
-			whenJust mRequest $ writeReq h . (Right *** id)
-			hFlush h
-		source h = ErrorT . E.try $ readResp h
-				
-writeReq :: Handle -> (Either Notice Request, RequestId) -> IO ()
-writeReq handle (e, requestId) = do
-	hPut handle lenBytes
-	hPut handle bytes
- where
-	bytes = runPut $ (either putNotice putRequest e) requestId
-	lenBytes = encodeSize . toEnum . fromEnum $ B.length bytes
-	encodeSize = runPut . putInt32 . (+ 4)
-
-readResp :: Handle -> IO (ResponseTo, Reply)
-readResp handle = do
-	len <- fromEnum . decodeSize <$> hGetN handle 4
-	runGet getReply <$> hGetN handle len
- where
-	decodeSize = subtract 4 . runGet getInt32
 
 -- * Pipe
 
@@ -111,7 +63,35 @@ call pipe notices request = do
 	check requestId (responseTo, reply) = if requestId == responseTo then reply else
 		error $ "expected response id (" ++ show responseTo ++ ") to match request id (" ++ show requestId ++ ")"
 
--- * Messages
+-- * Message
+
+type Message = ([Notice], Maybe (Request, RequestId))
+-- ^ A write notice(s), write notice(s) with getLastError request, or just query request.
+-- Note, that requestId will be out of order because request ids will be generated for notices after the request id supplied was generated. This is ok because the mongo server does not care about order just uniqueness.
+
+instance WriteMessage Message where
+	writeMessage handle (notices, mRequest) = ErrorT . E.try $ do
+		forM_ notices $ \n -> writeReq . (Left n,) =<< genRequestId
+		whenJust mRequest $ writeReq . (Right *** id)
+		hFlush handle
+	 where
+		writeReq (e, requestId) = do
+			hPut handle lenBytes
+			hPut handle bytes
+		 where
+			bytes = runPut $ (either putNotice putRequest e) requestId
+			lenBytes = encodeSize . toEnum . fromEnum $ B.length bytes
+		encodeSize = runPut . putInt32 . (+ 4)
+
+type Response = (ResponseTo, Reply)
+-- ^ Message received from a Mongo server in response to a Request
+
+instance ReadMessage Response where
+	readMessage handle = ErrorT . E.try $ readResp  where
+		readResp = do
+			len <- fromEnum . decodeSize <$> hGetN handle 4
+			runGet getReply <$> hGetN handle len
+		decodeSize = subtract 4 . runGet getInt32
 
 type FullCollection = UString
 -- ^ Database name and collection name with period (.) in between. Eg. \"myDb.myCollection\"

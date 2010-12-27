@@ -19,7 +19,8 @@ map/reduce queries on:
     Prelude> :set prompt "> "
     > :set -XOverloadedStrings
     > import Database.MongoDB
-    > conn <- newConnPool Internet 1 (host "localhost")
+    > import Data.CompactString ()
+    > conn <- newConnPool 1 (host "localhost")
     > let run act = access safe Master conn $ use (Database "test") act
     > :{
     run $ insertMany "mr1" [

@@ -41,25 +41,22 @@ Import the MongoDB driver library, and set
 OverloadedStrings so literal strings are converted to UTF-8 automatically.
 
     > import Database.MongoDB
+    > import Data.CompactString ()
     > :set -XOverloadedStrings
 
 Making A Connection
 -------------------
 Create a connection pool for your mongo server, using the standard port (27017):
 
-    > pool <- newConnPool Internet 1 $ host "127.0.0.1"
+    > pool <- newConnPool 1 $ host "127.0.0.1"
 
 or for a non-standard port
 
-    > pool <- newConnPool Internet 1 $ Host "127.0.0.1" (PortNumber 30000)
+    > pool <- newConnPool 1 $ Host "127.0.0.1" (PortNumber 30000)
 
-*newConnPool* takes the *network*, the connection pool size, and the host to connect to. It returns
+*newConnPool* takes the connection pool size, and the host to connect to. It returns
 a *ConnPool*, which is a potential pool of TCP connections. They are not created until first
 access, so it is not possible to get a connection error here.
-
-The network parameter allows you to override normal communications to, for example, log
-or replay messages sent and received from servers. *Internet* is the normal communication mode
-with no logging/replay.
 
 Note, plain IO code in this driver never raises an exception unless it invokes third party IO
 code that does. Driver code that may throw an exception says so in its Monad type,

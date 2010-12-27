@@ -1,5 +1,5 @@
 name: mongoDB
-version: 0.9
+version: 0.9.1
 build-type: Simple
 license: OtherLicense
 license-file: LICENSE
@@ -16,7 +16,8 @@ build-depends:
     nano-md5 -any,
     network -any,
     parsec -any,
-    random -any
+    random -any,
+    compact-string-fix -any
 stability: alpha
 homepage: http://github.com/TonyGen/mongoDB-haskell
 package-url:

@@ -6,20 +6,20 @@ Simple example below. Use with language extension /OvererloadedStrings/.
 > {-# LANGUAGE OverloadedStrings #-}
 >
 > import Database.MongoDB
-> import Data.UString (u)
+> import Data.CompactString ()  -- Show and IsString instances of UString
 > import Control.Monad.Trans (liftIO)
 >
 > main = do
->    pool <- newConnPool Internet 1 (host "127.0.0.1")
+>    pool <- newConnPool 1 (host "127.0.0.1")
 >    e <- access safe Master pool run
 >    print e
 >
 > run = use (Database "baseball") $ do
 >    clearTeams
 >    insertTeams
->    print' "All Teams" =<< allTeams
->    print' "National League Teams" =<< nationalLeagueTeams
->    print' "New York Teams" =<< newYorkTeams
+>    printDocs "All Teams" =<< allTeams
+>    printDocs "National League Teams" =<< nationalLeagueTeams
+>    printDocs "New York Teams" =<< newYorkTeams
 >
 > clearTeams = delete (select [] "team")
 >
@@ -35,7 +35,8 @@ Simple example below. Use with language extension /OvererloadedStrings/.
 >
 > newYorkTeams = rest =<< find (select ["home.state" =: u"NY"] "team") {project = ["name" =: (1 :: Int), "league" =: (1 :: Int)]}
 >
-> print' title docs = liftIO $ putStrLn title >> mapM_ (print . exclude ["_id"]) docs
+> printDocs title docs = liftIO $ putStrLn title >> mapM_ (print . exclude ["_id"]) docs
+>
 -}
 
 module Database.MongoDB (

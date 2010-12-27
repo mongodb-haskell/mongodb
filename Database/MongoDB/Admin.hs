@@ -31,7 +31,7 @@ import Database.MongoDB.Internal.Protocol (pwHash, pwKey)
 import Database.MongoDB.Connection (Host, showHostPort)
 import Database.MongoDB.Query
 import Data.Bson
-import Data.UString (pack, unpack, append, intercalate)
+import Data.UString (pack, append, intercalate)
 import Control.Monad.Reader
 import qualified Data.HashTable as T
 import Data.IORef
@@ -183,8 +183,8 @@ addUser :: (DbAccess m) => Bool -> Username -> Password -> m ()
 -- ^ Add user with password with read-only access if bool is True or read-write access if bool is False
 addUser readOnly user pass = do
 	mu <- findOne (select ["user" =: user] "system.users")
-	let u = merge ["readOnly" =: readOnly, "pwd" =: pwHash user pass] (maybe ["user" =: user] id mu)
-	save "system.users" u
+	let usr = merge ["readOnly" =: readOnly, "pwd" =: pwHash user pass] (maybe ["user" =: user] id mu)
+	save "system.users" usr
 
 removeUser :: (DbAccess m) => Username -> m ()
 removeUser user = delete (select ["user" =: user] "system.users")
@@ -205,9 +205,9 @@ copyDatabase (Database fromDb) fromHost mup (Database toDb) = do
 	let c = ["copydb" =: (1 :: Int), "fromhost" =: showHostPort fromHost, "fromdb" =: fromDb, "todb" =: toDb]
 	use admin $ case mup of
 		Nothing -> runCommand c
-		Just (u, p) -> do
+		Just (usr, pss) -> do
 			n <- at "nonce" <$> runCommand ["copydbgetnonce" =: (1 :: Int), "fromhost" =: showHostPort fromHost]
-			runCommand $ c ++ ["username" =: u, "nonce" =: n, "key" =: pwKey n u p]
+			runCommand $ c ++ ["username" =: usr, "nonce" =: n, "key" =: pwKey n usr pss]
 
 dropDatabase :: (Access m) => Database -> m Document
 -- ^ Delete the given database!
