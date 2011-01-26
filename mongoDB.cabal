@@ -16,8 +16,7 @@ build-depends:
     nano-md5 -any,
     network -any,
     parsec -any,
-    random -any,
-    compact-string-fix -any
+    random -any
 stability: alpha
 homepage: http://github.com/TonyGen/mongoDB-haskell
 package-url:
