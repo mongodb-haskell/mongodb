@@ -70,11 +70,30 @@ access w mos pool act = do
 	either (return . Left . ConnectionFailure) (runAction act w mos) ePipe
 
 -- | A monad with access to a 'Pipe', 'MasterOrSlaveOk', and 'WriteMode', and throws 'Failure' on read, write, or pipe failure
-class (Context Pipe m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, MonadIO' m, MonadMVar m) => Access m
-instance (Context Pipe m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, MonadIO' m, MonadMVar m) => Access m
+class (Context Pipe m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, MonadIO' m) => Access m
+instance (Context Pipe m, Context MasterOrSlaveOk m, Context WriteMode m, Throw Failure m, MonadIO' m) => Access m
+
+wrapIO :: (Access m) => (WriteMode -> MasterOrSlaveOk -> Pipe -> IO (Either Failure a)) -> m a
+-- ^ Lift IO with Access context and failure into Access monad
+wrapIO act = do
+	writeMod <- context
+	mos <- context
+	pipe <- context
+	e <- liftIO (act writeMod mos pipe)
+	either throw return e
+
+modifyMVar' :: (Access m) => MVar a -> (a -> Action IO (a, b)) -> m b
+modifyMVar' var act = wrapIO $ \w m p -> modifyMVar var $ \a -> do
+	e <- runAction (act a) w m p
+	return $ either ((a,) . Left) (Right <$>) e
+	
+addMVarFinalizer' :: (Access m) => MVar a -> Action IO () -> m ()
+addMVarFinalizer' var act = wrapIO $ \w m p -> do
+	addMVarFinalizer var $ runAction act w m p >> return ()  -- ignore any failure
+	return (Right ())
 
 newtype Action m a = Action (ErrorT Failure (ReaderT WriteMode (ReaderT MasterOrSlaveOk (ReaderT Pipe m))) a)
-	deriving (Context Pipe, Context MasterOrSlaveOk, Context WriteMode, Throw Failure, MonadIO, MonadMVar, Monad, Applicative, Functor)
+	deriving (Context Pipe, Context MasterOrSlaveOk, Context WriteMode, Throw Failure, MonadIO, Monad, Applicative, Functor)
 -- ^ Monad with access to a 'Pipe', 'MasterOrSlaveOk', and 'WriteMode', and throws a 'Failure' on read, write or pipe failure
 
 instance MonadTrans Action where
@@ -440,13 +459,14 @@ newCursor :: (Access m) => Database -> Collection -> BatchSize -> DelayedCursorS
 newCursor (Database db) col batch cs = do
 	var <- newMVar cs
 	let cursor = Cursor (db <.> col) batch var
-	addMVarFinalizer var (closeCursor cursor)
+	addMVarFinalizer' var (closeCursor cursor)
 	return cursor
 
 next :: (Access m) => Cursor -> m (Maybe Document)
 -- ^ Return next document in query result, or Nothing if finished.
-next (Cursor fcol batch var) = modifyMVar var nextState where
+next (Cursor fcol batch var) = modifyMVar' var nextState where
 	-- Pre-fetch next batch promise from server when last one in current batch is returned.
+	nextState:: DelayedCursorState -> Action IO (DelayedCursorState, Maybe Document)
 	nextState dcs = do
 		CS limit cid docs <- mapErrorIO id dcs
 		case docs of
@@ -470,7 +490,7 @@ rest :: (Access m) => Cursor -> m [Document]
 rest c = loop (next c)
 
 closeCursor :: (Access m) => Cursor -> m ()
-closeCursor (Cursor _ _ var) = modifyMVar var kill' where
+closeCursor (Cursor _ _ var) = modifyMVar' var kill' where
  	kill' dcs = first return <$> (kill =<< mapErrorIO id dcs)
 	kill (CS _ cid _) = (CS 0 0 [],) <$> if cid == 0 then return () else send [KillCursors [cid]]
 

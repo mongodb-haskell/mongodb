@@ -1,5 +1,5 @@
 name: mongoDB
-version: 0.9.1
+version: 0.9.2
 build-type: Simple
 license: OtherLicense
 license-file: LICENSE
@@ -21,8 +21,8 @@ stability: alpha
 homepage: http://github.com/TonyGen/mongoDB-haskell
 package-url:
 bug-reports:
-synopsis: A driver for MongoDB
-description: This module lets you connect to MongoDB (www.mongodb.org) and do inserts, queries, updates, etc.
+synopsis: MongoDB driver
+description: This module lets you connect to MongoDB (www.mongodb.org) and do inserts, queries, updates, etc. Please see the example in Database.MongoDB and the tutorial from the homepage.
 category: Database
 author: Tony Hannan <tony@10gen.com> & Scott Parish <srp@srparish.net>
 tested-with:
