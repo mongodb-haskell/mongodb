@@ -1,6 +1,6 @@
 {- | A pool of TCP connections to a single server or a replica set of servers. -}
 
-{-# LANGUAGE OverloadedStrings, ScopedTypeVariables, RecordWildCards, NamedFieldPuns, MultiParamTypeClasses, FlexibleContexts, TypeFamilies, DoRec, RankNTypes, FlexibleInstances #-}
+{-# LANGUAGE CPP, OverloadedStrings, ScopedTypeVariables, RecordWildCards, NamedFieldPuns, MultiParamTypeClasses, FlexibleContexts, TypeFamilies, DoRec, RankNTypes, FlexibleInstances #-}
 
 module Database.MongoDB.Connection (
 	-- * Pipe
@@ -70,7 +70,9 @@ showHostPort :: Host -> String
 showHostPort (Host hostname port) = hostname ++ ":" ++ (case port of
 	Service s -> s
 	PortNumber p -> show p
+#if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
 	UnixSocket s -> s)
+#endif
 
 readHostPortM :: (Monad m) => String -> m Host
 -- ^ Read string \"hostname:port\" as @Host hosthame port@ or \"hostname\" as @host hostname@ (default port). Fail if string does not match either syntax.
