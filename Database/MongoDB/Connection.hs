@@ -67,15 +67,18 @@ host hostname = Host hostname defaultPort
 
 showHostPort :: Host -> String
 -- ^ Display host as \"host:port\"
-showHostPort (Host hostname port) = hostname ++ ":" ++ (case port of
-	Service s -> s
-	PortNumber p -> show p
+-- TODO: Distinguish Service and UnixSocket port
+showHostPort (Host hostname port) = hostname ++ ":" ++ portname  where
+	portname = case port of
+		Service s -> s
+		PortNumber p -> show p
 #if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
-	UnixSocket s -> s)
+		UnixSocket s -> s
 #endif
 
 readHostPortM :: (Monad m) => String -> m Host
 -- ^ Read string \"hostname:port\" as @Host hosthame port@ or \"hostname\" as @host hostname@ (default port). Fail if string does not match either syntax.
+-- TODO: handle Service and UnixSocket port
 readHostPortM = either (fail . show) return . parse parser "readHostPort" where
 	hostname = many1 (letter <|> digit <|> char '-' <|> char '.')
 	parser = do
