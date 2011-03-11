@@ -52,7 +52,9 @@ commandReply :: String -> Reply -> Document
 -- ^ Extract first document from reply. Error if query error, using given string as prefix error message.
 commandReply title Reply{..} = if elem QueryError rResponseFlags
 	then error $ title ++ ": " ++ at "$err" (head rDocuments)
-	else head rDocuments
+	else if null rDocuments
+		then error ("empty reply to: " ++ title)
+		else head rDocuments
 
 -- * Host
 
@@ -219,8 +221,12 @@ newSetConnPool poolSize' repset net = assert (not . null $ seedHosts repset) $ d
 
 getMembers :: Name -> [ConnPool Host] -> IOE [Host]
 -- ^ Get members of replica set, master first. Query supplied connections until config found.
+-- TODO: make master first
 -- TODO: Verify config for request replica set name and not some other replica set. ismaster config should include replica set name in result but currently does not.
-getMembers _repsetName connections = hosts <$> untilSuccess (getReplicaInfo <=< getHostPipe) connections
+getMembers _repsetName connections = do
+	info <- untilSuccess (getReplicaInfo <=< getHostPipe) connections
+	when (null $ hosts info) $ fail $ "no hosts in " ++ show info
+	return $ hosts info
 
 refreshMembers :: ANetwork -> Name -> [ConnPool Host] -> IOE [ConnPool Host]
 -- ^ Update current members with master at head. Reuse unchanged members. Throw IOError if can't connect to any and fetch config. Dropped connections are not closed in case they still have users; they will be closed when garbage collected.
@@ -246,5 +252,5 @@ getSetPipe mos ReplicaSetConnPool{..} = modifyMVar currentMembers $ \conns -> do
 
 
 {- Authors: Tony Hannan <tony@10gen.com>
-   Copyright 2010 10gen Inc.
+   Copyright 2011 10gen Inc.
    Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at: http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License. -}
