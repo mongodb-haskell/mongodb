@@ -32,14 +32,17 @@ import Data.Int
 import Data.Bits
 import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
-import Data.Digest.OpenSSL.MD5 (md5sum)
+import qualified Crypto.Hash.MD5 as MD5 (hash)
 import Data.UString as U (pack, append, toByteString)
+import qualified Data.ByteString as BS (ByteString, unpack)
+import Data.Word (Word8)
 import System.IO.Error as E (try)
 import Control.Monad.Error
 import Control.Monad.Util (whenJust)
 import Network.Abstract hiding (send)
 import System.IO (hFlush)
 import Database.MongoDB.Internal.Util (hGetN, bitOr)
+import Numeric (showHex)
 
 -- Network -> Server -> (Sink, Source)
 -- (Sink, Source) -> Pipeline
@@ -306,7 +309,15 @@ type Password = UString
 type Nonce = UString
 
 pwHash :: Username -> Password -> UString
-pwHash u p = pack . md5sum . toByteString $ u `U.append` ":mongo:" `U.append` p
+pwHash u p = pack . byteStringHex . MD5.hash . toByteString $ u `U.append` ":mongo:" `U.append` p
 
 pwKey :: Nonce -> Username -> Password -> UString
-pwKey n u p = pack . md5sum . toByteString . U.append n . U.append u $ pwHash u p
+pwKey n u p = pack . byteStringHex . MD5.hash . toByteString . U.append n . U.append u $ pwHash u p
+
+byteStringHex :: BS.ByteString -> String
+-- ^ Hexadecimal string representation of a byte string. Each byte yields two hexadecimal characters.
+byteStringHex = concatMap byteHex . BS.unpack
+
+byteHex :: Word8 -> String
+-- ^ Two char hexadecimal representation of byte
+byteHex b = (if b < 16 then ('0' :) else id) (showHex b "")

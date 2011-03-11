@@ -1,5 +1,5 @@
 name: mongoDB
-version: 0.9.4
+version: 0.9.5
 build-type: Simple
 license: OtherLicense
 license-file: LICENSE
@@ -13,7 +13,7 @@ build-depends:
     bytestring -any,
     containers -any,
     mtl >= 2,
-    nano-md5 -any,
+    cryptohash -any,
     network -any,
     parsec -any,
     random -any
