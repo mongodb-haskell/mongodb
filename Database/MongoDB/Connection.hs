@@ -16,10 +16,11 @@ module Database.MongoDB.Connection (
 	connHost, replicaSet
 ) where
 
+import Prelude hiding (lookup)
 import Database.MongoDB.Internal.Protocol as X
 import qualified Network.Abstract as C
 import Network.Abstract (IOE, NetworkIO, ANetwork)
-import Data.Bson ((=:), at, UString)
+import Data.Bson ((=:), at, lookup, UString)
 import Control.Pipeline as P
 import Control.Applicative ((<$>))
 import Control.Exception (assert)
@@ -44,7 +45,7 @@ adminCommand cmd = Query{..} where
 	qOptions = [SlaveOK]
 	qFullCollection = "admin.$cmd"
 	qSkip = 0
-	qBatchSize = 0
+	qBatchSize = -1
 	qSelector = cmd
 	qProjector = []
 
@@ -105,16 +106,17 @@ instance Eq ReplicaSet where ReplicaSet x _ == ReplicaSet y _ = x == y
 
 -- ** Replica Info
 
-getReplicaInfo :: Pipe -> IOE ReplicaInfo
+getReplicaInfo :: ConnPool Host -> IOE ReplicaInfo
 -- ^ Get replica info of the connected host. Throw IOError if connection fails or host is not part of a replica set (no /hosts/ and /primary/ field).
-getReplicaInfo pipe = do
+getReplicaInfo conn = do
+	pipe <- getHostPipe conn
 	promise <- X.call pipe [] (adminCommand ["ismaster" =: (1 :: Int)])
 	info <- commandReply "ismaster" <$> promise
 	_ <- look "hosts" info
-	_ <- look "primary" info
-	return info
+	_ <- look "ismaster" info
+	return $ ReplicaInfo (connHost conn) info
 
-type ReplicaInfo = Document
+data ReplicaInfo = ReplicaInfo {infoHost :: Host, infoDoc :: Document}  deriving (Show)
 -- ^ Configuration info of a host in a replica set (result of /ismaster/ command). Contains all the hosts in the replica set plus its role in that set (master, slave, or arbiter)
 
 {- isPrimary :: ReplicaInfo -> Bool
@@ -125,18 +127,14 @@ isSecondary :: ReplicaInfo -> Bool
 -- ^ Is the replica described by this info a slave/secondary (not master or arbiter)
 isSecondary = true1 "secondary" -}
 
+primary :: ReplicaInfo -> Maybe Host
+-- ^ Read primary from configuration info. During failover or minor network partition there is no primary (Nothing).
+primary (ReplicaInfo host info) = if at "ismaster" info then Just host else readHostPort <$> lookup "primary" info
+
 replicas :: ReplicaInfo -> [Host]
--- ^ All replicas in set according to this replica configuration info.
-replicas = map readHostPort . at "hosts"
-
-primary :: ReplicaInfo -> Host
--- ^ Read primary from configuration info
-primary = readHostPort . at "primary"
-
-hosts :: ReplicaInfo -> [Host]
--- ^ replicas with primary at head
-hosts info = master : delete master members  where
-	members = replicas info
+-- ^ All replicas in set according to this replica configuration info with primary at head, if there is one.
+replicas info = maybe members (\m -> m : delete m members) master  where
+	members = map readHostPort $ at "hosts" (infoDoc info)
 	master = primary info
 
 -- * MasterOrSlaveOk
@@ -221,12 +219,8 @@ newSetConnPool poolSize' repset net = assert (not . null $ seedHosts repset) $ d
 
 getMembers :: Name -> [ConnPool Host] -> IOE [Host]
 -- ^ Get members of replica set, master first. Query supplied connections until config found.
--- TODO: make master first
--- TODO: Verify config for request replica set name and not some other replica set. ismaster config should include replica set name in result but currently does not.
-getMembers _repsetName connections = do
-	info <- untilSuccess (getReplicaInfo <=< getHostPipe) connections
-	when (null $ hosts info) $ fail $ "no hosts in " ++ show info
-	return $ hosts info
+-- TODO: Verify config for request replica set name and not some other replica set. "ismaster" reply includes "setName" in result.
+getMembers _repsetName connections = replicas <$> untilSuccess getReplicaInfo connections
 
 refreshMembers :: ANetwork -> Name -> [ConnPool Host] -> IOE [ConnPool Host]
 -- ^ Update current members with master at head. Reuse unchanged members. Throw IOError if can't connect to any and fetch config. Dropped connections are not closed in case they still have users; they will be closed when garbage collected.
