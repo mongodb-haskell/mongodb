@@ -116,7 +116,7 @@ getReplicaInfo conn = do
 	_ <- look "ismaster" info
 	return $ ReplicaInfo (connHost conn) info
 
-data ReplicaInfo = ReplicaInfo {infoHost :: Host, infoDoc :: Document}  deriving (Show)
+data ReplicaInfo = ReplicaInfo {_infoHost :: Host, infoDoc :: Document}  deriving (Show)
 -- ^ Configuration info of a host in a replica set (result of /ismaster/ command). Contains all the hosts in the replica set plus its role in that set (master, slave, or arbiter)
 
 {- isPrimary :: ReplicaInfo -> Bool
@@ -129,7 +129,7 @@ isSecondary = true1 "secondary" -}
 
 primary :: ReplicaInfo -> Maybe Host
 -- ^ Read primary from configuration info. During failover or minor network partition there is no primary (Nothing).
-primary (ReplicaInfo host info) = if at "ismaster" info then Just host else readHostPort <$> lookup "primary" info
+primary (ReplicaInfo host' info) = if at "ismaster" info then Just host' else readHostPort <$> lookup "primary" info
 
 replicas :: ReplicaInfo -> [Host]
 -- ^ All replicas in set according to this replica configuration info with primary at head, if there is one.
