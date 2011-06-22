@@ -13,14 +13,13 @@ Setup
 To start, we'll insert some example data which we can perform
 map/reduce queries on:
 
-    $ ghci -package mongoDB
-    GHCi, version 6.12.1: http://www.haskell.org/ghc/  :? for help
+    $ ghci
     ...
     Prelude> :set prompt "> "
     > :set -XOverloadedStrings
     > import Database.MongoDB
     > import Data.CompactString ()
-    > conn <- newConnPool 1 (host "localhost")
+    > conn <- newConnPool 1 (host "127.0.0.1")
     > let run act = access safe Master conn $ use (Database "test") act
     > :{
     run $ insertMany "mr1" [
@@ -68,18 +67,17 @@ key:
 Note: We can't just return values.length as the reduce function might
 be called iteratively on the results of other reduce steps.
 
-Finally, we run mapReduce and iterate over the result collection:
-
-    > run $ runMR (mapReduce "mr1" mapFn reduceFn) >>= rest
-    Right [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]]
-
-Advanced Map/Reduce
--------------------
-
-MongoDB returns additional statistics in the map/reduce results. To
-obtain them, use *runMR'* instead:
+Finally, we run mapReduce, results by default will be return in an array in the result document (inlined):
 
     > run $ runMR' (mapReduce "mr1" mapFn reduceFn)
-    Right [ result: "tmp.mr.mapreduce_1276482643_7", timeMillis: 379, counts: [ input: 4, emit: 6, output: 3], ok: 1.0]
+    Right [ results: [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]], timeMillis: 379, counts: [ input: 4, emit: 6, reduce: 2, output: 3], ok: 1.0]
 
-You can then obtain the results from here by quering the result collection yourself. *runMR* (above) does this for you but discards the statistics.
+Inlining only works if result set < 16MB. An alternative to inlining is outputing to a collection. But what to do if there is data already in the collection from a previous run of the same MapReduce? You have three alternatives in the MRMerge data type: Replace, Merge, and Reduce. See its documentation for details. To output to a collection, set the mOut field in MapReduce.
+
+	> run $ runMR' (mapReduce "mr1" mapFn reduceFn) {rOut = Output Replace "mr1out" Nothing}
+	Right [ result: "mr1out", timeMillis: 379, counts: [ input: 4, emit: 6, reduce: 2, output: 3], ok: 1.0]
+
+You can now query the mr1out collection to see the result, or run another MapReduce on it! A shortcut for running the map-reduce then querying the result collection right away is `runMR`.
+
+	> run $ rest =<< runMR (mapReduce "mr1" mapFn reduceFn) {rOut = Output Replace "mr1out" Nothing}
+	Right [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]]
