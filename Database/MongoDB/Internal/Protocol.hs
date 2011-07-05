@@ -5,10 +5,12 @@ This module is not intended for direct use. Use the high-level interface at "Dat
 {-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings, FlexibleContexts, TupleSections, TypeSynonymInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
 
 module Database.MongoDB.Internal.Protocol (
+	MasterOrSlaveOk(..),
+	FullCollection,
 	-- * Pipe
 	Pipe, send, call,
 	-- * Message
-	FullCollection,
+	writeMessage, readMessage,
 	-- ** Notice
 	Notice(..), UpdateOption(..), DeleteOption(..), CursorId,
 	-- ** Request
@@ -23,7 +25,9 @@ import Prelude as X
 import Control.Applicative ((<$>))
 import Control.Arrow ((***))
 import Data.ByteString.Lazy as B (length, hPut)
-import qualified Control.Pipeline as P
+import System.IO.Pipeline (IOE, Pipeline)
+import qualified System.IO.Pipeline as P (send, call)
+import System.IO (Handle)
 import Data.Bson (Document, UString)
 import Data.Bson.Binary
 import Data.Binary.Put
@@ -34,22 +38,21 @@ import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Crypto.Hash.MD5 as MD5 (hash)
 import Data.UString as U (pack, append, toByteString)
-import qualified Data.ByteString as BS (ByteString, unpack)
-import Data.Word (Word8)
 import System.IO.Error as E (try)
 import Control.Monad.Error
-import Control.Monad.Util (whenJust)
-import Network.Abstract hiding (send)
 import System.IO (hFlush)
-import Database.MongoDB.Internal.Util (hGetN, bitOr)
-import Numeric (showHex)
+import Database.MongoDB.Internal.Util (whenJust, hGetN, bitOr, byteStringHex)
 
--- Network -> Server -> (Sink, Source)
--- (Sink, Source) -> Pipeline
+-- * MasterOrSlaveOk
+
+data MasterOrSlaveOk =
+	  Master  -- ^ connect to master only
+	| SlaveOk  -- ^ connect to a slave, or master if no slave available
+	deriving (Show, Eq)
 
 -- * Pipe
 
-type Pipe = P.Pipeline Message Response
+type Pipe = Pipeline Response Message
 -- ^ Thread-safe TCP connection with pipelined requests
 
 send :: Pipe -> [Notice] -> IOE ()
@@ -69,32 +72,34 @@ call pipe notices request = do
 -- * Message
 
 type Message = ([Notice], Maybe (Request, RequestId))
--- ^ A write notice(s), write notice(s) with getLastError request, or just query request.
+-- ^ A write notice(s) with getLastError request, or just query request.
 -- Note, that requestId will be out of order because request ids will be generated for notices after the request id supplied was generated. This is ok because the mongo server does not care about order just uniqueness.
 
-instance WriteMessage Message where
-	writeMessage handle (notices, mRequest) = ErrorT . E.try $ do
-		forM_ notices $ \n -> writeReq . (Left n,) =<< genRequestId
-		whenJust mRequest $ writeReq . (Right *** id)
-		hFlush handle
+writeMessage :: Handle -> Message -> IOE ()
+-- ^ Write message to socket
+writeMessage handle (notices, mRequest) = ErrorT . E.try $ do
+	forM_ notices $ \n -> writeReq . (Left n,) =<< genRequestId
+	whenJust mRequest $ writeReq . (Right *** id)
+	hFlush handle
+ where
+	writeReq (e, requestId) = do
+		hPut handle lenBytes
+		hPut handle bytes
 	 where
-		writeReq (e, requestId) = do
-			hPut handle lenBytes
-			hPut handle bytes
-		 where
-			bytes = runPut $ (either putNotice putRequest e) requestId
-			lenBytes = encodeSize . toEnum . fromEnum $ B.length bytes
-		encodeSize = runPut . putInt32 . (+ 4)
+		bytes = runPut $ (either putNotice putRequest e) requestId
+		lenBytes = encodeSize . toEnum . fromEnum $ B.length bytes
+	encodeSize = runPut . putInt32 . (+ 4)
 
 type Response = (ResponseTo, Reply)
 -- ^ Message received from a Mongo server in response to a Request
 
-instance ReadMessage Response where
-	readMessage handle = ErrorT . E.try $ readResp  where
-		readResp = do
-			len <- fromEnum . decodeSize <$> hGetN handle 4
-			runGet getReply <$> hGetN handle len
-		decodeSize = subtract 4 . runGet getInt32
+readMessage :: Handle -> IOE Response
+-- ^ read response from socket
+readMessage handle = ErrorT $ E.try readResp  where
+	readResp = do
+		len <- fromEnum . decodeSize <$> hGetN handle 4
+		runGet getReply <$> hGetN handle len
+	decodeSize = subtract 4 . runGet getInt32
 
 type FullCollection = UString
 -- ^ Database name and collection name with period (.) in between. Eg. \"myDb.myCollection\"
@@ -314,10 +319,7 @@ pwHash u p = pack . byteStringHex . MD5.hash . toByteString $ u `U.append` ":mon
 pwKey :: Nonce -> Username -> Password -> UString
 pwKey n u p = pack . byteStringHex . MD5.hash . toByteString . U.append n . U.append u $ pwHash u p
 
-byteStringHex :: BS.ByteString -> String
--- ^ Hexadecimal string representation of a byte string. Each byte yields two hexadecimal characters.
-byteStringHex = concatMap byteHex . BS.unpack
 
-byteHex :: Word8 -> String
--- ^ Two char hexadecimal representation of byte
-byteHex b = (if b < 16 then ('0' :) else id) (showHex b "")
+{- Authors: Tony Hannan <tony@10gen.com>
+   Copyright 2011 10gen Inc.
+   Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at: http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License. -}

@@ -6,15 +6,15 @@ Simple example below. Use with language extension /OvererloadedStrings/.
 > {-# LANGUAGE OverloadedStrings #-}
 >
 > import Database.MongoDB
-> import Data.CompactString ()  -- Show and IsString instances of UString
 > import Control.Monad.Trans (liftIO)
 >
 > main = do
->    pool <- newConnPool 1 (host "127.0.0.1")
->    e <- access safe Master pool run
+>    pipe <- runIOE $ connect (host "127.0.0.1")
+>    e <- access pipe safe Master "baseball" run
+>    close pipe
 >    print e
 >
-> run = use (Database "baseball") $ do
+> run = do
 >    clearTeams
 >    insertTeams
 >    printDocs "All Teams" =<< allTeams

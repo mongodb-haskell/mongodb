@@ -38,7 +38,8 @@ import Data.IORef
 import qualified Data.Set as S
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent (forkIO, threadDelay)
-import Database.MongoDB.Internal.Util ((<.>), true1)
+import Database.MongoDB.Internal.Util (MonadIO', (<.>), true1)
+import Control.Monad.MVar (MonadMVar)
 
 -- * Admin
 
@@ -51,17 +52,17 @@ coptElem Capped = "capped" =: True
 coptElem (MaxByteSize n) = "size" =: n
 coptElem (MaxItems n) = "max" =: n
 
-createCollection :: (DbAccess m) => [CollectionOption] -> Collection -> m Document
+createCollection :: (MonadIO' m) => [CollectionOption] -> Collection -> Action m Document
 -- ^ Create collection with given options. You only need to call this to set options, otherwise a collection is created automatically on first use with no options.
 createCollection opts col = runCommand $ ["create" =: col] ++ map coptElem opts
 
-renameCollection :: (DbAccess m) => Collection -> Collection -> m Document
+renameCollection :: (MonadIO' m) => Collection -> Collection -> Action m Document
 -- ^ Rename first collection to second collection
 renameCollection from to = do
-	Database db <- thisDatabase
-	use admin $ runCommand ["renameCollection" =: db <.> from, "to" =: db <.> to, "dropTarget" =: True]
+	db <- thisDatabase
+	useDb admin $ runCommand ["renameCollection" =: db <.> from, "to" =: db <.> to, "dropTarget" =: True]
 
-dropCollection :: (DbAccess m) => Collection -> m Bool
+dropCollection :: (MonadIO' m) => Collection -> Action m Bool
 -- ^ Delete the given collection! Return True if collection existed (and was deleted); return False if collection did not exist (and no action).
 dropCollection coll = do
 	resetIndexCache
@@ -70,7 +71,7 @@ dropCollection coll = do
 		if at "errmsg" r == ("ns not found" :: UString) then return False else
 			fail $ "dropCollection failed: " ++ show r
 
-validateCollection :: (DbAccess m) => Collection -> m Document
+validateCollection :: (MonadIO' m) => Collection -> Action m Document
 -- ^ This operation takes a while
 validateCollection coll = runCommand ["validate" =: coll]
 
@@ -87,7 +88,7 @@ data Index = Index {
 	} deriving (Show, Eq)
 
 idxDocument :: Index -> Database -> Document
-idxDocument Index{..} (Database db) = [
+idxDocument Index{..} db = [
 	"ns" =: db <.> iColl,
 	"key" =: iKey,
 	"name" =: iName,
@@ -102,7 +103,7 @@ genName :: Order -> IndexName
 genName keys = intercalate "_" (map f keys)  where
 	f (k := v) = k `append` "_" `append` pack (show v)
 
-ensureIndex :: (DbAccess m) => Index -> m ()
+ensureIndex :: (MonadIO' m) => Index -> Action m ()
 -- ^ Create index if we did not already create one. May be called repeatedly with practically no performance hit, because we remember if we already called this for the same index (although this memory gets wiped out every 15 minutes, in case another client drops the index and we want to create it again).
 ensureIndex idx = let k = (iColl idx, iName idx) in do
 	icache <- fetchIndexCache
@@ -111,23 +112,23 @@ ensureIndex idx = let k = (iColl idx, iName idx) in do
 		writeMode (Safe []) (createIndex idx)
 		liftIO $ writeIORef icache (S.insert k set)
 
-createIndex :: (DbAccess m) => Index -> m ()
+createIndex :: (MonadIO' m) => Index -> Action m ()
 -- ^ Create index on the server. This call goes to the server every time.
 createIndex idx = insert_ "system.indexes" . idxDocument idx =<< thisDatabase
 
-dropIndex :: (DbAccess m) => Collection -> IndexName -> m Document
+dropIndex :: (MonadIO' m) => Collection -> IndexName -> Action m Document
 -- ^ Remove the index
 dropIndex coll idxName = do
 	resetIndexCache
 	runCommand ["deleteIndexes" =: coll, "index" =: idxName]
 
-getIndexes :: (DbAccess m) => Collection -> m [Document]
+getIndexes :: (MonadMVar m, Functor m) => Collection -> Action m [Document]
 -- ^ Get all indexes on this collection
 getIndexes coll = do
-	Database db <- thisDatabase
+	db <- thisDatabase
 	rest =<< find (select ["ns" =: db <.> coll] "system.indexes")
 
-dropIndexes :: (DbAccess m) => Collection -> m Document
+dropIndexes :: (MonadIO' m) => Collection -> Action m Document
 -- ^ Drop all indexes on this collection
 dropIndexes coll = do
 	resetIndexCache
@@ -143,7 +144,7 @@ type IndexCache = IORef (S.Set (Collection, IndexName))
 dbIndexCache :: DbIndexCache
 -- ^ initialize cache and fork thread that clears it every 15 minutes
 dbIndexCache = unsafePerformIO $ do
-	table <- T.new (==) (T.hashString . unpack . databaseName)
+	table <- T.new (==) (T.hashString . unpack)
 	_ <- forkIO . forever $ threadDelay 900000000 >> clearDbIndexCache
 	return table
 {-# NOINLINE dbIndexCache #-}
@@ -153,7 +154,7 @@ clearDbIndexCache = do
 	keys <- map fst <$> T.toList dbIndexCache
 	mapM_ (T.delete dbIndexCache) keys
 
-fetchIndexCache :: (DbAccess m) => m IndexCache
+fetchIndexCache :: (MonadIO m) => Action m IndexCache
 -- ^ Get index cache for current database
 fetchIndexCache = do
 	db <- thisDatabase
@@ -166,7 +167,7 @@ fetchIndexCache = do
 		T.insert dbIndexCache db idx
 		return idx
 
-resetIndexCache :: (DbAccess m) => m ()
+resetIndexCache :: (MonadIO m) => Action m ()
 -- ^ reset index cache for current database
 resetIndexCache = do
 	icache <- fetchIndexCache
@@ -174,74 +175,74 @@ resetIndexCache = do
 
 -- ** User
 
-allUsers :: (DbAccess m) => m [Document]
+allUsers :: (MonadMVar m, Functor m) => Action m [Document]
 -- ^ Fetch all users of this database
 allUsers = map (exclude ["_id"]) <$> (rest =<< find
 	(select [] "system.users") {sort = ["user" =: (1 :: Int)], project = ["user" =: (1 :: Int), "readOnly" =: (1 :: Int)]})
 
-addUser :: (DbAccess m) => Bool -> Username -> Password -> m ()
+addUser :: (MonadIO' m) => Bool -> Username -> Password -> Action m ()
 -- ^ Add user with password with read-only access if bool is True or read-write access if bool is False
 addUser readOnly user pass = do
 	mu <- findOne (select ["user" =: user] "system.users")
 	let usr = merge ["readOnly" =: readOnly, "pwd" =: pwHash user pass] (maybe ["user" =: user] id mu)
 	save "system.users" usr
 
-removeUser :: (DbAccess m) => Username -> m ()
+removeUser :: (MonadIO m) => Username -> Action m ()
 removeUser user = delete (select ["user" =: user] "system.users")
 
 -- ** Database
 
 admin :: Database
 -- ^ \"admin\" database
-admin = Database "admin"
+admin = "admin"
 
-cloneDatabase :: (Access m) => Database -> Host -> m Document
+cloneDatabase :: (MonadIO' m) => Database -> Host -> Action m Document
 -- ^ Copy database from given host to the server I am connected to. Fails and returns @"ok" = 0@ if we don't have permission to read from given server (use copyDatabase in this case).
-cloneDatabase db fromHost = use db $ runCommand ["clone" =: showHostPort fromHost]
+cloneDatabase db fromHost = useDb db $ runCommand ["clone" =: showHostPort fromHost]
 
-copyDatabase :: (Access m) => Database -> Host -> Maybe (Username, Password) -> Database -> m Document
+copyDatabase :: (MonadIO' m) => Database -> Host -> Maybe (Username, Password) -> Database -> Action m Document
 -- ^ Copy database from given host to the server I am connected to. If username & password is supplied use them to read from given host.
-copyDatabase (Database fromDb) fromHost mup (Database toDb) = do
+copyDatabase fromDb fromHost mup toDb = do
 	let c = ["copydb" =: (1 :: Int), "fromhost" =: showHostPort fromHost, "fromdb" =: fromDb, "todb" =: toDb]
-	use admin $ case mup of
+	useDb admin $ case mup of
 		Nothing -> runCommand c
 		Just (usr, pss) -> do
 			n <- at "nonce" <$> runCommand ["copydbgetnonce" =: (1 :: Int), "fromhost" =: showHostPort fromHost]
 			runCommand $ c ++ ["username" =: usr, "nonce" =: n, "key" =: pwKey n usr pss]
 
-dropDatabase :: (Access m) => Database -> m Document
+dropDatabase :: (MonadIO' m) => Database -> Action m Document
 -- ^ Delete the given database!
-dropDatabase db = use db $ runCommand ["dropDatabase" =: (1 :: Int)]
+dropDatabase db = useDb db $ runCommand ["dropDatabase" =: (1 :: Int)]
 
-repairDatabase :: (Access m) => Database -> m Document
+repairDatabase :: (MonadIO' m) => Database -> Action m Document
 -- ^ Attempt to fix any corrupt records. This operation takes a while.
-repairDatabase db = use db $ runCommand ["repairDatabase" =: (1 :: Int)]
+repairDatabase db = useDb db $ runCommand ["repairDatabase" =: (1 :: Int)]
 
 -- ** Server
 
-serverBuildInfo :: (Access m) => m Document
-serverBuildInfo = use admin $ runCommand ["buildinfo" =: (1 :: Int)]
+serverBuildInfo :: (MonadIO' m) => Action m Document
+serverBuildInfo = useDb admin $ runCommand ["buildinfo" =: (1 :: Int)]
 
-serverVersion :: (Access m) => m UString
+serverVersion :: (MonadIO' m) => Action m UString
 serverVersion = at "version" <$> serverBuildInfo
 
 -- * Diagnostics
 
 -- ** Collection
 
-collectionStats :: (DbAccess m) => Collection -> m Document
+collectionStats :: (MonadIO' m) => Collection -> Action m Document
 collectionStats coll = runCommand ["collstats" =: coll]
 
-dataSize :: (DbAccess m) => Collection -> m Int
+dataSize :: (MonadIO' m) => Collection -> Action m Int
 dataSize c = at "size" <$> collectionStats c
 
-storageSize :: (DbAccess m) => Collection -> m Int
+storageSize :: (MonadIO' m) => Collection -> Action m Int
 storageSize c = at "storageSize" <$> collectionStats c
 
-totalIndexSize :: (DbAccess m) => Collection -> m Int
+totalIndexSize :: (MonadIO' m) => Collection -> Action m Int
 totalIndexSize c = at "totalIndexSize" <$> collectionStats c
 
-totalSize :: (DbAccess m) => Collection -> m Int
+totalSize :: (MonadMVar m, MonadIO' m) => Collection -> Action m Int
 totalSize coll = do
 	x <- storageSize coll
 	xs <- mapM isize =<< getIndexes coll
@@ -253,35 +254,35 @@ totalSize coll = do
 
 data ProfilingLevel = Off | Slow | All  deriving (Show, Enum, Eq)
 
-getProfilingLevel :: (DbAccess m) => m ProfilingLevel
+getProfilingLevel :: (MonadIO' m) => Action m ProfilingLevel
 getProfilingLevel = toEnum . at "was" <$> runCommand ["profile" =: (-1 :: Int)]
 
 type MilliSec = Int
 
-setProfilingLevel :: (DbAccess m) => ProfilingLevel -> Maybe MilliSec -> m ()
+setProfilingLevel :: (MonadIO' m) => ProfilingLevel -> Maybe MilliSec -> Action m ()
 setProfilingLevel p mSlowMs =
 	runCommand (["profile" =: fromEnum p] ++ ("slowms" =? mSlowMs)) >> return ()
 
 -- ** Database
 
-dbStats :: (DbAccess m) => m Document
+dbStats :: (MonadIO' m) => Action m Document
 dbStats = runCommand ["dbstats" =: (1 :: Int)]
 
-currentOp :: (DbAccess m) => m (Maybe Document)
+currentOp :: (MonadIO m) => Action m (Maybe Document)
 -- ^ See currently running operation on the database, if any
 currentOp = findOne (select [] "$cmd.sys.inprog")
 
 type OpNum = Int
 
-killOp :: (DbAccess m) => OpNum -> m (Maybe Document)
+killOp :: (MonadIO m) => OpNum -> Action m (Maybe Document)
 killOp op = findOne (select ["op" =: op] "$cmd.sys.killop")
 
 -- ** Server
 
-serverStatus :: (Access m) => m Document
-serverStatus = use admin $ runCommand ["serverStatus" =: (1 :: Int)]
+serverStatus :: (MonadIO' m) => Action m Document
+serverStatus = useDb admin $ runCommand ["serverStatus" =: (1 :: Int)]
 
 
 {- Authors: Tony Hannan <tony@10gen.com>
-   Copyright 2010 10gen Inc.
+   Copyright 2011 10gen Inc.
    Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at: http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License. -}
