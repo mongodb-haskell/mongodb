@@ -371,7 +371,7 @@ findOne q = do
 	return (listToMaybe docs)
 
 fetch :: (MonadIO m) => Query -> Action m Document
--- ^ Same as 'findOne' except throw 'DocNotFound' if no match
+-- ^ Same as 'findOne' except throw 'DocNotFound' if none match
 fetch q = findOne q >>= maybe (throwError $ DocNotFound $ selection q) return
 
 explain :: (MonadIO m) => Query -> Action m Document
