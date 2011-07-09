@@ -26,14 +26,14 @@ import Control.Monad (forM_)
 import Control.Applicative ((<$>))
 import Data.UString (UString, unpack)
 import Data.Bson as D (Document, lookup, at, (=:))
-import Database.MongoDB.Query (access, safe, MasterOrSlaveOk(SlaveOk), Failure(ConnectionFailure), Command, runCommand)
+import Database.MongoDB.Query (access, slaveOk, Failure(ConnectionFailure), Command, runCommand)
 import Database.MongoDB.Internal.Util (untilSuccess, liftIOE, runIOE, updateAssocs, shuffle)
 import Data.List as L (lookup, intersect, partition, (\\))
 
 adminCommand :: Command -> Pipe -> IOE Document
 -- ^ Run command against admin database on server connected to pipe. Fail if connection fails.
 adminCommand cmd pipe =
-	liftIOE failureToIOError . ErrorT $ access pipe safe SlaveOk "admin" $ runCommand cmd
+	liftIOE failureToIOError . ErrorT $ access pipe slaveOk "admin" $ runCommand cmd
  where
 	failureToIOError (ConnectionFailure e) = e
 	failureToIOError e = userError $ show e

@@ -109,7 +109,7 @@ ensureIndex idx = let k = (iColl idx, iName idx) in do
 	icache <- fetchIndexCache
 	set <- liftIO (readIORef icache)
 	unless (S.member k set) $ do
-		writeMode (Safe []) (createIndex idx)
+		accessMode master (createIndex idx)
 		liftIO $ writeIORef icache (S.insert k set)
 
 createIndex :: (MonadIO' m) => Index -> Action m ()

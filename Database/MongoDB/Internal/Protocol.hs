@@ -5,7 +5,6 @@ This module is not intended for direct use. Use the high-level interface at "Dat
 {-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings, FlexibleContexts, TupleSections, TypeSynonymInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
 
 module Database.MongoDB.Internal.Protocol (
-	MasterOrSlaveOk(..),
 	FullCollection,
 	-- * Pipe
 	Pipe, send, call,
@@ -42,13 +41,6 @@ import System.IO.Error as E (try)
 import Control.Monad.Error
 import System.IO (hFlush)
 import Database.MongoDB.Internal.Util (whenJust, hGetN, bitOr, byteStringHex)
-
--- * MasterOrSlaveOk
-
-data MasterOrSlaveOk =
-	  Master  -- ^ connect to master only
-	| SlaveOk  -- ^ connect to a slave, or master if no slave available
-	deriving (Show, Eq)
 
 -- * Pipe
 

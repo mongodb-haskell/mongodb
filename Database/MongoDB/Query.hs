@@ -1,10 +1,12 @@
 -- | Query and update documents
 
-{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, RankNTypes #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies #-}
 
 module Database.MongoDB.Query (
 	-- * Monad
-	Action, Failure(..), access,
+	Action, access, Failure(..),
+	AccessMode(..), GetLastError, master, slaveOk, accessMode, 
+	MonadDB(..),
 	-- * Database
 	Database, allDatabases, useDb, thisDatabase,
 	-- ** Authentication
@@ -15,7 +17,6 @@ module Database.MongoDB.Query (
 	Selection(..), Selector, whereJS,
 	Select(select),
 	-- * Write
-	WriteMode(..), safe, GetLastError, writeMode,
 	-- ** Insert
 	insert, insert_, insertMany, insertMany_,
 	-- ** Update
@@ -23,10 +24,9 @@ module Database.MongoDB.Query (
 	-- ** Delete
 	delete, deleteOne,
 	-- * Read
-	MasterOrSlaveOk(..), readMode,
 	-- ** Query
 	Query(..), QueryOption(..), Projector, Limit, Order, BatchSize,
-	explain, find, findOne, count, distinct,
+	explain, find, findOne, fetch, count, distinct,
 	-- *** Cursor
 	Cursor, next, nextN, rest, closeCursor, isCursorClosed,
 	-- ** Group
@@ -41,12 +41,15 @@ module Database.MongoDB.Query (
 import Prelude as X hiding (lookup)
 import Data.UString as U (UString, dropWhile, any, tail)
 import Data.Bson (Document, at, lookup, look, Field(..), (=:), (=?), Label, Value(String,Doc), Javascript, genObjectId)
-import Database.MongoDB.Internal.Protocol (MasterOrSlaveOk(..), Pipe, Notice(..), Request(GetMore), Reply(..), QueryOption(..), ResponseFlag(..), UpdateOption(..), DeleteOption(..), CursorId, FullCollection, Username, Password, pwKey)
+import Database.MongoDB.Internal.Protocol (Pipe, Notice(..), Request(GetMore), Reply(..), QueryOption(..), ResponseFlag(..), UpdateOption(..), DeleteOption(..), CursorId, FullCollection, Username, Password, pwKey)
 import qualified Database.MongoDB.Internal.Protocol as P (send, call, Request(Query))
 import Database.MongoDB.Internal.Util (MonadIO', loop, liftIOE, true1, (<.>))
 import Control.Monad.MVar
 import Control.Monad.Error
 import Control.Monad.Reader
+import Control.Monad.State (StateT)
+import Control.Monad.Writer (WriterT, Monoid)
+import Control.Monad.RWS (RWST)
 import Control.Applicative (Applicative, (<$>))
 import Data.Maybe (listToMaybe, catMaybes)
 import Data.Int (Int32)
@@ -54,8 +57,15 @@ import Data.Word (Word32)
 
 -- * Monad
 
-type Action m = ErrorT Failure (ReaderT Context m)
--- ^ A monad on top of m (which must be a MonadIO) with access to a 'Context' and may throw a 'Failure'
+newtype Action m a = Action (ErrorT Failure (ReaderT Context m) a)
+	deriving (Functor, Applicative, Monad, MonadIO, MonadMVar, MonadError Failure)
+-- ^ A monad on top of m (which must be a MonadIO) that may access the database and may fail with a DB 'Failure'
+
+instance MonadTrans Action where lift = Action . lift . lift
+
+access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m (Either Failure a)
+-- ^ Run action against database on server at other end of pipe. Use write mode for any writes and read mode for any reads. Return Left on connection or read/write failure.
+access myPipe myAccessMode myDatabase (Action action) = runReaderT (runErrorT action) Context{..}
 
 -- | A connection failure, or a read or write exception like cursor expired or inserting a duplicate key.
 -- Note, unexpected data from the server is not a Failure, rather it is a programming error (you should call 'error' in this case) because the client and server are incompatible and requires a programming change.
@@ -64,37 +74,94 @@ data Failure =
 	| CursorNotFoundFailure CursorId  -- ^ Cursor expired because it wasn't accessed for over 10 minutes, or this cursor came from a different server that the one you are currently connected to (perhaps a fail over happen between servers in a replica set)
 	| QueryFailure String  -- ^ Query failed for some reason as described in the string
 	| WriteFailure ErrorCode String  -- ^ Error observed by getLastError after a write, error description is in string
+	| DocNotFound Selection  -- ^ 'fetch' found no document matching selection
 	deriving (Show, Eq)
 
 type ErrorCode = Int
 -- ^ Error code from getLastError
 
 instance Error Failure where strMsg = error
--- ^ 'fail' is treated the same as 'error'. In other words, don't use it.
+-- ^ 'fail' is treated the same as a programming 'error'. In other words, don't use it.
+
+-- | Type of reads and writes to perform
+data AccessMode =
+	 ReadStaleOk  -- Read-only action, reading stale data from a slave is OK.
+	| UnconfirmedWrites  -- Read-write action, slave not OK, every write is fire & forget.
+	| ConfirmWrites GetLastError  -- Read-write action, slave not OK, every write is confirmed with getLastError.
+
+type GetLastError = Document
+-- ^ Parameters for getLastError command. For example ["w" =: 2] tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See "http://www.mongodb.org/display/DOCS/Last+Error+Commands" for more options.
+
+master :: AccessMode
+-- ^ @'ConfirmWrites' []@
+master = ConfirmWrites []
+
+slaveOk :: AccessMode
+-- ^ @'ReadStaleOk'@
+slaveOk = ReadStaleOk
+
+accessMode :: (Monad m) => AccessMode -> Action m a -> Action m a
+-- ^ Run action with given 'AccessMode'
+accessMode mode (Action act) = Action $ local (\ctx -> ctx {myAccessMode = mode}) act
+
+readMode :: AccessMode -> ReadMode
+readMode ReadStaleOk = StaleOk
+readMode _ = Fresh
+
+writeMode :: AccessMode -> WriteMode
+writeMode ReadStaleOk = Confirm []
+writeMode UnconfirmedWrites = NoConfirm
+writeMode (ConfirmWrites z) = Confirm z
 
 -- | Values needed when executing a db operation
 data Context = Context {
 	myPipe :: Pipe, -- | operations read/write to this pipelined TCP connection to a MongoDB server
-	myReadMode :: MasterOrSlaveOk, -- | queries set slaveOk according to this mode
-	myWriteMode :: WriteMode, -- | writes will automatically issue a getlasterror when this writeMode is `Safe`
+	myAccessMode :: AccessMode, -- | read/write operation will use this access mode
 	myDatabase :: Database } -- | operations query/update this database
 
-access :: (MonadIO m) => Pipe -> WriteMode -> MasterOrSlaveOk -> Database -> Action m a -> m (Either Failure a)
--- ^ Run action under given context. Return Left on Failure.
-access myPipe myWriteMode myReadMode myDatabase action = runReaderT (runErrorT action) Context{..}
+myReadMode :: Context -> ReadMode
+myReadMode = readMode . myAccessMode
+
+myWriteMode :: Context -> WriteMode
+myWriteMode = writeMode . myAccessMode
 
 send :: (MonadIO m) => [Notice] -> Action m ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw 'ConnectionFailure' if pipe fails.
-send ns = do
+send ns = Action $ do
 	pipe <- asks myPipe
 	liftIOE ConnectionFailure $ P.send pipe ns
 
 call :: (MonadIO m) => [Notice] -> Request -> Action m (ErrorT Failure IO Reply)
 -- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
-call ns r = do
+call ns r = Action $ do
 	pipe <- asks myPipe
 	promise <- liftIOE ConnectionFailure $ P.call pipe ns r
 	return (liftIOE ConnectionFailure promise)
+
+-- | If you stack a monad on top of 'Action' then make it an instance of this class and use 'liftDB' to execute an DB Actions within it. Instances already exist for simple mtl transformers.
+class (Monad m, MonadMVar (BaseMonad m), Applicative (BaseMonad m), Functor (BaseMonad m)) => MonadDB m where
+	type BaseMonad m :: * -> *
+	liftDB :: Action (BaseMonad m) a -> m a
+
+instance (MonadMVar m, Applicative m, Functor m) => MonadDB (Action m) where
+	type BaseMonad (Action m) = m
+	liftDB = id
+
+instance (MonadDB m, Error e) => MonadDB (ErrorT e m) where
+	type BaseMonad (ErrorT e m) = BaseMonad m
+	liftDB = lift . liftDB
+instance (MonadDB m) => MonadDB (ReaderT r m) where
+	type BaseMonad (ReaderT r m) = BaseMonad m
+	liftDB = lift . liftDB
+instance (MonadDB m) => MonadDB (StateT s m) where
+	type BaseMonad (StateT s m) = BaseMonad m
+	liftDB = lift . liftDB
+instance (MonadDB m, Monoid w) => MonadDB (WriterT w m) where
+	type BaseMonad (WriterT w m) = BaseMonad m
+	liftDB = lift . liftDB
+instance (MonadDB m, Monoid w) => MonadDB (RWST r w s m) where
+	type BaseMonad (RWST r w s m) = BaseMonad m
+	liftDB = lift . liftDB
 
 -- * Database
 
@@ -106,11 +173,11 @@ allDatabases = map (at "name") . at "databases" <$> useDb "admin" (runCommand1 "
 
 thisDatabase :: (Monad m) => Action m Database
 -- ^ Current database in use
-thisDatabase = asks myDatabase
+thisDatabase = Action $ asks myDatabase
 
 useDb :: (Monad m) => Database -> Action m a -> Action m a
 -- ^ Run action against given database
-useDb = local . \db ctx -> ctx {myDatabase = db}
+useDb db (Action act) = Action $ local (\ctx -> ctx {myDatabase = db}) act
 
 -- * Authentication
 
@@ -159,28 +226,16 @@ instance Select Query where
 
 -- * Write
 
--- | Default write-mode is 'Unsafe'
 data WriteMode =
-	  Unsafe  -- ^ Submit writes without receiving acknowledgments. Fast. Assumes writes succeed even though they may not.
-	| Safe GetLastError  -- ^ Receive an acknowledgment after every write, and raise exception if one says the write failed. This is acomplished by sending the getLastError command, with given 'GetLastError' parameters, after every write.
+	  NoConfirm  -- ^ Submit writes without receiving acknowledgments. Fast. Assumes writes succeed even though they may not.
+	| Confirm GetLastError  -- ^ Receive an acknowledgment after every write, and raise exception if one says the write failed. This is acomplished by sending the getLastError command, with given 'GetLastError' parameters, after every write.
 	deriving (Show, Eq)
-
-type GetLastError = Document
--- ^ Parameters for getLastError command. For example ["w" =: 2] tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See "http://www.mongodb.org/display/DOCS/Last+Error+Commands" for more options.
-
-safe :: WriteMode
--- ^ Safe []
-safe = Safe []
-
-writeMode :: (Monad m) => WriteMode -> Action m a -> Action m a
--- ^ Run action with given 'WriteMode'
-writeMode = local . \w ctx -> ctx {myWriteMode = w}
 
 write :: (MonadIO m) => Notice -> Action m ()
 -- ^ Send write to server, and if write-mode is 'Safe' then include getLastError request and raise 'WriteFailure' if it reports an error.
-write notice = asks myWriteMode >>= \mode -> case mode of
-	Unsafe -> send [notice]
-	Safe params -> do
+write notice = Action (asks myWriteMode) >>= \mode -> case mode of
+	NoConfirm -> send [notice]
+	Confirm params -> do
 		let q = query (("getlasterror" =: (1 :: Int)) : params) "$cmd"
 		Batch _ _ [doc] <- fulfill =<< request [notice] =<< queryRequest False q {limit = 1}
 		case lookup "err" doc of
@@ -262,13 +317,14 @@ delete' opts (Select sel col) = do
 
 -- * Read
 
-readMode :: (Monad m) => MasterOrSlaveOk -> Action m a -> Action m a
--- ^ Execute action using given read mode. Master = consistent reads, SlaveOk = eventually consistent reads.
-readMode = local . \r ctx -> ctx {myReadMode = r}
+data ReadMode =
+	  Fresh  -- ^ read from master only
+	| StaleOk  -- ^ read from slave ok
+	deriving (Show, Eq)
 
-msOption :: MasterOrSlaveOk -> [QueryOption]
-msOption Master = []
-msOption SlaveOk = [SlaveOK]
+readModeOption :: ReadMode -> [QueryOption]
+readModeOption Fresh = []
+readModeOption StaleOk = [SlaveOK]
 
 -- ** Query
 
@@ -314,6 +370,10 @@ findOne q = do
 	Batch _ _ docs <- fulfill =<< request [] =<< queryRequest False q {limit = 1}
 	return (listToMaybe docs)
 
+fetch :: (MonadIO m) => Query -> Action m Document
+-- ^ Same as 'findOne' except throw 'DocNotFound' if no match
+fetch q = findOne q >>= maybe (throwError $ DocNotFound $ selection q) return
+
 explain :: (MonadIO m) => Query -> Action m Document
 -- ^ Return performance stats of query execution
 explain q = do  -- same as findOne but with explain set to true
@@ -333,11 +393,11 @@ distinct k (Select sel col) = at "values" <$> runCommand ["distinct" =: col, "ke
 queryRequest :: (Monad m) => Bool -> Query -> Action m (Request, Limit)
 -- ^ Translate Query to Protocol.Query. If first arg is true then add special $explain attribute.
 queryRequest isExplain Query{..} = do
-	ctx <- ask
+	ctx <- Action ask
 	return $ queryRequest' (myReadMode ctx) (myDatabase ctx)
  where
-	queryRequest' mos db = (P.Query{..}, remainingLimit) where
-		qOptions = msOption mos ++ options
+	queryRequest' rm db = (P.Query{..}, remainingLimit) where
+		qOptions = readModeOption rm ++ options
 		qFullCollection = db <.> coll selection
 		qSkip = fromIntegral skip
 		(qBatchSize, remainingLimit) = batchSizeRemainingLimit batchSize limit
@@ -383,9 +443,9 @@ fromReply limit Reply{..} = do
 		CursorNotFound -> throwError (CursorNotFoundFailure rCursorId)
 		QueryError -> throwError (QueryFailure $ at "$err" $ head rDocuments)
 
-fulfill :: (MonadIO m) => DelayedBatch -> ErrorT Failure m Batch
+fulfill :: (MonadIO m) => DelayedBatch -> Action m Batch
 -- ^ Demand and wait for result, raise failure if exception
-fulfill = liftIOE id
+fulfill = Action . liftIOE id
 
 -- *** Cursor
 
