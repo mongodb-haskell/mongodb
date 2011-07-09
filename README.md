@@ -1,15 +1,9 @@
-mongoDB
--------
+This is the Haskell MongoDB driver (client). [MongoDB](http://www.mongodb.org) is a free, scalable, fast, document database management system. This driver lets you connect to a MongoDB server, and update and query its data. It also lets you do adminstrative tasks, like create an index or look at performance statistics.
 
-About
------
-
-MongoDB driver for Haskell, which lets you connect to a MongoDB database management system and do inserts, queries, updates, etc. 
-
-Links
------
-
-* [MongoDB](http://www.mongodb.org)
-* [mongoDB API reference](http://hackage.haskell.org/package/mongoDB)
-* [tutorial](http://github.com/TonyGen/mongoDB-haskell/blob/master/tutorial.md)
-* [map/reduce example](http://github.com/TonyGen/mongoDB-haskell/blob/master/map-reduce-example.md)
+### Documentation
+* [Quick example](http://github.com/TonyGen/mongoDB-haskell/blob/master/doc/Example.hs)
+* [Tutorial](http://github.com/TonyGen/mongoDB-haskell/blob/master/doc/tutorial.md)
+* [Driver API](http://hackage.haskell.org/package/mongoDB)
+* [MapReduce example](http://github.com/TonyGen/mongoDB-haskell/blob/master/doc/map-reduce-example.md)
+* [Driver design](http://github.com/TonyGen/mongoDB-haskell/blob/master/doc/design.md)
+* [MongoDB DBMS](http://www.mongodb.org)
