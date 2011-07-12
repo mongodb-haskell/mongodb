@@ -11,7 +11,6 @@ Bson
 MongoDB
 -------
 + Support the new query flag: https://jira.mongodb.org/browse/SERVER-2020
-+ Support MapReduce 1.8 version
 + When one connection in a pool fails, close all other since they will likely fail too
 + on insert/update: reject keys that start with "$" or "."
 + dereference dbref
@@ -43,8 +42,6 @@ Tests - none currently
 Misc
 ----
 + javascript DSL
-+ update tutorial to match new python one
-+ custom types (see python examples)
 
 Questions:
 - In Mongo shell, db.foo.totalSize fetches storageSize of each index but does not use it
@@ -52,4 +49,3 @@ Questions:
 Notes:
 - Remember that in the new version of MongoDB (>= 1.6), "ok" field can be a number (0 or 1) or boolean (False or True). Use 'true1' function defined in Database.MongoDB.Util
 - A cursor will die on the server if not accessed (by any connection) within past 10 minutes (unless NoCursorTimeout option set). Accessing a dead (or non-existent) cursor raises a CursorNotFoundFailure.
-- Unsafe to shrink pool and close connections because map/reduce temp tables that were created on the connection will get deleted. Note, other connections can access a map/reduce temp table as long as the original connection is still alive. Also, other connections can access cursors created on other connections, even if those die. Cursors will be deleted on server only if idle for more than 10 minutes. Accessing a deleted cursor returns an error.

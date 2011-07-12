@@ -10,11 +10,13 @@ Start a local MongoDB server in a separate terminal window:
 Start a haskell session:
 
 	$ ghci
+	> :set prompt "> "
 
 Import the MongoDB driver library, and set OverloadedStrings so literal strings are converted to UTF-8 automatically.
 
 	> :set -XOverloadedStrings
 	> import Database.MongoDB
+	> import Data.CompactString ()  -- only needed when using ghci
 
 ### Connecting
 
@@ -30,7 +32,7 @@ A `Pipe` is a thread-safe, pipelined (a' la [HTTP pipelining](http://en.wikipedi
 
 ### Action monad
 
-A DB read or write operation is called a DB `Action`. A DB Action is a monad so you can sequence them together. To run an Action supply it to the `access` function with the Pipe to read/write to, the `AccessMode` for read/write operations, and the `Database` to access. For example, to list all collections in the "test" database:
+A DB read or write operation is called a DB `Action`. A DB Action is a monad so you can sequence them together. To run an Action supply it to the `access` function with the Pipe to use, the `AccessMode` for read/write operations, and the `Database` to access. For example, to list all collections in the "test" database:
 
 	> access pipe master "test" allCollections
 
@@ -40,7 +42,7 @@ A DB read or write operation is called a DB `Action`. A DB Action is a monad so 
 
 Since we are working in ghci, which requires us to start from the IO monad every time, we'll define a convenient *run* function that takes an action and executes it against our "test" database on the server we just connected to, with master access mode:
 
-	> let run = access pipe master "test"
+	> let run act = access pipe master "test" act
 
 ### Databases and Collections
 
@@ -118,13 +120,13 @@ You can count how many documents are in an entire collection:
 
 Or count how many documents match a query:
 
-	> run $ count $ select ["title" =: ["$exits" =: True]] "posts"
+	> run $ count $ select ["title" =: ["$exists" =: True]] "posts"
 
 ### Sorting
 
 `sort` takes the fields to sort by and whether ascending (1) or descending (-1)
 
-	> run $ find (select [] "posts") {sort = ["author" =: 1, "title" =: 1]} >> rest
+	> run $ find (select [] "posts") {sort = ["author" =: 1, "text" =: 1]} >>= rest
 
 If you don't sort, documents are returned in *natural* order, which is the order found on disk. Natural order is not particularly useful because, although the order is often close to insertion order, it is not guaranteed.
 
@@ -132,7 +134,7 @@ If you don't sort, documents are returned in *natural* order, which is the order
 
 `project` returns partial documents containing only the fields you include (1). However, *_id* is always included unless you exclude it (0).
 
-	> run $ find (select [] "posts") {project = ["author" =: 1, "_id" =: 0]}
+	> run $ find (select [] "posts") {project = ["author" =: 1, "_id" =: 0]} >>= rest
 
 ### Updating
 
@@ -142,9 +144,9 @@ If you don't sort, documents are returned in *natural* order, which is the order
 
 or inserts a new document if its *_id* is new or missing
 
-	> run $ save "posts" ["author" =: "Tony", "text" =: "Haskell rocks"]
+	> run $ save "posts" ["author" =: "Tony", "text" =: "hello world"]
 
-`modify` updates every document matching selection according to supplied modifier. For example:
+`modify` updates every document matching selection using supplied modifier. For example:
 
 	> run $ modify (select [] "posts") ["$push" =: ["tags" =: "new"]]
 
@@ -156,7 +158,7 @@ or inserts a new document if its *_id* is new or missing
 
 ### Documentation
 
-Documentation on the Mongo query language, i.e. the selector document, modifier document, etc., can be found at the [MongoDB Developer Zone](http://www.mongodb.org/display/DOCS/Developer+Zone).
+Documentation on the Mongo query language (i.e. the selector document, modifier document, etc.) can be found at the [MongoDB Developer Zone](http://www.mongodb.org/display/DOCS/Developer+Zone).
 
-Haddock generated documentation on this Haskell driver can be found on [Hackage](http://hackage.haskell.org/package/mongoDB).
+Haddock generated documentation of this Haskell driver can be found on [Hackage](http://hackage.haskell.org/package/mongoDB).
 

@@ -2,7 +2,7 @@
 
 {-# LANGUAGE RecordWildCards, NamedFieldPuns, FlexibleContexts #-}
 
-module Var.Pool where
+module System.IO.Pool where
 
 import Control.Applicative ((<$>))
 import Control.Monad.MVar

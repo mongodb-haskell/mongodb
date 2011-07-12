@@ -538,7 +538,7 @@ data MapReduce = MapReduce {
 	rSelect :: Selector,  -- ^ Operate on only those documents selected. Default is [] meaning all documents.
 	rSort :: Order,  -- ^ Default is [] meaning no sort
 	rLimit :: Limit,  -- ^ Default is 0 meaning no limit
-	rOut :: MROut,  -- ^ Output to a collection with a certain merge policy. Default is no collection (Inline). Note, you don't want this default if your result set is large.
+	rOut :: MROut,  -- ^ Output to a collection with a certain merge policy. Default is no collection ('Inline'). Note, you don't want this default if your result set is large.
 	rFinalize :: Maybe FinalizeFun,  -- ^ Function to apply to all the results when finished. Default is Nothing.
 	rScope :: Document,  -- ^ Variables (environment) that can be accessed from map/reduce/finalize. Default is [].
 	rVerbose :: Bool  -- ^ Provide statistics on job execution time. Default is False.

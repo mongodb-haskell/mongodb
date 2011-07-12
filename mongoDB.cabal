@@ -40,7 +40,7 @@ exposed-modules:
     Database.MongoDB.Internal.Util
     Database.MongoDB.Query
     System.IO.Pipeline
-    Var.Pool
+    System.IO.Pool
 exposed: True
 buildable: True
 build-tools:
