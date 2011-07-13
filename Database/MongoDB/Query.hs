@@ -25,7 +25,7 @@ module Database.MongoDB.Query (
 	delete, deleteOne,
 	-- * Read
 	-- ** Query
-	Query(..), QueryOption(..), Projector, Limit, Order, BatchSize,
+	Query(..), QueryOption(NoCursorTimeout), Projector, Limit, Order, BatchSize,
 	explain, find, findOne, fetch, count, distinct,
 	-- *** Cursor
 	Cursor, next, nextN, rest, closeCursor, isCursorClosed,
@@ -64,7 +64,7 @@ newtype Action m a = Action (ErrorT Failure (ReaderT Context m) a)
 instance MonadTrans Action where lift = Action . lift . lift
 
 access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m (Either Failure a)
--- ^ Run action against database on server at other end of pipe. Use write mode for any writes and read mode for any reads. Return Left on connection or read/write failure.
+-- ^ Run action against database on server at other end of pipe. Use access mode for any reads and writes. Return Left on connection failure or read/write failure.
 access myPipe myAccessMode myDatabase (Action action) = runReaderT (runErrorT action) Context{..}
 
 -- | A connection failure, or a read or write exception like cursor expired or inserting a duplicate key.
@@ -115,9 +115,9 @@ writeMode (ConfirmWrites z) = Confirm z
 
 -- | Values needed when executing a db operation
 data Context = Context {
-	myPipe :: Pipe, -- | operations read/write to this pipelined TCP connection to a MongoDB server
-	myAccessMode :: AccessMode, -- | read/write operation will use this access mode
-	myDatabase :: Database } -- | operations query/update this database
+	myPipe :: Pipe, -- ^ operations read/write to this pipelined TCP connection to a MongoDB server
+	myAccessMode :: AccessMode, -- ^ read/write operation will use this access mode
+	myDatabase :: Database } -- ^ operations query/update this database
 
 myReadMode :: Context -> ReadMode
 myReadMode = readMode . myAccessMode
@@ -138,7 +138,7 @@ call ns r = Action $ do
 	promise <- liftIOE ConnectionFailure $ P.call pipe ns r
 	return (liftIOE ConnectionFailure promise)
 
--- | If you stack a monad on top of 'Action' then make it an instance of this class and use 'liftDB' to execute an DB Actions within it. Instances already exist for simple mtl transformers.
+-- | If you stack a monad on top of 'Action' then make it an instance of this class and use 'liftDB' to execute a DB Action within it. Instances already exist for the basic mtl transformers.
 class (Monad m, MonadMVar (BaseMonad m), Applicative (BaseMonad m), Functor (BaseMonad m)) => MonadDB m where
 	type BaseMonad m :: * -> *
 	liftDB :: Action (BaseMonad m) a -> m a

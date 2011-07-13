@@ -3,13 +3,14 @@
 {-# LANGUAGE CPP, OverloadedStrings, ScopedTypeVariables, TupleSections #-}
 
 module Database.MongoDB.Connection (
+	-- * Util
 	IOE, runIOE,
 	-- * Connection
 	Pipe, close, isClosed,
-	-- * Host
-	Host(..), PortID(..), host, showHostPort, readHostPort, readHostPortM, connect,
+	-- * Server
+	Host(..), PortID(..), defaultPort, host, showHostPort, readHostPort, readHostPortM, connect,
 	-- * Replica Set
-	ReplicaSetName, openReplicaSet, ReplicaSet, primary, secondaryOk
+	ReplicaSetName, openReplicaSet, ReplicaSet, primary, secondaryOk, closeReplicaSet
 ) where
 
 import Prelude hiding (lookup)
@@ -28,7 +29,7 @@ import Data.UString (UString, unpack)
 import Data.Bson as D (Document, lookup, at, (=:))
 import Database.MongoDB.Query (access, slaveOk, Failure(ConnectionFailure), Command, runCommand)
 import Database.MongoDB.Internal.Util (untilSuccess, liftIOE, runIOE, updateAssocs, shuffle)
-import Data.List as L (lookup, intersect, partition, (\\))
+import Data.List as L (lookup, intersect, partition, (\\), delete)
 
 adminCommand :: Command -> Pipe -> IOE Document
 -- ^ Run command against admin database on server connected to pipe. Fail if connection fails.
@@ -43,10 +44,11 @@ adminCommand cmd pipe =
 data Host = Host HostName PortID  deriving (Show, Eq, Ord)
 
 defaultPort :: PortID
+-- ^ Default MongoDB port = 27017
 defaultPort = PortNumber 27017
 
 host :: HostName -> Host
--- ^ Host on default MongoDB port
+-- ^ Host on 'defaultPort'
 host hostname = Host hostname defaultPort
 
 showHostPort :: Host -> String
@@ -61,7 +63,7 @@ showHostPort (Host hostname port) = hostname ++ ":" ++ portname  where
 #endif
 
 readHostPortM :: (Monad m) => String -> m Host
--- ^ Read string \"hostname:port\" as @Host hosthame port@ or \"hostname\" as @host hostname@ (default port). Fail if string does not match either syntax.
+-- ^ Read string \"hostname:port\" as @Host hosthame (PortNumber port)@ or \"hostname\" as @host hostname@ (default port). Fail if string does not match either syntax.
 -- TODO: handle Service and UnixSocket port
 readHostPortM = either (fail . show) return . parse parser "readHostPort" where
 	hostname = many1 (letter <|> digit <|> char '-' <|> char '.')
@@ -75,7 +77,7 @@ readHostPortM = either (fail . show) return . parse parser "readHostPort" where
 			return $ Host h (PortNumber $ fromIntegral port)
 
 readHostPort :: String -> Host
--- ^ Read string \"hostname:port\" as @Host hostname port@ or \"hostname\" as @host hostname@ (default port). Error if string does not match either syntax.
+-- ^ Read string \"hostname:port\" as @Host hostname (PortNumber port)@ or \"hostname\" as @host hostname@ (default port). Error if string does not match either syntax.
 readHostPort = runIdentity . readHostPortM
 
 connect :: Host -> IOE Pipe
@@ -98,8 +100,12 @@ openReplicaSet (rsName, seedList) = do
 	_ <- updateMembers rs
 	return rs
 
+closeReplicaSet :: ReplicaSet -> IO ()
+-- ^ Close all connections to replica set
+closeReplicaSet (ReplicaSet _ vMembers) = withMVar vMembers $ mapM_ (maybe (return ()) close . snd)
+
 primary :: ReplicaSet -> IOE Pipe
--- ^ Return connection to current primary of replica set
+-- ^ Return connection to current primary of replica set. Fail if no primary available.
 primary rs@(ReplicaSet rsName _) = do
 	mHost <- statedPrimary <$> updateMembers rs
 	case mHost of
@@ -107,11 +113,12 @@ primary rs@(ReplicaSet rsName _) = do
 		Nothing -> throwError $ userError $ "replica set " ++ unpack rsName ++ " has no primary"
 
 secondaryOk :: ReplicaSet -> IOE Pipe
--- ^ Return connection to a random member (secondary or primary)
+-- ^ Return connection to a random secondary, or primary if no secondaries available.
 secondaryOk rs = do
 	info <- updateMembers rs
 	hosts <- lift $ shuffle (possibleHosts info)
-	untilSuccess (connection rs Nothing) hosts
+	let hosts' = maybe hosts (\p -> delete p hosts ++ [p]) (statedPrimary info)
+	untilSuccess (connection rs Nothing) hosts'
 
 type ReplicaInfo = (Host, Document)
 -- ^ Result of isMaster command on host in replica set. Returned fields are: setName, ismaster, secondary, hosts, [primary]. primary only present when ismaster = false

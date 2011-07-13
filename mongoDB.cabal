@@ -22,7 +22,7 @@ stability: alpha
 homepage: http://github.com/TonyGen/mongoDB-haskell
 package-url:
 bug-reports:
-synopsis: Driver (client) for MongoDB, a free, scalable, fast, document database management system
+synopsis: Driver (client) for MongoDB, a free, scalable, fast, document DBMS
 description: This package lets you connect to MongoDB servers and update/query their data. Please see the example in Database.MongoDB and the tutorial from the homepage. For information about MongoDB itself, see www.mongodb.org.
 category: Database
 author: Tony Hannan <tony@10gen.com> & Scott Parish <srp@srparish.net>

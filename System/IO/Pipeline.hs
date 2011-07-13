@@ -1,4 +1,4 @@
-{- | Pipelining is sending multiple requests over a socket and receiving the responses later, in the same order. This is faster than sending one request, waiting for the response, then sending the next request, and so on. This implementation returns a /promise (future)/ response for each request that when invoked waits for the response if not already arrived. Multiple threads can send on the same pipeline (and get promises back); it will send each thread's request right away without waiting.
+{- | Pipelining is sending multiple requests over a socket and receiving the responses later in the same order (a' la HTTP pipelining). This is faster than sending one request, waiting for the response, then sending the next request, and so on. This implementation returns a /promise (future)/ response for each request that when invoked waits for the response if not already arrived. Multiple threads can send on the same pipeline (and get promises back); it will send each thread's request right away without waiting.
 
 A pipeline closes itself when a read or write causes an error, so you can detect a broken pipeline by checking isClosed.  It also closes itself when garbage collected, or you can close it explicitly. -}
 
@@ -27,6 +27,7 @@ onException (ErrorT action) releaser = ErrorT $ do
 	return e
 
 type IOE = ErrorT IOError IO
+-- ^ IO monad with explicit error
 
 -- * IOStream
 
@@ -59,7 +60,7 @@ newPipeline stream = do
 	return pipe
 
 close :: Pipeline i o -> IO ()
--- | Close pipe and underlying connection
+-- ^ Close pipe and underlying connection
 close Pipeline{..} = do
 	killThread listenThread
 	closeStream =<< readMVar vStream
