@@ -11,7 +11,7 @@ A *Value* is one of several basic types, which includes primitive types like Boo
 
 *UString* is a type synonym for CompactString which is a UTF-8 encoded string from the [compact-string package](http://hackage.haskell.org/package/compact-string-fix). I chose this package over the [text package](http://hackage.haskell.org/package/text) because its native format is UTF-8 while text's native format is UTF-16 and thus would spend more time serializing to BSON which requires UTF-8. If and when the text package changes its native format to UTF-8 I will switch to it. In the meantime, you can make *Text* an instance of Val to automatically convert it to/from UString.
 
-UString is an instance of *IsString* so literal strings can be interpreted as UStrings. Use the Language extension [*OverloadedStrings*](http://www.haskell.org/ghc/docs/7.0.4/html/users_guide/type-class-extensions.html#Overloaded+string+literals) to enable this. If you don't use this extension, use the *u* function to convert a String to a UString. Field labels are UStrings.
+UString is an instance of *IsString* so literal strings can be interpreted as UStrings. Use the Language extension [*OverloadedStrings*](http://www.haskell.org/ghc/docs/7.0.4/html/users_guide/type-class-extensions.html#Overloaded+string+literals) to enable this. If you don't use this extension, use the *u* function to convert a String to a UString. Field labels are also UStrings.
 
 You may want to define fields ahead of time to help catch typos. For example, you can define `name = ("name" =:) :: UString -> Field` and `score = ("score" =:) :: Int -> Field`, and then construct a document as `[name "Tony", score 42]`. This will ensure your fields have the correct label and type, and is more succinct.
 

@@ -5,5 +5,5 @@ This is the Haskell MongoDB driver (client). [MongoDB](http://www.mongodb.org) i
 * [Tutorial](http://github.com/TonyGen/mongoDB-haskell/blob/master/doc/tutorial.md)
 * [Driver API](http://hackage.haskell.org/package/mongoDB)
 * [MapReduce example](http://github.com/TonyGen/mongoDB-haskell/blob/master/doc/map-reduce-example.md)
-* [Driver design](http://github.com/TonyGen/mongoDB-haskell/blob/master/doc/design.md)
+* [Driver design](http://github.com/TonyGen/mongoDB-haskell/blob/master/doc/Article1.md)
 * [MongoDB DBMS](http://www.mongodb.org)
