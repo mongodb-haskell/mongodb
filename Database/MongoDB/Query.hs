@@ -4,7 +4,7 @@
 
 module Database.MongoDB.Query (
 	-- * Monad
-	Action, access, Failure(..),
+	Action, access, Failure(..), ErrorCode,
 	AccessMode(..), GetLastError, master, slaveOk, accessMode, 
 	MonadDB(..),
 	-- * Database
@@ -85,19 +85,19 @@ instance Error Failure where strMsg = error
 
 -- | Type of reads and writes to perform
 data AccessMode =
-	 ReadStaleOk  -- Read-only action, reading stale data from a slave is OK.
-	| UnconfirmedWrites  -- Read-write action, slave not OK, every write is fire & forget.
-	| ConfirmWrites GetLastError  -- Read-write action, slave not OK, every write is confirmed with getLastError.
+	 ReadStaleOk  -- ^ Read-only action, reading stale data from a slave is OK.
+	| UnconfirmedWrites  -- ^ Read-write action, slave not OK, every write is fire & forget.
+	| ConfirmWrites GetLastError  -- ^ Read-write action, slave not OK, every write is confirmed with getLastError.
 
 type GetLastError = Document
--- ^ Parameters for getLastError command. For example ["w" =: 2] tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See "http://www.mongodb.org/display/DOCS/Last+Error+Commands" for more options.
+-- ^ Parameters for getLastError command. For example @[\"w\" =: 2]@ tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See <http://www.mongodb.org/display/DOCS/Last+Error+Commands> for more options.
 
 master :: AccessMode
--- ^ @'ConfirmWrites' []@
+-- ^ Same as 'ConfirmWrites' []
 master = ConfirmWrites []
 
 slaveOk :: AccessMode
--- ^ @'ReadStaleOk'@
+-- ^ Same as 'ReadStaleOk'
 slaveOk = ReadStaleOk
 
 accessMode :: (Monad m) => AccessMode -> Action m a -> Action m a
@@ -208,7 +208,7 @@ data Selection = Select {selector :: Selector, coll :: Collection}  deriving (Sh
 -- ^ Selects documents in collection that match selector
 
 type Selector = Document
--- ^ Filter for a query, analogous to the where clause in SQL. @[]@ matches all documents in collection. @[x =: a, y =: b]@ is analogous to @where x = a and y = b@ in SQL. See <http://www.mongodb.org/display/DOCS/Querying> for full selector syntax.
+-- ^ Filter for a query, analogous to the where clause in SQL. @[]@ matches all documents in collection. @[\"x\" =: a, \"y\" =: b]@ is analogous to @where x = a and y = b@ in SQL. See <http://www.mongodb.org/display/DOCS/Querying> for full selector syntax.
 
 whereJS :: Selector -> Javascript -> Selector
 -- ^ Add Javascript predicate to selector, in which case a document must match both selector and predicate
@@ -342,13 +342,13 @@ data Query = Query {
 	} deriving (Show, Eq)
 
 type Projector = Document
--- ^ Fields to return, analogous to the select clause in SQL. @[]@ means return whole document (analogous to * in SQL). @[x =: 1, y =: 1]@ means return only @x@ and @y@ fields of each document. @[x =: 0]@ means return all fields except @x@.
+-- ^ Fields to return, analogous to the select clause in SQL. @[]@ means return whole document (analogous to * in SQL). @[\"x\" =: 1, \"y\" =: 1]@ means return only @x@ and @y@ fields of each document. @[\"x\" =: 0]@ means return all fields except @x@.
 
 type Limit = Word32
 -- ^ Maximum number of documents to return, i.e. cursor will close after iterating over this number of documents. 0 means no limit.
 
 type Order = Document
--- ^ Fields to sort by. Each one is associated with 1 or -1. Eg. @[x =: 1, y =: -1]@ means sort by @x@ ascending then @y@ descending
+-- ^ Fields to sort by. Each one is associated with 1 or -1. Eg. @[\"x\" =: 1, \"y\" =: -1]@ means sort by @x@ ascending then @y@ descending
 
 type BatchSize = Word32
 -- ^ The number of document to return in each batch response from the server. 0 means use Mongo default.

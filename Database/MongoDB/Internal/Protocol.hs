@@ -203,7 +203,7 @@ dBits = bitOr . map dBit
 
 -- ** Request
 
--- | A request is a message that is sent with a 'Reply' returned
+-- | A request is a message that is sent with a 'Reply' expected in return
 data Request =
 	  Query {
 		qOptions :: [QueryOption],
