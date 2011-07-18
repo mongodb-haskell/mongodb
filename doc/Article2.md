@@ -71,4 +71,4 @@ This is not good and unexpected. How can you detect these problems without analy
 
 Unfortunately, profiling is not trivial, it takes some time and analysis. But it is a task usually needed anyway for production-quality applications. Over time you may develop enough expertise to recognize problematic unevaluated expressions as you write them, but for now I would get accustom to profiling.
 
-In conclusion, Haskell is a modern *mainstream* programming language designed to help you write high quality software easily. The [MongoDB driver for Haskell](http://hackage.haskell.org/package/mongoDB) is ready so you can build your Mongo application in Haskell.
+In conclusion, Haskell is a modern mainstream programming language designed to help you write high quality software easily. The [MongoDB driver for Haskell](http://hackage.haskell.org/package/mongoDB) is ready if you decide to build a Mongo application in Haskell.
