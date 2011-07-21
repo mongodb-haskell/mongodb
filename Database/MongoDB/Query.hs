@@ -28,7 +28,7 @@ module Database.MongoDB.Query (
 	Query(..), QueryOption(NoCursorTimeout), Projector, Limit, Order, BatchSize,
 	explain, find, findOne, fetch, count, distinct,
 	-- *** Cursor
-	Cursor, next, nextN, rest, closeCursor, isCursorClosed,
+	Cursor, nextBatch, next, nextN, rest, closeCursor, isCursorClosed,
 	-- ** Group
 	Group(..), GroupKey(..), group,
 	-- ** MapReduce
@@ -472,6 +472,17 @@ newCursor db col batchSize dBatch = do
 	addMVarFinalizer var (closeCursor cursor)
 	return cursor
 
+nextBatch :: (MonadMVar m) => Cursor -> Action m [Document]
+-- ^ Return next batch of documents in query result, which will be empty if finished.
+nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
+	-- Pre-fetch next batch promise from server and return current batch.
+	Batch limit cid docs <- fulfill dBatch
+	dBatch' <- if cid /= 0 then nextBatch' limit cid else return $ return (Batch 0 0 [])
+	return (dBatch', docs)
+ where
+	nextBatch' limit cid = request [] (GetMore fcol batchSize' cid, remLimit)
+		where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
+
 next :: (MonadMVar m) => Cursor -> Action m (Maybe Document)
 -- ^ Return next document in query result, or Nothing if finished.
 next (Cursor fcol batchSize var) = modifyMVar var nextState where
@@ -482,13 +493,13 @@ next (Cursor fcol batchSize var) = modifyMVar var nextState where
 		case docs of
 			doc : docs' -> do
 				dBatch' <- if null docs' && cid /= 0
-					then nextBatch limit cid
+					then nextBatch' limit cid
 					else return $ return (Batch limit cid docs')
 				return (dBatch', Just doc)
 			[] -> if cid == 0
 				then return (return $ Batch 0 0 [], Nothing)  -- finished
 				else error $ "server returned empty batch but says more results on server"
-	nextBatch limit cid = request [] (GetMore fcol batchSize' cid, remLimit)
+	nextBatch' limit cid = request [] (GetMore fcol batchSize' cid, remLimit)
 		where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
 
 nextN :: (MonadMVar m, Functor m) => Int -> Cursor -> Action m [Document]
