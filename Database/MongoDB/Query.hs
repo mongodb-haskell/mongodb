@@ -18,7 +18,7 @@ module Database.MongoDB.Query (
 	Select(select),
 	-- * Write
 	-- ** Insert
-	insert, insert_, insertMany, insertMany_,
+	insert, insert_, insertMany, insertMany_, insertAll, insertAll_,
 	-- ** Update
 	save, replace, repsert, Modifier, modify,
 	-- ** Delete
@@ -41,7 +41,7 @@ module Database.MongoDB.Query (
 import Prelude as X hiding (lookup)
 import Data.UString as U (UString, dropWhile, any, tail)
 import Data.Bson (Document, at, lookup, look, Field(..), (=:), (=?), Label, Value(String,Doc), Javascript, genObjectId)
-import Database.MongoDB.Internal.Protocol (Pipe, Notice(..), Request(GetMore), Reply(..), QueryOption(..), ResponseFlag(..), UpdateOption(..), DeleteOption(..), CursorId, FullCollection, Username, Password, pwKey)
+import Database.MongoDB.Internal.Protocol (Pipe, Notice(..), Request(GetMore), Reply(..), QueryOption(..), ResponseFlag(..), InsertOption(..), UpdateOption(..), DeleteOption(..), CursorId, FullCollection, Username, Password, pwKey)
 import qualified Database.MongoDB.Internal.Protocol as P (send, call, Request(Query))
 import Database.MongoDB.Internal.Util (MonadIO', loop, liftIOE, true1, (<.>))
 import Control.Monad.MVar
@@ -253,16 +253,28 @@ insert_ :: (MonadIO' m) => Collection -> Document -> Action m ()
 insert_ col doc = insert col doc >> return ()
 
 insertMany :: (MonadIO m) => Collection -> [Document] -> Action m [Value]
--- ^ Insert documents into collection and return their \"_id\" values, which are created automatically if not supplied
-insertMany col docs = do
-	db <- thisDatabase
-	docs' <- liftIO $ mapM assignId docs
-	write (Insert (db <.> col) docs')
-	mapM (look "_id") docs'
+-- ^ Insert documents into collection and return their \"_id\" values, which are created automatically if not supplied. If a document fails to be inserted (eg. due to duplicate key) then remaining docs are aborted, and LastError is set.
+insertMany = insert' []
 
 insertMany_ :: (MonadIO m) => Collection -> [Document] -> Action m ()
 -- ^ Same as 'insertMany' except don't return _ids
 insertMany_ col docs = insertMany col docs >> return ()
+
+insertAll :: (MonadIO m) => Collection -> [Document] -> Action m [Value]
+-- ^ Insert documents into collection and return their \"_id\" values, which are created automatically if not supplied. If a document fails to be inserted (eg. due to duplicate key) then remaining docs are still inserted. LastError is set if any doc fails, not just last one.
+insertAll = insert' [KeepGoing]
+
+insertAll_ :: (MonadIO m) => Collection -> [Document] -> Action m ()
+-- ^ Same as 'insertAll' except don't return _ids
+insertAll_ col docs = insertAll col docs >> return ()
+
+insert' :: (MonadIO m) => [InsertOption] -> Collection -> [Document] -> Action m [Value]
+-- ^ Insert documents into collection and return their \"_id\" values, which are created automatically if not supplied
+insert' opts col docs = do
+	db <- thisDatabase
+	docs' <- liftIO $ mapM assignId docs
+	write (Insert (db <.> col) opts docs')
+	mapM (look "_id") docs'
 
 assignId :: Document -> IO Document
 -- ^ Assign a unique value to _id field if missing

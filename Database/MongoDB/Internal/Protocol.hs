@@ -11,7 +11,7 @@ module Database.MongoDB.Internal.Protocol (
 	-- * Message
 	writeMessage, readMessage,
 	-- ** Notice
-	Notice(..), UpdateOption(..), DeleteOption(..), CursorId,
+	Notice(..), InsertOption(..), UpdateOption(..), DeleteOption(..), CursorId,
 	-- ** Request
 	Request(..), QueryOption(..),
 	-- ** Reply
@@ -135,6 +135,7 @@ getHeader = do
 data Notice =
 	  Insert {
 	  	iFullCollection :: FullCollection,
+	  	iOptions :: [InsertOption],
 	  	iDocuments :: [Document]}
 	| Update {
 		uFullCollection :: FullCollection,
@@ -147,6 +148,9 @@ data Notice =
 		dSelector :: Document}
 	| KillCursors {
 		kCursorIds :: [CursorId]}
+	deriving (Show, Eq)
+
+data InsertOption = KeepGoing  -- ^ If set, the database will not stop processing a bulk insert if one fails (eg due to duplicate IDs). This makes bulk insert behave similarly to a series of single inserts, except lastError will be set if any insert fails, not just the last one. (new in 1.9.1)
 	deriving (Show, Eq)
 
 data UpdateOption =
@@ -170,23 +174,32 @@ nOpcode KillCursors{} = 2007
 putNotice :: Notice -> RequestId -> Put
 putNotice notice requestId = do
 	putHeader (nOpcode notice) requestId
-	putInt32 0
 	case notice of
 		Insert{..} -> do
+			putInt32 (iBits iOptions)
 			putCString iFullCollection
 			mapM_ putDocument iDocuments
 		Update{..} -> do
+			putInt32 0
 			putCString uFullCollection
 			putInt32 (uBits uOptions)
 			putDocument uSelector
 			putDocument uUpdater
 		Delete{..} -> do
+			putInt32 0
 			putCString dFullCollection
 			putInt32 (dBits dOptions)
 			putDocument dSelector
 		KillCursors{..} -> do
+			putInt32 0
 			putInt32 $ toEnum (X.length kCursorIds)
 			mapM_ putInt64 kCursorIds
+
+iBit :: InsertOption -> Int32
+iBit KeepGoing = bit 0
+
+iBits :: [InsertOption] -> Int32
+iBits = bitOr . map iBit
 
 uBit :: UpdateOption -> Int32
 uBit Upsert = bit 0

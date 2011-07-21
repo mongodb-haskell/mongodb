@@ -17,9 +17,9 @@ Simple example below. Use with language extension /OvererloadedStrings/.
 > run = do
 >    clearTeams
 >    insertTeams
->    printDocs "All Teams" =<< allTeams
->    printDocs "National League Teams" =<< nationalLeagueTeams
->    printDocs "New York Teams" =<< newYorkTeams
+>    allTeams >>= printDocs "All Teams"
+>    nationalLeagueTeams >>= printDocs "National League Teams"
+>    newYorkTeams >>= printDocs "New York Teams"
 >
 > clearTeams = delete (select [] "team")
 >
