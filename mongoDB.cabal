@@ -1,5 +1,5 @@
 name: mongoDB
-version: 1.0.0
+version: 1.0.1
 build-type: Simple
 license: OtherLicense
 license-file: LICENSE
@@ -58,7 +58,7 @@ install-includes:
 include-dirs:
 hs-source-dirs: .
 other-modules:
-ghc-prof-options:
+ghc-prof-options: -auto-all
 ghc-shared-options:
 ghc-options: -Wall -O2
 hugs-options:
