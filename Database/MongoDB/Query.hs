@@ -25,7 +25,7 @@ module Database.MongoDB.Query (
 	delete, deleteOne,
 	-- * Read
 	-- ** Query
-	Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData), Projector, Limit, Order, BatchSize,
+	Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData, Partial), Projector, Limit, Order, BatchSize,
 	explain, find, findOne, fetch, count, distinct,
 	-- *** Cursor
 	Cursor, nextBatch, next, nextN, rest, closeCursor, isCursorClosed,

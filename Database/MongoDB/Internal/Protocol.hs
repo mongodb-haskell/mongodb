@@ -239,6 +239,8 @@ data QueryOption =
 	| NoCursorTimeout  -- ^ The server normally times out idle cursors after 10 minutes to prevent a memory leak in case a client forgets to close a cursor. Set this option to allow a cursor to live forever until it is closed.
 	| AwaitData  -- ^ Use with TailableCursor. If we are at the end of the data, block for a while rather than returning no data. After a timeout period, we do return as normal.
 --	| Exhaust  -- ^ Stream the data down full blast in multiple "more" packages, on the assumption that the client will fully read all data queried. Faster when you are pulling a lot of data and know you want to pull it all down. Note: the client is not allowed to not read all the data unless it closes the connection.
+-- Exhaust commented out because not compatible with current `Pipeline` implementation
+	| Partial  -- ^ Get partial results from a _mongos_ if some shards are down, instead of throwing an error.
 	deriving (Show, Eq)
 
 -- *** Binary format
@@ -270,6 +272,7 @@ qBit SlaveOK = bit 2
 qBit NoCursorTimeout = bit 4
 qBit AwaitData = bit 5
 --qBit Exhaust = bit 6
+qBit Partial = bit 7
 
 qBits :: [QueryOption] -> Int32
 qBits = bitOr . map qBit
