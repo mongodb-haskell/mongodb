@@ -4,7 +4,7 @@
 
 module Database.MongoDB.Connection (
 	-- * Util
-	IOE, runIOE, Secs,
+	Secs, IOE, runIOE,
 	-- * Connection
 	Pipe, close, isClosed,
 	-- * Server
@@ -16,10 +16,9 @@ module Database.MongoDB.Connection (
 ) where
 
 import Prelude hiding (lookup)
-import Database.MongoDB.Internal.Protocol (Pipe, writeMessage, readMessage)
-import System.IO.Pipeline (IOE, IOStream(..), newPipeline, close, isClosed)
+import Database.MongoDB.Internal.Protocol (Pipe, newPipe)
+import System.IO.Pipeline (IOE, close, isClosed)
 import System.IO.Error as E (try)
-import System.IO (hClose)
 import Network (HostName, PortID(..), connectTo)
 import Text.ParserCombinators.Parsec as T (parse, many1, letter, digit, char, eof, spaces, try, (<|>))
 import Control.Monad.Identity (runIdentity)
@@ -102,7 +101,7 @@ connect' timeoutSecs (Host hostname port) = do
 	handle <- ErrorT . E.try $ do
 		mh <- timeout (round $ timeoutSecs * 1000000) (connectTo hostname port)
 		maybe (ioError $ userError "connect timed out") return mh
-	lift $ newPipeline $ IOStream (writeMessage handle) (readMessage handle) (hClose handle)
+	lift $ newPipe handle
 
 -- * Replica Set
 

@@ -7,9 +7,7 @@ This module is not intended for direct use. Use the high-level interface at "Dat
 module Database.MongoDB.Internal.Protocol (
 	FullCollection,
 	-- * Pipe
-	Pipe, send, call,
-	-- * Message
-	writeMessage, readMessage,
+	Pipe, newPipe, send, call,
 	-- ** Notice
 	Notice(..), InsertOption(..), UpdateOption(..), DeleteOption(..), CursorId,
 	-- ** Request
@@ -24,9 +22,9 @@ import Prelude as X
 import Control.Applicative ((<$>))
 import Control.Arrow ((***))
 import Data.ByteString.Lazy as B (length, hPut)
-import System.IO.Pipeline (IOE, Pipeline)
+import System.IO.Pipeline (IOE, Pipeline, newPipeline, IOStream(..))
 import qualified System.IO.Pipeline as P (send, call)
-import System.IO (Handle)
+import System.IO (Handle, hClose)
 import Data.Bson (Document, UString)
 import Data.Bson.Binary
 import Data.Binary.Put
@@ -46,6 +44,10 @@ import Database.MongoDB.Internal.Util (whenJust, hGetN, bitOr, byteStringHex)
 
 type Pipe = Pipeline Response Message
 -- ^ Thread-safe TCP connection with pipelined requests
+
+newPipe :: Handle -> IO Pipe
+-- ^ Create pipe over handle
+newPipe handle = newPipeline $ IOStream (writeMessage handle) (readMessage handle) (hClose handle)
 
 send :: Pipe -> [Notice] -> IOE ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
