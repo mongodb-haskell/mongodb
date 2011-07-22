@@ -60,7 +60,7 @@ hs-source-dirs: .
 other-modules:
 ghc-prof-options: -auto-all
 ghc-shared-options:
-ghc-options: -Wall -O2
+ghc-options: -Wall
 hugs-options:
 nhc98-options:
 jhc-options:

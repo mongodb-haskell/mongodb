@@ -10,7 +10,6 @@ Bson
 
 MongoDB
 -------
-+ Support the new query flag: https://jira.mongodb.org/browse/SERVER-2020
 + When one connection in a pool fails, close all other since they will likely fail too
 + on insert/update: reject keys that start with "$" or "."
 + dereference dbref
