@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, ExtendedDefaultRules #-}
 
 import Database.MongoDB
 import Control.Monad.Trans (liftIO)
@@ -19,15 +19,15 @@ run = do
 clearTeams = delete (select [] "team")
 
 insertTeams = insertMany "team" [
-    ["name" =: u"Yankees", "home" =: ["city" =: u"New York", "state" =: u"NY"], "league" =: u"American"],
-    ["name" =: u"Mets", "home" =: ["city" =: u"New York", "state" =: u"NY"], "league" =: u"National"],
-    ["name" =: u"Phillies", "home" =: ["city" =: u"Philadelphia", "state" =: u"PA"], "league" =: u"National"],
-    ["name" =: u"Red Sox", "home" =: ["city" =: u"Boston", "state" =: u"MA"], "league" =: u"American"] ]
+    ["name" =: "Yankees", "home" =: ["city" =: "New York", "state" =: "NY"], "league" =: "American"],
+    ["name" =: "Mets", "home" =: ["city" =: "New York", "state" =: "NY"], "league" =: "National"],
+    ["name" =: "Phillies", "home" =: ["city" =: "Philadelphia", "state" =: "PA"], "league" =: "National"],
+    ["name" =: "Red Sox", "home" =: ["city" =: "Boston", "state" =: "MA"], "league" =: "American"] ]
 
-allTeams = rest =<< find (select [] "team") {sort = ["home.city" =: (1 :: Int)]}
+allTeams = rest =<< find (select [] "team") {sort = ["home.city" =: 1]}
 
-nationalLeagueTeams = rest =<< find (select ["league" =: u"National"] "team")
+nationalLeagueTeams = rest =<< find (select ["league" =: "National"] "team")
 
-newYorkTeams = rest =<< find (select ["home.state" =: u"NY"] "team") {project = ["name" =: (1 :: Int), "league" =: (1 :: Int)]}
+newYorkTeams = rest =<< find (select ["home.state" =: "NY"] "team") {project = ["name" =: 1, "league" =: 1]}
 
 printDocs title docs = liftIO $ putStrLn title >> mapM_ (print . exclude ["_id"]) docs
