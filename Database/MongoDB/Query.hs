@@ -40,7 +40,7 @@ module Database.MongoDB.Query (
 
 import Prelude as X hiding (lookup)
 import Data.UString as U (UString, dropWhile, any, tail)
-import Data.Bson (Document, at, lookup, look, Field(..), (=:), (=?), Label, Value(String,Doc), Javascript, genObjectId)
+import Data.Bson (Document, at, valueAt, lookup, look, Field(..), (=:), (=?), Label, Value(String,Doc), Javascript, genObjectId)
 import Database.MongoDB.Internal.Protocol (Pipe, Notice(..), Request(GetMore), Reply(..), QueryOption(..), ResponseFlag(..), InsertOption(..), UpdateOption(..), DeleteOption(..), CursorId, FullCollection, Username, Password, pwKey)
 import qualified Database.MongoDB.Internal.Protocol as P (send, call, Request(Query))
 import Database.MongoDB.Internal.Util (MonadIO', loop, liftIOE, true1, (<.>))
@@ -274,7 +274,7 @@ insert' opts col docs = do
 	db <- thisDatabase
 	docs' <- liftIO $ mapM assignId docs
 	write (Insert (db <.> col) opts docs')
-	mapM (look "_id") docs'
+	return $ map (valueAt "_id") docs'
 
 assignId :: Document -> IO Document
 -- ^ Assign a unique value to _id field if missing
