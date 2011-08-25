@@ -17,7 +17,8 @@ build-depends:
     network -any,
     parsec -any,
     random -any,
-    random-shuffle -any
+    random-shuffle -any,
+    monad-control >= 0.2 && < 0.3
 stability: alpha
 homepage: http://github.com/TonyGen/mongoDB-haskell
 package-url:
