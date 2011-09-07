@@ -39,7 +39,7 @@ import qualified Data.Set as S
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent (forkIO, threadDelay)
 import Database.MongoDB.Internal.Util (MonadIO', (<.>), true1)
-import Control.Monad.MVar (MonadMVar)
+import Control.Monad.MVar (MonadControlIO)
 
 -- * Admin
 
@@ -122,7 +122,7 @@ dropIndex coll idxName = do
 	resetIndexCache
 	runCommand ["deleteIndexes" =: coll, "index" =: idxName]
 
-getIndexes :: (MonadMVar m, Functor m) => Collection -> Action m [Document]
+getIndexes :: (MonadControlIO m, Functor m) => Collection -> Action m [Document]
 -- ^ Get all indexes on this collection
 getIndexes coll = do
 	db <- thisDatabase
@@ -175,7 +175,7 @@ resetIndexCache = do
 
 -- ** User
 
-allUsers :: (MonadMVar m, Functor m) => Action m [Document]
+allUsers :: (MonadControlIO m, Functor m) => Action m [Document]
 -- ^ Fetch all users of this database
 allUsers = map (exclude ["_id"]) <$> (rest =<< find
 	(select [] "system.users") {sort = ["user" =: (1 :: Int)], project = ["user" =: (1 :: Int), "readOnly" =: (1 :: Int)]})
@@ -242,7 +242,7 @@ storageSize c = at "storageSize" <$> collectionStats c
 totalIndexSize :: (MonadIO' m) => Collection -> Action m Int
 totalIndexSize c = at "totalIndexSize" <$> collectionStats c
 
-totalSize :: (MonadMVar m, MonadIO' m) => Collection -> Action m Int
+totalSize :: (MonadControlIO m, MonadIO' m) => Collection -> Action m Int
 totalSize coll = do
 	x <- storageSize coll
 	xs <- mapM isize =<< getIndexes coll

@@ -5,14 +5,15 @@
 module Control.Monad.MVar (
 	MVar,
 	module Control.Monad.MVar,
-	liftIO
+	liftIO,
+	MonadControlIO
 ) where
 
 import Control.Concurrent.MVar (MVar)
 import qualified Control.Concurrent.MVar as IO
-import Control.Monad.Error
-import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.Error (MonadIO (liftIO))
+import Control.Monad.IO.Control (MonadControlIO, controlIO)
+import Control.Exception.Control (mask, onException)
 
 newEmptyMVar :: (MonadIO m) => m (MVar a)
 newEmptyMVar = liftIO IO.newEmptyMVar
@@ -41,39 +42,24 @@ tryPutMVar var = liftIO . IO.tryPutMVar var
 isEmptyMVar :: (MonadIO m) => MVar a -> m Bool
 isEmptyMVar = liftIO . IO.isEmptyMVar
 
-class (MonadIO m) => MonadMVar m where
-	modifyMVar :: MVar a -> (a -> m (a, b)) -> m b
-	addMVarFinalizer :: MVar a -> m () -> m ()
+modifyMVar :: MonadControlIO m => MVar a -> (a -> m (a, b)) -> m b
+modifyMVar m io =
+  mask $ \restore -> do
+    a      <- takeMVar m
+    (a',b) <- restore (io a) `onException` putMVar m a
+    putMVar m a'
+    return b
 
-modifyMVar_ :: (MonadMVar m) => MVar a -> (a -> m a) -> m ()
+addMVarFinalizer :: MonadControlIO m => MVar a -> m () -> m ()
+addMVarFinalizer mvar f = controlIO $ \run ->
+    return $ liftIO $ addMVarFinalizer mvar (run f >> return ())
+
+modifyMVar_ :: (MonadControlIO m) => MVar a -> (a -> m a) -> m ()
 modifyMVar_ var act = modifyMVar var $ \a -> do
 	a' <- act a
 	return (a', ())
 
-withMVar :: (MonadMVar m) => MVar a -> (a -> m b) -> m b
+withMVar :: (MonadControlIO m) => MVar a -> (a -> m b) -> m b
 withMVar var act = modifyMVar var $ \a -> do
 	b <- act a
 	return (a, b)
-
-instance MonadMVar IO where
-	modifyMVar = IO.modifyMVar
-	addMVarFinalizer = IO.addMVarFinalizer
-
-instance (MonadMVar m, Error e) => MonadMVar (ErrorT e m) where
-	modifyMVar var f = ErrorT $ modifyMVar var $ \a -> do
-		e <- runErrorT (f a)
-		return $ either ((a, ) . Left) (fmap Right) e
-	addMVarFinalizer var (ErrorT act) = ErrorT $ 
-		addMVarFinalizer var (act >> return ()) >> return (Right ())
-		-- NOTE, error is silently dropped
-
-instance (MonadMVar m) => MonadMVar (ReaderT r m) where
-	modifyMVar var f = ReaderT $ \r -> modifyMVar var $ \a -> runReaderT (f a) r
-	addMVarFinalizer var (ReaderT act) = ReaderT (addMVarFinalizer var . act)
-
-instance (MonadMVar m) => MonadMVar (StateT s m) where
-	modifyMVar var f = StateT $ \s -> modifyMVar var $ \a -> do
-		((a', b), s') <- runStateT (f a) s
-		return (a', (b, s'))
-	addMVarFinalizer var (StateT act) = StateT $ \s ->
-		addMVarFinalizer var (act s >> return ()) >> return ((), s)
