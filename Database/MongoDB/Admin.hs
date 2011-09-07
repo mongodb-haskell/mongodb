@@ -18,7 +18,7 @@ module Database.MongoDB.Admin (
 	-- ** Collection
 	collectionStats, dataSize, storageSize, totalIndexSize, totalSize,
 	-- ** Profiling
-	ProfilingLevel, getProfilingLevel, MilliSec, setProfilingLevel,
+	ProfilingLevel(..), getProfilingLevel, MilliSec, setProfilingLevel,
 	-- ** Database
 	dbStats, OpNum, currentOp, killOp,
 	-- ** Server

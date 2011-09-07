@@ -72,13 +72,13 @@ access myPipe myAccessMode myDatabase (Action action) = runReaderT (runErrorT ac
 data Failure =
 	 ConnectionFailure IOError  -- ^ TCP connection ('Pipeline') failed. May work if you try again on the same Mongo 'Connection' which will create a new Pipe.
 	| CursorNotFoundFailure CursorId  -- ^ Cursor expired because it wasn't accessed for over 10 minutes, or this cursor came from a different server that the one you are currently connected to (perhaps a fail over happen between servers in a replica set)
-	| QueryFailure String  -- ^ Query failed for some reason as described in the string
+	| QueryFailure ErrorCode String  -- ^ Query failed for some reason as described in the string
 	| WriteFailure ErrorCode String  -- ^ Error observed by getLastError after a write, error description is in string
 	| DocNotFound Selection  -- ^ 'fetch' found no document matching selection
 	deriving (Show, Eq)
 
 type ErrorCode = Int
--- ^ Error code from getLastError
+-- ^ Error code from getLastError or query failure
 
 instance Error Failure where strMsg = error
 -- ^ 'fail' is treated the same as a programming 'error'. In other words, don't use it.
@@ -452,8 +452,8 @@ fromReply limit Reply{..} = do
 	-- If response flag indicates failure then throw it, otherwise do nothing
 	checkResponseFlag flag = case flag of
 		AwaitCapable -> return ()
-		CursorNotFound -> throwError (CursorNotFoundFailure rCursorId)
-		QueryError -> throwError (QueryFailure $ at "$err" $ head rDocuments)
+		CursorNotFound -> throwError $ CursorNotFoundFailure rCursorId
+		QueryError -> throwError $ QueryFailure (at "code" $ head rDocuments) (at "$err" $ head rDocuments)
 
 fulfill :: (MonadIO m) => DelayedBatch -> Action m Batch
 -- ^ Demand and wait for result, raise failure if exception
