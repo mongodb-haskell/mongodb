@@ -52,7 +52,7 @@ modifyMVar m io =
 
 addMVarFinalizer :: MonadControlIO m => MVar a -> m () -> m ()
 addMVarFinalizer mvar f = controlIO $ \run ->
-    return $ liftIO $ addMVarFinalizer mvar (run f >> return ())
+    return $ liftIO $ IO.addMVarFinalizer mvar (run f >> return ())
 
 modifyMVar_ :: (MonadControlIO m) => MVar a -> (a -> m a) -> m ()
 modifyMVar_ var act = modifyMVar var $ \a -> do
