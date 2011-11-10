@@ -18,7 +18,7 @@ module Database.MongoDB.Connection (
 import Prelude hiding (lookup)
 import Database.MongoDB.Internal.Protocol (Pipe, newPipe)
 import System.IO.Pipeline (IOE, close, isClosed)
-import System.IO.Error as E (try)
+import Control.Exception as E (try)
 import Network (HostName, PortID(..), connectTo)
 import Text.ParserCombinators.Parsec as T (parse, many1, letter, digit, char, eof, spaces, try, (<|>))
 import Control.Monad.Identity (runIdentity)

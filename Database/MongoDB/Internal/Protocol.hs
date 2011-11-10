@@ -35,7 +35,7 @@ import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Crypto.Hash.MD5 as MD5 (hash)
 import Data.UString as U (pack, append, toByteString)
-import System.IO.Error as E (try)
+import Control.Exception as E (try)
 import Control.Monad.Error
 import System.IO (hFlush)
 import Database.MongoDB.Internal.Util (whenJust, hGetN, bitOr, byteStringHex)
