@@ -50,6 +50,8 @@ import Control.Monad.Reader
 import Control.Monad.State (StateT)
 import Control.Monad.Writer (WriterT, Monoid)
 import Control.Monad.RWS (RWST)
+import Control.Monad.Base (MonadBase(liftBase))
+import Control.Monad.Trans.Control (ComposeSt, MonadBaseControl(..), MonadTransControl(..), StM, StT, defaultLiftBaseWith, defaultRestoreM)
 import Control.Applicative (Applicative, (<$>))
 import Data.Maybe (listToMaybe, catMaybes)
 import Data.Int (Int32)
@@ -57,11 +59,29 @@ import Data.Word (Word32)
 
 -- * Monad
 
-newtype Action m a = Action (ErrorT Failure (ReaderT Context m) a)
-	deriving (Functor, Applicative, Monad, MonadIO, MonadControlIO, MonadError Failure)
+newtype Action m a = Action {unAction :: ErrorT Failure (ReaderT Context m) a}
+	deriving (Functor, Applicative, Monad, MonadIO, MonadError Failure)
 -- ^ A monad on top of m (which must be a MonadIO) that may access the database and may fail with a DB 'Failure'
 
-instance MonadTrans Action where lift = Action . lift . lift
+instance MonadBase b m => MonadBase b (Action m) where
+     liftBase = Action . liftBase
+
+instance (MonadIO m, MonadBaseControl b m) => MonadBaseControl b (Action m) where
+     newtype StM (Action m) a = StMT {unStMT :: ComposeSt Action m a}
+     liftBaseWith = defaultLiftBaseWith StMT
+     restoreM     = defaultRestoreM   unStMT
+
+instance MonadTrans Action where
+     lift = Action . lift . lift
+
+instance MonadTransControl Action where
+    newtype StT Action a = StActionT {unStAction :: StT (ReaderT Context) (StT (ErrorT Failure) a)}
+
+    liftWith f = Action $ liftWith $ \runError ->
+                            liftWith $ \runReader ->
+                              f (liftM StActionT . runReader . runError . unAction)
+
+    restoreT = Action . restoreT . restoreT . liftM unStAction
 
 access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m (Either Failure a)
 -- ^ Run action against database on server at other end of pipe. Use access mode for any reads and writes. Return Left on connection failure or read/write failure.
@@ -139,11 +159,11 @@ call ns r = Action $ do
 	return (liftIOE ConnectionFailure promise)
 
 -- | If you stack a monad on top of 'Action' then make it an instance of this class and use 'liftDB' to execute a DB Action within it. Instances already exist for the basic mtl transformers.
-class (Monad m, MonadControlIO (BaseMonad m), Applicative (BaseMonad m), Functor (BaseMonad m)) => MonadDB m where
+class (Monad m, MonadBaseControl IO (BaseMonad m), Applicative (BaseMonad m), Functor (BaseMonad m)) => MonadDB m where
 	type BaseMonad m :: * -> *
 	liftDB :: Action (BaseMonad m) a -> m a
 
-instance (MonadControlIO m, Applicative m, Functor m) => MonadDB (Action m) where
+instance (MonadBaseControl IO m, Applicative m, Functor m) => MonadDB (Action m) where
 	type BaseMonad (Action m) = m
 	liftDB = id
 
@@ -192,7 +212,7 @@ auth usr pss = do
 type Collection = UString
 -- ^ Collection name (not prefixed with database)
 
-allCollections :: (MonadControlIO m, Functor m) => Action m [Collection]
+allCollections :: (MonadIO m, MonadBaseControl IO m, Functor m) => Action m [Collection]
 -- ^ List all collections in this database
 allCollections = do
 	db <- thisDatabase
@@ -369,7 +389,7 @@ query :: Selector -> Collection -> Query
 -- ^ Selects documents in collection that match selector. It uses no query options, projects all fields, does not skip any documents, does not limit result size, uses default batch size, does not sort, does not hint, and does not snapshot.
 query sel col = Query [] (Select sel col) [] 0 0 [] False 0 []
 
-find :: (MonadControlIO m) => Query -> Action m Cursor
+find :: (MonadIO m, MonadBaseControl IO m) => Query -> Action m Cursor
 -- ^ Fetch documents satisfying query
 find q@Query{selection, batchSize} = do
 	db <- thisDatabase
@@ -464,7 +484,7 @@ fulfill = Action . liftIOE id
 data Cursor = Cursor FullCollection BatchSize (MVar DelayedBatch)
 -- ^ Iterator over results of a query. Use 'next' to iterate or 'rest' to get all results. A cursor is closed when it is explicitly closed, all results have been read from it, garbage collected, or not used for over 10 minutes (unless 'NoCursorTimeout' option was specified in 'Query'). Reading from a closed cursor raises a 'CursorNotFoundFailure'. Note, a cursor is not closed when the pipe is closed, so you can open another pipe to the same server and continue using the cursor.
 
-newCursor :: (MonadControlIO m) => Database -> Collection -> BatchSize -> DelayedBatch -> Action m Cursor
+newCursor :: (MonadIO m, MonadBaseControl IO m) => Database -> Collection -> BatchSize -> DelayedBatch -> Action m Cursor
 -- ^ Create new cursor. If you don't read all results then close it. Cursor will be closed automatically when all results are read from it or when eventually garbage collected.
 newCursor db col batchSize dBatch = do
 	var <- newMVar dBatch
@@ -472,7 +492,7 @@ newCursor db col batchSize dBatch = do
 	addMVarFinalizer var (closeCursor cursor)
 	return cursor
 
-nextBatch :: (MonadControlIO m) => Cursor -> Action m [Document]
+nextBatch :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m [Document]
 -- ^ Return next batch of documents in query result, which will be empty if finished.
 nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
 	-- Pre-fetch next batch promise from server and return current batch.
@@ -483,7 +503,7 @@ nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
 	nextBatch' limit cid = request [] (GetMore fcol batchSize' cid, remLimit)
 		where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
 
-next :: (MonadControlIO m) => Cursor -> Action m (Maybe Document)
+next :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m (Maybe Document)
 -- ^ Return next document in query result, or Nothing if finished.
 next (Cursor fcol batchSize var) = modifyMVar var nextState where
 	-- Pre-fetch next batch promise from server when last one in current batch is returned.
@@ -502,15 +522,15 @@ next (Cursor fcol batchSize var) = modifyMVar var nextState where
 	nextBatch' limit cid = request [] (GetMore fcol batchSize' cid, remLimit)
 		where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
 
-nextN :: (MonadControlIO m, Functor m) => Int -> Cursor -> Action m [Document]
+nextN :: (MonadIO m, MonadBaseControl IO m, Functor m) => Int -> Cursor -> Action m [Document]
 -- ^ Return next N documents or less if end is reached
 nextN n c = catMaybes <$> replicateM n (next c)
 
-rest :: (MonadControlIO m, Functor m) => Cursor -> Action m [Document]
+rest :: (MonadIO m, MonadBaseControl IO m, Functor m) => Cursor -> Action m [Document]
 -- ^ Return remaining documents in query result
 rest c = loop (next c)
 
-closeCursor :: (MonadControlIO m) => Cursor -> Action m ()
+closeCursor :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m ()
 closeCursor (Cursor _ _ var) = modifyMVar var $ \dBatch -> do
 	Batch _ cid _ <- fulfill dBatch
 	unless (cid == 0) $ send [KillCursors [cid]]
@@ -618,7 +638,7 @@ mapReduce :: Collection -> MapFun -> ReduceFun -> MapReduce
 -- ^ MapReduce on collection with given map and reduce functions. Remaining attributes are set to their defaults, which are stated in their comments.
 mapReduce col map' red = MapReduce col map' red [] [] 0 Inline Nothing [] False
 
-runMR :: (MonadControlIO m, Applicative m) => MapReduce -> Action m Cursor
+runMR :: (MonadIO m, MonadBaseControl IO m, Applicative m) => MapReduce -> Action m Cursor
 -- ^ Run MapReduce and return cursor of results. Error if map/reduce fails (because of bad Javascript)
 runMR mr = do
 	res <- runMR' mr
