@@ -1,19 +1,18 @@
 {- | Lift MVar operations so you can do them within monads stacked on top of IO. Analogous to MonadIO -}
 
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE FlexibleContexts, TupleSections #-}
 
 module Control.Monad.MVar (
 	MVar,
 	module Control.Monad.MVar,
 	liftIO,
-	MonadControlIO
 ) where
 
 import Control.Concurrent.MVar (MVar)
 import qualified Control.Concurrent.MVar as IO
 import Control.Monad.Error (MonadIO (liftIO))
-import Control.Monad.IO.Control (MonadControlIO, controlIO)
-import Control.Exception.Control (mask, onException)
+import Control.Monad.Trans.Control (MonadBaseControl, liftBaseWith)
+import Control.Exception.Lifted (mask, onException)
 
 newEmptyMVar :: (MonadIO m) => m (MVar a)
 newEmptyMVar = liftIO IO.newEmptyMVar
@@ -42,7 +41,7 @@ tryPutMVar var = liftIO . IO.tryPutMVar var
 isEmptyMVar :: (MonadIO m) => MVar a -> m Bool
 isEmptyMVar = liftIO . IO.isEmptyMVar
 
-modifyMVar :: MonadControlIO m => MVar a -> (a -> m (a, b)) -> m b
+modifyMVar :: (MonadIO m, MonadBaseControl IO m) => MVar a -> (a -> m (a, b)) -> m b
 modifyMVar m io =
   mask $ \restore -> do
     a      <- takeMVar m
@@ -50,16 +49,16 @@ modifyMVar m io =
     putMVar m a'
     return b
 
-addMVarFinalizer :: MonadControlIO m => MVar a -> m () -> m ()
-addMVarFinalizer mvar f = controlIO $ \run ->
-    return $ liftIO $ IO.addMVarFinalizer mvar (run f >> return ())
+addMVarFinalizer :: (MonadIO m, MonadBaseControl IO m) => MVar a -> m () -> m ()
+addMVarFinalizer mv f = liftBaseWith $ \run ->
+  IO.addMVarFinalizer mv (run f >> return ())
 
-modifyMVar_ :: (MonadControlIO m) => MVar a -> (a -> m a) -> m ()
+modifyMVar_ :: (MonadIO m, MonadBaseControl IO m) => MVar a -> (a -> m a) -> m ()
 modifyMVar_ var act = modifyMVar var $ \a -> do
 	a' <- act a
 	return (a', ())
 
-withMVar :: (MonadControlIO m) => MVar a -> (a -> m b) -> m b
+withMVar :: (MonadIO m, MonadBaseControl IO m) => MVar a -> (a -> m b) -> m b
 withMVar var act = modifyMVar var $ \a -> do
 	b <- act a
 	return (a, b)
