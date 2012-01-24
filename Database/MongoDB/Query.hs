@@ -44,7 +44,7 @@ import Data.Bson (Document, at, valueAt, lookup, look, Field(..), (=:), (=?), La
 import Database.MongoDB.Internal.Protocol (Pipe, Notice(..), Request(GetMore, qOptions, qFullCollection, qSkip, qBatchSize, qSelector, qProjector), Reply(..), QueryOption(..), ResponseFlag(..), InsertOption(..), UpdateOption(..), DeleteOption(..), CursorId, FullCollection, Username, Password, pwKey)
 import qualified Database.MongoDB.Internal.Protocol as P (send, call, Request(Query))
 import Database.MongoDB.Internal.Util (MonadIO', loop, liftIOE, true1, (<.>))
-import Control.Monad.MVar
+import Control.Concurrent.MVar.Lifted
 import Control.Monad.Error
 import Control.Monad.Reader
 import Control.Monad.State (StateT)
@@ -76,11 +76,9 @@ instance MonadTrans Action where
 
 instance MonadTransControl Action where
     newtype StT Action a = StActionT {unStAction :: StT (ReaderT Context) (StT (ErrorT Failure) a)}
-
     liftWith f = Action $ liftWith $ \runError ->
-                            liftWith $ \runReader ->
-                              f (liftM StActionT . runReader . runError . unAction)
-
+                            liftWith $ \runReader' ->
+                              f (liftM StActionT . runReader' . runError . unAction)
     restoreT = Action . restoreT . restoreT . liftM unStAction
 
 access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m (Either Failure a)
@@ -500,6 +498,7 @@ nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
 	dBatch' <- if cid /= 0 then nextBatch' fcol batchSize limit cid else return $ return (Batch 0 0 [])
 	return (dBatch', docs)
 
+fulfill' :: (MonadIO m) => FullCollection -> BatchSize -> DelayedBatch -> Action m Batch
 -- Discard pre-fetched batch if empty with nonzero cid.
 fulfill' fcol batchSize dBatch = do
 	b@(Batch limit cid docs) <- fulfill dBatch
@@ -507,6 +506,7 @@ fulfill' fcol batchSize dBatch = do
 		then nextBatch' fcol batchSize limit cid >>= fulfill
 		else return b
 
+nextBatch' :: (MonadIO m) => FullCollection -> BatchSize -> Limit -> CursorId -> Action m DelayedBatch
 nextBatch' fcol batchSize limit cid = request [] (GetMore fcol batchSize' cid, remLimit)
 	where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
 
@@ -541,7 +541,7 @@ closeCursor (Cursor _ _ var) = modifyMVar var $ \dBatch -> do
 	unless (cid == 0) $ send [KillCursors [cid]]
 	return $ (return $ Batch 0 0 [], ())
 
-isCursorClosed :: (MonadIO m) => Cursor -> Action m Bool
+isCursorClosed :: (MonadIO m, MonadBase IO m) => Cursor -> Action m Bool
 isCursorClosed (Cursor _ _ var) = do
 		Batch _ cid docs <- fulfill =<< readMVar var
 		return (cid == 0 && null docs)

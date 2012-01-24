@@ -5,7 +5,7 @@
 module System.IO.Pool where
 
 import Control.Applicative ((<$>))
-import Control.Monad.MVar
+import Control.Concurrent.MVar.Lifted
 import Data.Array.IO
 import Data.Maybe (catMaybes)
 import Control.Monad.Error

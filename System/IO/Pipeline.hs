@@ -16,7 +16,7 @@ import Prelude hiding (length)
 import GHC.Conc (ThreadStatus(..), threadStatus)
 import Control.Concurrent (ThreadId, forkIO, killThread)
 import Control.Concurrent.Chan
-import Control.Monad.MVar
+import Control.Concurrent.MVar.Lifted
 import Control.Monad.Error
 
 onException :: (Monad m) => ErrorT e m a -> m () -> ErrorT e m a

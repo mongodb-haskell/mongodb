@@ -35,7 +35,6 @@ data-dir: ""
 extra-source-files:
 extra-tmp-files:
 exposed-modules:
-    Control.Monad.MVar
     Database.MongoDB
     Database.MongoDB.Admin
     Database.MongoDB.Connection

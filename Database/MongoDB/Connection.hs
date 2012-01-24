@@ -23,7 +23,7 @@ import Network (HostName, PortID(..), connectTo)
 import Text.ParserCombinators.Parsec as T (parse, many1, letter, digit, char, eof, spaces, try, (<|>))
 import Control.Monad.Identity (runIdentity)
 import Control.Monad.Error (ErrorT(..), lift, throwError)
-import Control.Monad.MVar
+import Control.Concurrent.MVar.Lifted
 import Control.Monad (forM_)
 import Control.Applicative ((<$>))
 import Data.UString (UString, unpack)
