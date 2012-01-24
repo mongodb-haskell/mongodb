@@ -1,10 +1,11 @@
 name: mongoDB
-version: 1.1.1
+version: 1.2.0
 build-type: Simple
 license: OtherLicense
 license-file: LICENSE
-copyright: Copyright (c) 2010-2010 10gen Inc. & Scott Parish
-maintainer: Tony Hannan <tony@10gen.com>
+copyright: Copyright (c) 2010-2012 10gen Inc.
+author: Tony Hannan
+maintainer: Tony Hannan <tonyhannan@gmail.com>
 build-depends:
     array -any,
     base <5,
@@ -18,9 +19,9 @@ build-depends:
     parsec -any,
     random -any,
     random-shuffle -any,
-    monad-control >= 0.3.0.1 && < 0.4,
-    lifted-base >= 0.1.0.1 && < 0.2,
-    transformers-base >= 0.4 && < 0.5
+    monad-control >= 0.3.1,
+    lifted-base >= 0.1.0.3,
+    transformers-base >= 0.4.1
 stability: alpha
 homepage: http://github.com/TonyGen/mongoDB-haskell
 package-url:
@@ -28,7 +29,6 @@ bug-reports:
 synopsis: Driver (client) for MongoDB, a free, scalable, fast, document DBMS
 description: This package lets you connect to MongoDB servers and update/query their data. Please see the example in Database.MongoDB and the tutorial from the homepage. For information about MongoDB itself, see www.mongodb.org.
 category: Database
-author: Tony Hannan <tony@10gen.com> & Scott Parish <srp@srparish.net>
 tested-with:
 data-files:
 data-dir: ""
