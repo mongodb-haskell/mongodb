@@ -496,43 +496,36 @@ nextBatch :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m [Document]
 -- ^ Return next batch of documents in query result, which will be empty if finished.
 nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
 	-- Pre-fetch next batch promise from server and return current batch.
-	-- Discard pre-fetched batch if empty with nonzero cid.
-	Batch limit cid docs <- fulfill' dBatch
-	dBatch' <- if cid /= 0 then nextBatch' limit cid else return $ return (Batch 0 0 [])
+	Batch limit cid docs <- fulfill' fcol batchSize dBatch
+	dBatch' <- if cid /= 0 then nextBatch' fcol batchSize limit cid else return $ return (Batch 0 0 [])
 	return (dBatch', docs)
- where
-	fulfill' dBatch = do
-		b@(Batch limit cid docs) <- fulfill dBatch
-		if cid /= 0 && null docs
-			then nextBatch' limit cid >>= fulfill
-			else return b
-	nextBatch' limit cid = request [] (GetMore fcol batchSize' cid, remLimit)
-		where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
+
+-- Discard pre-fetched batch if empty with nonzero cid.
+fulfill' fcol batchSize dBatch = do
+	b@(Batch limit cid docs) <- fulfill dBatch
+	if cid /= 0 && null docs
+		then nextBatch' fcol batchSize limit cid >>= fulfill
+		else return b
+
+nextBatch' fcol batchSize limit cid = request [] (GetMore fcol batchSize' cid, remLimit)
+	where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
 
 next :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m (Maybe Document)
 -- ^ Return next document in query result, or Nothing if finished.
 next (Cursor fcol batchSize var) = modifyMVar var nextState where
 	-- Pre-fetch next batch promise from server when last one in current batch is returned.
-	-- Discard pre-fetched batch if empty with nonzero cid.
 	-- nextState:: DelayedBatch -> Action m (DelayedBatch, Maybe Document)
 	nextState dBatch = do
-		Batch limit cid docs <- fulfill' dBatch
+		Batch limit cid docs <- fulfill' fcol batchSize dBatch
 		case docs of
 			doc : docs' -> do
 				dBatch' <- if null docs' && cid /= 0
-					then nextBatch' limit cid
+					then nextBatch' fcol batchSize limit cid
 					else return $ return (Batch limit cid docs')
 				return (dBatch', Just doc)
 			[] -> if cid == 0
 				then return (return $ Batch 0 0 [], Nothing)  -- finished
-				else fmap (,Nothing) $ nextBatch' limit cid
-	fulfill' dBatch = do
-		b@(Batch limit cid docs) <- fulfill dBatch
-		if cid /= 0 && null docs
-			then nextBatch' limit cid >>= fulfill
-			else return b
-	nextBatch' limit cid = request [] (GetMore fcol batchSize' cid, remLimit)
-		where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
+				else fmap (,Nothing) $ nextBatch' fcol batchSize limit cid
 
 nextN :: (MonadIO m, MonadBaseControl IO m, Functor m) => Int -> Cursor -> Action m [Document]
 -- ^ Return next N documents or less if end is reached
