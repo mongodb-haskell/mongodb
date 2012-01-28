@@ -106,6 +106,7 @@ data AccessMode =
 	 ReadStaleOk  -- ^ Read-only action, reading stale data from a slave is OK.
 	| UnconfirmedWrites  -- ^ Read-write action, slave not OK, every write is fire & forget.
 	| ConfirmWrites GetLastError  -- ^ Read-write action, slave not OK, every write is confirmed with getLastError.
+    deriving Show
 
 type GetLastError = Document
 -- ^ Parameters for getLastError command. For example @[\"w\" =: 2]@ tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See <http://www.mongodb.org/display/DOCS/Last+Error+Commands> for more options.
