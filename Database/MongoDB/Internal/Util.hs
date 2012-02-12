@@ -30,6 +30,33 @@ deriving instance Ord PortID
 class (MonadIO m, Applicative m, Functor m) => MonadIO' m
 instance (MonadIO m, Applicative m, Functor m) => MonadIO' m
 
+-- | A monadic sort implementation derived from the non-monadic one in ghc's Prelude
+mergesortM :: Monad m => (a -> a -> m Ordering) -> [a] -> m [a]
+mergesortM cmp = mergesortM' cmp . map wrap
+
+mergesortM' :: Monad m => (a -> a -> m Ordering) -> [[a]] -> m [a]
+mergesortM' _  [] = return []
+mergesortM' _  [xs] = return xs
+mergesortM' cmp xss = mergesortM' cmp =<< (merge_pairsM cmp xss)
+
+merge_pairsM :: Monad m => (a -> a -> m Ordering) -> [[a]] -> m [[a]]
+merge_pairsM _   [] = return []
+merge_pairsM _   [xs] = return [xs]
+merge_pairsM cmp (xs:ys:xss) = liftM2 (:) (mergeM cmp xs ys) (merge_pairsM cmp xss)
+
+mergeM :: Monad m => (a -> a -> m Ordering) -> [a] -> [a] -> m [a]
+mergeM _   [] ys = return ys
+mergeM _   xs [] = return xs
+mergeM cmp (x:xs) (y:ys)
+ = do
+     c <- x `cmp` y
+     case c of
+        GT -> liftM (y:) (mergeM cmp (x:xs)   ys)
+        _  -> liftM (x:) (mergeM cmp    xs (y:ys))
+
+wrap :: a -> [a]
+wrap x = [x]
+
 shuffle :: [a] -> IO [a]
 -- ^ Randomly shuffle items in list
 shuffle list = shuffle' list (L.length list) <$> newStdGen
