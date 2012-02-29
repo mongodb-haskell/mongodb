@@ -1,6 +1,8 @@
 -- | Miscellaneous general functions and Show, Eq, and Ord instances for PortID
 
 {-# LANGUAGE FlexibleInstances, UndecidableInstances, StandaloneDeriving #-}
+-- PortID instances
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Database.MongoDB.Internal.Util where
 
