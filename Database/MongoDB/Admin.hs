@@ -31,9 +31,10 @@ import Database.MongoDB.Internal.Protocol (pwHash, pwKey)
 import Database.MongoDB.Connection (Host, showHostPort)
 import Database.MongoDB.Query
 import Data.Bson
-import Data.UString (pack, append, intercalate)
 import Control.Monad.Reader
-import qualified Data.HashTable as T
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.HashTable as H
 import Data.IORef
 import qualified Data.Set as S
 import System.IO.Unsafe (unsafePerformIO)
@@ -68,7 +69,7 @@ dropCollection coll = do
 	resetIndexCache
 	r <- runCommand ["drop" =: coll]
 	if true1 "ok" r then return True else do
-		if at "errmsg" r == ("ns not found" :: UString) then return False else
+		if at "errmsg" r == ("ns not found" :: Text) then return False else
 			fail $ "dropCollection failed: " ++ show r
 
 validateCollection :: (MonadIO' m) => Collection -> Action m Document
@@ -77,7 +78,7 @@ validateCollection coll = runCommand ["validate" =: coll]
 
 -- ** Index
 
-type IndexName = UString
+type IndexName = Text
 
 data Index = Index {
 	iColl :: Collection,
@@ -100,8 +101,8 @@ index :: Collection -> Order -> Index
 index coll keys = Index coll keys (genName keys) False False
 
 genName :: Order -> IndexName
-genName keys = intercalate "_" (map f keys)  where
-	f (k := v) = k `append` "_" `append` pack (show v)
+genName keys = T.intercalate "_" (map f keys)  where
+	f (k := v) = k `T.append` "_" `T.append` T.pack (show v)
 
 ensureIndex :: (MonadIO' m) => Index -> Action m ()
 -- ^ Create index if we did not already create one. May be called repeatedly with practically no performance hit, because we remember if we already called this for the same index (although this memory gets wiped out every 15 minutes, in case another client drops the index and we want to create it again).
@@ -132,11 +133,11 @@ dropIndexes :: (MonadIO' m) => Collection -> Action m Document
 -- ^ Drop all indexes on this collection
 dropIndexes coll = do
 	resetIndexCache
-	runCommand ["deleteIndexes" =: coll, "index" =: ("*" :: UString)]
+	runCommand ["deleteIndexes" =: coll, "index" =: ("*" :: Text)]
 
 -- *** Index cache
 
-type DbIndexCache = T.HashTable Database IndexCache
+type DbIndexCache = H.HashTable Database IndexCache
 -- ^ Cache the indexes we create so repeatedly calling ensureIndex only hits database the first time. Clear cache every once in a while so if someone else deletes index we will recreate it on ensureIndex.
 
 type IndexCache = IORef (S.Set (Collection, IndexName))
@@ -144,27 +145,27 @@ type IndexCache = IORef (S.Set (Collection, IndexName))
 dbIndexCache :: DbIndexCache
 -- ^ initialize cache and fork thread that clears it every 15 minutes
 dbIndexCache = unsafePerformIO $ do
-	table <- T.new (==) (T.hashString . unpack)
+	table <- H.new (==) (H.hashString . T.unpack)
 	_ <- forkIO . forever $ threadDelay 900000000 >> clearDbIndexCache
 	return table
 {-# NOINLINE dbIndexCache #-}
 
 clearDbIndexCache :: IO ()
 clearDbIndexCache = do
-	keys <- map fst <$> T.toList dbIndexCache
-	mapM_ (T.delete dbIndexCache) keys
+	keys <- map fst <$> H.toList dbIndexCache
+	mapM_ (H.delete dbIndexCache) keys
 
 fetchIndexCache :: (MonadIO m) => Action m IndexCache
 -- ^ Get index cache for current database
 fetchIndexCache = do
 	db <- thisDatabase
 	liftIO $ do
-		mc <- T.lookup dbIndexCache db
+		mc <- H.lookup dbIndexCache db
 		maybe (newIdxCache db) return mc
  where
 	newIdxCache db = do
 		idx <- newIORef S.empty
-		T.insert dbIndexCache db idx
+		H.insert dbIndexCache db idx
 		return idx
 
 resetIndexCache :: (MonadIO m) => Action m ()
@@ -223,7 +224,7 @@ repairDatabase db = useDb db $ runCommand ["repairDatabase" =: (1 :: Int)]
 serverBuildInfo :: (MonadIO' m) => Action m Document
 serverBuildInfo = useDb admin $ runCommand ["buildinfo" =: (1 :: Int)]
 
-serverVersion :: (MonadIO' m) => Action m UString
+serverVersion :: (MonadIO' m) => Action m Text
 serverVersion = at "version" <$> serverBuildInfo
 
 -- * Diagnostics
@@ -248,7 +249,7 @@ totalSize coll = do
 	xs <- mapM isize =<< getIndexes coll
 	return (foldl (+) x xs)
  where
-	isize idx = at "storageSize" <$> collectionStats (coll `append` ".$" `append` at "name" idx)
+	isize idx = at "storageSize" <$> collectionStats (coll `T.append` ".$" `T.append` at "name" idx)
 
 -- ** Profiling
 

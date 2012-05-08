@@ -25,7 +25,7 @@ import Data.ByteString.Lazy as B (length, hPut)
 import System.IO.Pipeline (IOE, Pipeline, newPipeline, IOStream(..))
 import qualified System.IO.Pipeline as P (send, call)
 import System.IO (Handle, hClose)
-import Data.Bson (Document, UString)
+import Data.Bson (Document)
 import Data.Bson.Binary
 import Data.Binary.Put
 import Data.Binary.Get
@@ -33,8 +33,10 @@ import Data.Int
 import Data.Bits
 import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
+import Data.Text (Text)
 import qualified Crypto.Hash.MD5 as MD5 (hash)
-import Data.UString as U (pack, append, toByteString)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Control.Exception as E (try)
 import Control.Monad.Error
 import System.IO (hFlush)
@@ -95,7 +97,7 @@ readMessage handle = ErrorT $ E.try readResp  where
 		runGet getReply <$> hGetN handle len
 	decodeSize = subtract 4 . runGet getInt32
 
-type FullCollection = UString
+type FullCollection = Text
 -- ^ Database name and collection name with period (.) in between. Eg. \"myDb.myCollection\"
 
 -- ** Header
@@ -319,15 +321,15 @@ rBit AwaitCapable = 3
 
 -- * Authentication
 
-type Username = UString
-type Password = UString
-type Nonce = UString
+type Username = Text
+type Password = Text
+type Nonce = Text
 
-pwHash :: Username -> Password -> UString
-pwHash u p = pack . byteStringHex . MD5.hash . toByteString $ u `U.append` ":mongo:" `U.append` p
+pwHash :: Username -> Password -> Text
+pwHash u p = T.pack . byteStringHex . MD5.hash . TE.encodeUtf8 $ u `T.append` ":mongo:" `T.append` p
 
-pwKey :: Nonce -> Username -> Password -> UString
-pwKey n u p = pack . byteStringHex . MD5.hash . toByteString . U.append n . U.append u $ pwHash u p
+pwKey :: Nonce -> Username -> Password -> Text
+pwKey n u p = T.pack . byteStringHex . MD5.hash . TE.encodeUtf8 . T.append n . T.append u $ pwHash u p
 
 
 {- Authors: Tony Hannan <tony@10gen.com>

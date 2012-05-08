@@ -26,7 +26,8 @@ import Control.Monad.Error (ErrorT(..), lift, throwError)
 import Control.Concurrent.MVar.Lifted
 import Control.Monad (forM_)
 import Control.Applicative ((<$>))
-import Data.UString (UString, unpack)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Bson as D (Document, lookup, at, (=:))
 import Database.MongoDB.Query (access, slaveOk, Failure(ConnectionFailure), Command, runCommand)
 import Database.MongoDB.Internal.Util (untilSuccess, liftIOE, runIOE, updateAssocs, shuffle, mergesortM)
@@ -105,12 +106,12 @@ connect' timeoutSecs (Host hostname port) = do
 
 -- * Replica Set
 
-type ReplicaSetName = UString
+type ReplicaSetName = Text
 
 -- | Maintains a connection (created on demand) to each server in the named replica set
 data ReplicaSet = ReplicaSet ReplicaSetName (MVar [(Host, Maybe Pipe)]) Secs
 
-replSetName :: ReplicaSet -> UString
+replSetName :: ReplicaSet -> Text
 -- ^ name of connected replica set
 replSetName (ReplicaSet rsName _ _) = rsName
 
@@ -136,7 +137,7 @@ primary rs@(ReplicaSet rsName _ _) = do
 	mHost <- statedPrimary <$> updateMembers rs
 	case mHost of
 		Just host' -> connection rs Nothing host'
-		Nothing -> throwError $ userError $ "replica set " ++ unpack rsName ++ " has no primary"
+		Nothing -> throwError $ userError $ "replica set " ++ T.unpack rsName ++ " has no primary"
 
 secondaryOk :: ReplicaSet -> IOE Pipe
 -- ^ Return connection to a random secondary, or primary if no secondaries available.
@@ -186,8 +187,8 @@ fetchReplicaInfo rs@(ReplicaSet rsName _ _) (host', mPipe) = do
 	pipe <- connection rs mPipe host'
 	info <- adminCommand ["isMaster" =: (1 :: Int)] pipe
 	case D.lookup "setName" info of
-		Nothing -> throwError $ userError $ show host' ++ " not a member of any replica set, including " ++ unpack rsName ++ ": " ++ show info
-		Just setName | setName /= rsName -> throwError $ userError $ show host' ++ " not a member of replica set " ++ unpack rsName ++ ": " ++ show info
+		Nothing -> throwError $ userError $ show host' ++ " not a member of any replica set, including " ++ T.unpack rsName ++ ": " ++ show info
+		Just setName | setName /= rsName -> throwError $ userError $ show host' ++ " not a member of replica set " ++ T.unpack rsName ++ ": " ++ show info
 		Just _ -> return (host', info)
 
 connection :: ReplicaSet -> Maybe Pipe -> Host -> IOE Pipe

@@ -39,7 +39,8 @@ module Database.MongoDB.Query (
 ) where
 
 import Prelude as X hiding (lookup)
-import Data.UString as U (UString, dropWhile, any, tail)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Bson (Document, at, valueAt, lookup, look, Field(..), (=:), (=?), Label, Value(String,Doc), Javascript, genObjectId)
 import Database.MongoDB.Internal.Protocol (Pipe, Notice(..), Request(GetMore, qOptions, qFullCollection, qSkip, qBatchSize, qSelector, qProjector), Reply(..), QueryOption(..), ResponseFlag(..), InsertOption(..), UpdateOption(..), DeleteOption(..), CursorId, FullCollection, Username, Password, pwKey)
 import qualified Database.MongoDB.Internal.Protocol as P (send, call, Request(Query))
@@ -184,7 +185,7 @@ instance (MonadDB m, Monoid w) => MonadDB (RWST r w s m) where
 
 -- * Database
 
-type Database = UString
+type Database = Text
 
 allDatabases :: (MonadIO' m) => Action m [Database]
 -- ^ List all databases residing on server
@@ -208,7 +209,7 @@ auth usr pss = do
 
 -- * Collection
 
-type Collection = UString
+type Collection = Text
 -- ^ Collection name (not prefixed with database)
 
 allCollections :: (MonadIO m, MonadBaseControl IO m, Functor m) => Action m [Collection]
@@ -218,8 +219,8 @@ allCollections = do
 	docs <- rest =<< find (query [] "system.namespaces") {sort = ["name" =: (1 :: Int)]}
 	return . filter (not . isSpecial db) . map dropDbPrefix $ map (at "name") docs
  where
- 	dropDbPrefix = U.tail . U.dropWhile (/= '.')
- 	isSpecial db col = U.any (== '$') col && db <.> col /= "local.oplog.$main"
+ 	dropDbPrefix = T.tail . T.dropWhile (/= '.')
+ 	isSpecial db col = T.any (== '$') col && db <.> col /= "local.oplog.$main"
 
 -- * Selection
 
@@ -670,7 +671,7 @@ runCommand :: (MonadIO' m) => Command -> Action m Document
 runCommand c = maybe err id <$> findOne (query c "$cmd") where
 	err = error $ "Nothing returned for command: " ++ show c
 
-runCommand1 :: (MonadIO' m) => UString -> Action m Document
+runCommand1 :: (MonadIO' m) => Text -> Action m Document
 -- ^ @runCommand1 foo = runCommand [foo =: 1]@
 runCommand1 c = runCommand [c =: (1 :: Int)]
 
