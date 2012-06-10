@@ -13,11 +13,15 @@ module System.IO.Pipeline (
 ) where
 
 import Prelude hiding (length)
-import GHC.Conc (ThreadStatus(..), threadStatus)
 import Control.Concurrent (ThreadId, forkIO, killThread)
-import Control.Concurrent.Chan
-import Control.Concurrent.MVar.Lifted
-import Control.Monad.Error
+import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
+import Control.Monad (forever)
+import GHC.Conc (ThreadStatus(..), threadStatus)
+
+import Control.Monad.Trans (liftIO)
+import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
+                                       putMVar, readMVar, addMVarFinalizer)
+import Control.Monad.Error (ErrorT(ErrorT), runErrorT)
 
 onException :: (Monad m) => ErrorT e m a -> m () -> ErrorT e m a
 -- ^ If first action throws an exception then run second action then re-throw

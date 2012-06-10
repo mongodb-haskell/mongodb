@@ -5,9 +5,11 @@
 module Database.MongoDB.Admin (
 	-- * Admin
 	-- ** Collection
-	CollectionOption(..), createCollection, renameCollection, dropCollection, validateCollection,
+	CollectionOption(..), createCollection, renameCollection, dropCollection,
+    validateCollection,
 	-- ** Index
-	Index(..), IndexName, index, ensureIndex, createIndex, dropIndex, getIndexes, dropIndexes,
+	Index(..), IndexName, index, ensureIndex, createIndex, dropIndex,
+    getIndexes, dropIndexes,
 	-- ** User
 	allUsers, addUser, removeUser,
 	-- ** Database
@@ -27,20 +29,29 @@ module Database.MongoDB.Admin (
 
 import Prelude hiding (lookup)
 import Control.Applicative ((<$>))
-import Database.MongoDB.Internal.Protocol (pwHash, pwKey)
-import Database.MongoDB.Connection (Host, showHostPort)
-import Database.MongoDB.Query
-import Data.Bson
-import Control.Monad.Reader
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.HashTable as H
-import Data.IORef
-import qualified Data.Set as S
-import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent (forkIO, threadDelay)
-import Database.MongoDB.Internal.Util (MonadIO', (<.>), true1)
+import Control.Monad (forever, unless)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Set (Set)
+import System.IO.Unsafe (unsafePerformIO)
+
+import qualified Data.HashTable as H
+import qualified Data.Set as Set
+
+import Control.Monad.Trans (MonadIO, liftIO)
 import Control.Monad.Trans.Control (MonadBaseControl)
+import Data.Bson (Document, Field(..), at, (=:), (=?), exclude, merge)
+import Data.Text (Text)
+
+import qualified Data.Text as T
+
+import Database.MongoDB.Connection (Host, showHostPort)
+import Database.MongoDB.Internal.Protocol (pwHash, pwKey)
+import Database.MongoDB.Internal.Util (MonadIO', (<.>), true1)
+import Database.MongoDB.Query (Action, Database, Collection, Username, Password,
+                               Order, Query(..), accessMode, master, runCommand,
+                               useDb, thisDatabase, rest, select, find, findOne,
+                               insert_, save, delete)
 
 -- * Admin
 
@@ -109,9 +120,9 @@ ensureIndex :: (MonadIO' m) => Index -> Action m ()
 ensureIndex idx = let k = (iColl idx, iName idx) in do
 	icache <- fetchIndexCache
 	set <- liftIO (readIORef icache)
-	unless (S.member k set) $ do
+	unless (Set.member k set) $ do
 		accessMode master (createIndex idx)
-		liftIO $ writeIORef icache (S.insert k set)
+		liftIO $ writeIORef icache (Set.insert k set)
 
 createIndex :: (MonadIO' m) => Index -> Action m ()
 -- ^ Create index on the server. This call goes to the server every time.
@@ -140,7 +151,7 @@ dropIndexes coll = do
 type DbIndexCache = H.HashTable Database IndexCache
 -- ^ Cache the indexes we create so repeatedly calling ensureIndex only hits database the first time. Clear cache every once in a while so if someone else deletes index we will recreate it on ensureIndex.
 
-type IndexCache = IORef (S.Set (Collection, IndexName))
+type IndexCache = IORef (Set (Collection, IndexName))
 
 dbIndexCache :: DbIndexCache
 -- ^ initialize cache and fork thread that clears it every 15 minutes
@@ -164,7 +175,7 @@ fetchIndexCache = do
 		maybe (newIdxCache db) return mc
  where
 	newIdxCache db = do
-		idx <- newIORef S.empty
+		idx <- newIORef Set.empty
 		H.insert dbIndexCache db idx
 		return idx
 
@@ -172,7 +183,7 @@ resetIndexCache :: (MonadIO m) => Action m ()
 -- ^ reset index cache for current database
 resetIndexCache = do
 	icache <- fetchIndexCache
-	liftIO (writeIORef icache S.empty)
+	liftIO (writeIORef icache Set.empty)
 
 -- ** User
 

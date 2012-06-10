@@ -8,33 +8,43 @@ module Database.MongoDB.Connection (
 	-- * Connection
 	Pipe, close, isClosed,
 	-- * Server
-	Host(..), PortID(..), defaultPort, host, showHostPort, readHostPort, readHostPortM,
-	globalConnectTimeout, connect, connect',
+	Host(..), PortID(..), defaultPort, host, showHostPort, readHostPort,
+    readHostPortM, globalConnectTimeout, connect, connect',
 	-- * Replica Set
 	ReplicaSetName, openReplicaSet, openReplicaSet',
 	ReplicaSet, primary, secondaryOk, routedHost, closeReplicaSet, replSetName
 ) where
 
 import Prelude hiding (lookup)
-import Database.MongoDB.Internal.Protocol (Pipe, newPipe)
-import System.IO.Pipeline (IOE, close, isClosed)
-import Control.Exception as E (try)
+import Data.IORef (IORef, newIORef, readIORef)
+import Data.List (intersect, partition, (\\), delete)
+import Control.Applicative ((<$>))
+import Control.Monad (forM_)
 import Network (HostName, PortID(..), connectTo)
-import Text.ParserCombinators.Parsec as T (parse, many1, letter, digit, char, eof, spaces, try, (<|>))
+import System.IO.Unsafe (unsafePerformIO)
+import System.Timeout (timeout)
+import Text.ParserCombinators.Parsec (parse, many1, letter, digit, char, eof,
+                                      spaces, try, (<|>))
+import qualified Control.Exception as E
+import qualified Data.List as List
+
+
 import Control.Monad.Identity (runIdentity)
 import Control.Monad.Error (ErrorT(..), lift, throwError)
-import Control.Concurrent.MVar.Lifted
-import Control.Monad (forM_)
-import Control.Applicative ((<$>))
+import Control.Concurrent.MVar.Lifted (MVar, newMVar, withMVar, modifyMVar,
+                                       readMVar)
+import Data.Bson (Document, at, (=:))
 import Data.Text (Text)
+
+import qualified Data.Bson as B
 import qualified Data.Text as T
-import Data.Bson as D (Document, lookup, at, (=:))
-import Database.MongoDB.Query (access, slaveOk, Failure(ConnectionFailure), Command, runCommand)
-import Database.MongoDB.Internal.Util (untilSuccess, liftIOE, runIOE, updateAssocs, shuffle, mergesortM)
-import Data.List as L (lookup, intersect, partition, (\\), delete)
-import Data.IORef (IORef, newIORef, readIORef)
-import System.Timeout (timeout)
-import System.IO.Unsafe (unsafePerformIO)
+
+import Database.MongoDB.Internal.Protocol (Pipe, newPipe)
+import Database.MongoDB.Internal.Util (untilSuccess, liftIOE, runIOE,
+                                       updateAssocs, shuffle, mergesortM)
+import Database.MongoDB.Query (Command, Failure(ConnectionFailure), access,
+                              slaveOk, runCommand)
+import System.IO.Pipeline (IOE, close, isClosed)
 
 adminCommand :: Command -> Pipe -> IOE Document
 -- ^ Run command against admin database on server connected to pipe. Fail if connection fails.
@@ -75,7 +85,7 @@ readHostPortM = either (fail . show) return . parse parser "readHostPort" where
 	parser = do
 		spaces
 		h <- hostname
-		T.try (spaces >> eof >> return (host h)) <|> do
+		try (spaces >> eof >> return (host h)) <|> do
 			_ <- char ':'
 			port :: Int <- read <$> many1 digit
 			spaces >> eof
@@ -161,7 +171,7 @@ type ReplicaInfo = (Host, Document)
 
 statedPrimary :: ReplicaInfo -> Maybe Host
 -- ^ Primary of replica set or Nothing if there isn't one
-statedPrimary (host', info) = if (at "ismaster" info) then Just host' else readHostPort <$> D.lookup "primary" info
+statedPrimary (host', info) = if (at "ismaster" info) then Just host' else readHostPort <$> B.lookup "primary" info
 
 possibleHosts :: ReplicaInfo -> [Host]
 -- ^ Non-arbiter, non-hidden members of replica set
@@ -186,7 +196,7 @@ fetchReplicaInfo :: ReplicaSet -> (Host, Maybe Pipe) -> IOE ReplicaInfo
 fetchReplicaInfo rs@(ReplicaSet rsName _ _) (host', mPipe) = do
 	pipe <- connection rs mPipe host'
 	info <- adminCommand ["isMaster" =: (1 :: Int)] pipe
-	case D.lookup "setName" info of
+	case B.lookup "setName" info of
 		Nothing -> throwError $ userError $ show host' ++ " not a member of any replica set, including " ++ T.unpack rsName ++ ": " ++ show info
 		Just setName | setName /= rsName -> throwError $ userError $ show host' ++ " not a member of replica set " ++ T.unpack rsName ++ ": " ++ show info
 		Just _ -> return (host', info)
@@ -198,7 +208,7 @@ connection (ReplicaSet _ vMembers timeoutSecs) mPipe host' =
  where
  	conn = 	modifyMVar vMembers $ \members -> do
 		let new = connect' timeoutSecs host' >>= \pipe -> return (updateAssocs host' (Just pipe) members, pipe)
-		case L.lookup host' members of
+		case List.lookup host' members of
 			Just (Just pipe) -> lift (isClosed pipe) >>= \bad -> if bad then new else return (members, pipe)
 			_ -> new
 

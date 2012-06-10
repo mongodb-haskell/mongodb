@@ -1,8 +1,12 @@
-{-| Low-level messaging between this client and the MongoDB server, see Mongo Wire Protocol (<http://www.mongodb.org/display/DOCS/Mongo+Wire+Protocol>).
+-- | Low-level messaging between this client and the MongoDB server, see Mongo
+-- Wire Protocol (<http://www.mongodb.org/display/DOCS/Mongo+Wire+Protocol>).
+--
+-- This module is not intended for direct use. Use the high-level interface at
+-- "Database.MongoDB.Query" and "Database.MongoDB.Connection" instead.
 
-This module is not intended for direct use. Use the high-level interface at "Database.MongoDB.Query" and "Database.MongoDB.Connection" instead. -}
-
-{-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings, FlexibleContexts, TupleSections, TypeSynonymInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
+{-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts, TupleSections, TypeSynonymInstances #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
 
 module Database.MongoDB.Internal.Protocol (
 	FullCollection,
@@ -18,29 +22,35 @@ module Database.MongoDB.Internal.Protocol (
 	Username, Password, Nonce, pwHash, pwKey
 ) where
 
-import Prelude as X
 import Control.Applicative ((<$>))
 import Control.Arrow ((***))
-import Data.ByteString.Lazy as B (length, hPut)
-import System.IO.Pipeline (IOE, Pipeline, newPipeline, IOStream(..))
-import qualified System.IO.Pipeline as P (send, call)
-import System.IO (Handle, hClose)
-import Data.Bson (Document)
-import Data.Bson.Binary
-import Data.Binary.Put
-import Data.Binary.Get
-import Data.Int
-import Data.Bits
-import Data.IORef
+import Control.Exception (try)
+import Control.Monad (forM_, replicateM, unless)
+import Data.Binary.Get (Get, runGet)
+import Data.Binary.Put (Put, runPut)
+import Data.Bits (bit, testBit)
+import Data.Int (Int32, Int64)
+import Data.IORef (IORef, newIORef, atomicModifyIORef)
+import System.IO (Handle, hClose, hFlush)
 import System.IO.Unsafe (unsafePerformIO)
+
+import qualified Data.ByteString.Lazy as L
+
+import Control.Monad.Error (ErrorT(..))
+import Control.Monad.Trans (MonadIO, liftIO)
+import Data.Bson (Document)
+import Data.Bson.Binary (getDocument, putDocument, getInt32, putInt32, getInt64,
+                         putInt64, putCString)
 import Data.Text (Text)
-import qualified Crypto.Hash.MD5 as MD5 (hash)
+
+import qualified Crypto.Hash.MD5 as MD5
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Control.Exception as E (try)
-import Control.Monad.Error
-import System.IO (hFlush)
+
 import Database.MongoDB.Internal.Util (whenJust, hGetN, bitOr, byteStringHex)
+import System.IO.Pipeline (IOE, Pipeline, newPipeline, IOStream(..))
+
+import qualified System.IO.Pipeline as P
 
 -- * Pipe
 
@@ -73,17 +83,17 @@ type Message = ([Notice], Maybe (Request, RequestId))
 
 writeMessage :: Handle -> Message -> IOE ()
 -- ^ Write message to socket
-writeMessage handle (notices, mRequest) = ErrorT . E.try $ do
+writeMessage handle (notices, mRequest) = ErrorT . try $ do
 	forM_ notices $ \n -> writeReq . (Left n,) =<< genRequestId
 	whenJust mRequest $ writeReq . (Right *** id)
 	hFlush handle
  where
 	writeReq (e, requestId) = do
-		hPut handle lenBytes
-		hPut handle bytes
+		L.hPut handle lenBytes
+		L.hPut handle bytes
 	 where
 		bytes = runPut $ (either putNotice putRequest e) requestId
-		lenBytes = encodeSize . toEnum . fromEnum $ B.length bytes
+		lenBytes = encodeSize . toEnum . fromEnum $ L.length bytes
 	encodeSize = runPut . putInt32 . (+ 4)
 
 type Response = (ResponseTo, Reply)
@@ -91,7 +101,7 @@ type Response = (ResponseTo, Reply)
 
 readMessage :: Handle -> IOE Response
 -- ^ read response from socket
-readMessage handle = ErrorT $ E.try readResp  where
+readMessage handle = ErrorT $ try readResp  where
 	readResp = do
 		len <- fromEnum . decodeSize <$> hGetN handle 4
 		runGet getReply <$> hGetN handle len
@@ -196,7 +206,7 @@ putNotice notice requestId = do
 			putDocument dSelector
 		KillCursors{..} -> do
 			putInt32 0
-			putInt32 $ toEnum (X.length kCursorIds)
+			putInt32 $ toEnum (length kCursorIds)
 			mapM_ putInt64 kCursorIds
 
 iBit :: InsertOption -> Int32

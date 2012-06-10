@@ -5,12 +5,15 @@
 module System.IO.Pool where
 
 import Control.Applicative ((<$>))
-import Control.Concurrent.MVar.Lifted
-import Data.Array.IO
-import Data.Maybe (catMaybes)
-import Control.Monad.Error
-import System.Random (randomRIO)
 import Control.Exception (assert)
+import Data.Array.IO (IOArray, readArray, writeArray, newArray, newListArray,
+                      getElems, getBounds, rangeSize, range)
+import Data.Maybe (catMaybes)
+import System.Random (randomRIO)
+
+import Control.Concurrent.MVar.Lifted (MVar, newMVar, withMVar, modifyMVar_)
+import Control.Monad.Error (ErrorT, Error)
+import Control.Monad.Trans (liftIO)
 
 -- | Creator, destroyer, and checker of resources of type r. Creator may throw error or type e.
 data Factory e r = Factory {

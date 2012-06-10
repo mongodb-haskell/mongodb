@@ -7,23 +7,27 @@
 module Database.MongoDB.Internal.Util where
 
 import Control.Applicative (Applicative(..), (<$>))
-import Network (PortID(..))
+import Control.Arrow (left)
+import Control.Exception (assert)
+import Control.Monad (liftM, liftM2)
 import Data.Bits (Bits, (.|.))
-import Data.Bson
-import Data.ByteString.Lazy as S (ByteString, length, append, hGet)
+import Data.Word (Word8)
+import Network (PortID(..))
+import Numeric (showHex)
 import System.IO (Handle)
 import System.IO.Error (mkIOError, eofErrorType)
-import Control.Exception (assert)
-import Control.Monad.Error
-import Control.Arrow (left)
-import Data.Text (Text)
-import qualified Data.ByteString as BS (ByteString, unpack)
-import qualified Data.Text as T
-import Data.Word (Word8)
-import Numeric (showHex)
-import System.Random.Shuffle (shuffle')
 import System.Random (newStdGen)
-import Data.List as L (length)
+import System.Random.Shuffle (shuffle')
+
+import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString as S
+
+import Control.Monad.Error (MonadError(..), ErrorT(..), Error(..))
+import Control.Monad.Trans (MonadIO, liftIO)
+import Data.Bson
+import Data.Text (Text)
+
+import qualified Data.Text as T
 
 deriving instance Show PortID
 deriving instance Eq PortID
@@ -62,7 +66,7 @@ wrap x = [x]
 
 shuffle :: [a] -> IO [a]
 -- ^ Randomly shuffle items in list
-shuffle list = shuffle' list (L.length list) <$> newStdGen
+shuffle list = shuffle' list (length list) <$> newStdGen
 
 loop :: (Functor m, Monad m) => m (Maybe a) -> m [a]
 -- ^ Repeatedy execute action, collecting results, until it returns Nothing
@@ -110,18 +114,18 @@ true1 k doc = case valueAt k doc of
 	Int64 n -> n == 1
 	_ -> error $ "expected " ++ show k ++ " to be Num or Bool in " ++ show doc
 
-hGetN :: Handle -> Int -> IO ByteString
+hGetN :: Handle -> Int -> IO L.ByteString
 -- ^ Read N bytes from hande, blocking until all N bytes are read. If EOF is reached before N bytes then raise EOF exception.
 hGetN h n = assert (n >= 0) $ do
-	bytes <- hGet h n
-	let x = fromEnum $ S.length bytes
+	bytes <- L.hGet h n
+	let x = fromEnum $ L.length bytes
 	if x >= n then return bytes
 		else if x == 0 then ioError (mkIOError eofErrorType "hGetN" (Just h) Nothing)
-			else S.append bytes <$> hGetN h (n - x)
+			else L.append bytes <$> hGetN h (n - x)
 
-byteStringHex :: BS.ByteString -> String
+byteStringHex :: S.ByteString -> String
 -- ^ Hexadecimal string representation of a byte string. Each byte yields two hexadecimal characters.
-byteStringHex = concatMap byteHex . BS.unpack
+byteStringHex = concatMap byteHex . S.unpack
 
 byteHex :: Word8 -> String
 -- ^ Two char hexadecimal representation of byte

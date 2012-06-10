@@ -25,38 +25,57 @@ module Database.MongoDB.Query (
 	delete, deleteOne,
 	-- * Read
 	-- ** Query
-	Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData, Partial), Projector, Limit, Order, BatchSize,
+	Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData, Partial),
+    Projector, Limit, Order, BatchSize,
 	explain, find, findOne, fetch, count, distinct,
 	-- *** Cursor
 	Cursor, nextBatch, next, nextN, rest, closeCursor, isCursorClosed,
 	-- ** Group
 	Group(..), GroupKey(..), group,
 	-- ** MapReduce
-	MapReduce(..), MapFun, ReduceFun, FinalizeFun, MROut(..), MRMerge(..), MRResult, mapReduce, runMR, runMR',
+	MapReduce(..), MapFun, ReduceFun, FinalizeFun, MROut(..), MRMerge(..),
+    MRResult, mapReduce, runMR, runMR',
 	-- * Command
 	Command, runCommand, runCommand1,
 	eval,
 ) where
 
-import Prelude as X hiding (lookup)
+import Prelude hiding (lookup)
+import Control.Applicative (Applicative, (<$>))
+import Control.Monad (unless, replicateM, liftM)
+import Data.Int (Int32)
+import Data.Maybe (listToMaybe, catMaybes)
+import Data.Word (Word32)
+
+import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
+                                       readMVar, modifyMVar)
+import Control.Monad.Base (MonadBase(liftBase))
+import Control.Monad.Error (ErrorT, Error(..), MonadError, runErrorT,
+                            throwError)
+import Control.Monad.Reader (ReaderT, runReaderT, ask, asks, local)
+import Control.Monad.RWS (RWST)
+import Control.Monad.State (StateT)
+import Control.Monad.Trans (MonadIO, MonadTrans, lift, liftIO)
+import Control.Monad.Trans.Control (ComposeSt, MonadBaseControl(..),
+                                    MonadTransControl(..), StM, StT,
+                                    defaultLiftBaseWith, defaultRestoreM)
+import Control.Monad.Writer (WriterT, Monoid)
+import Data.Bson (Document, Field(..), Label, Value(String,Doc), Javascript,
+                  at, valueAt, lookup, look, genObjectId, (=:), (=?))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Bson (Document, at, valueAt, lookup, look, Field(..), (=:), (=?), Label, Value(String,Doc), Javascript, genObjectId)
-import Database.MongoDB.Internal.Protocol (Pipe, Notice(..), Request(GetMore, qOptions, qFullCollection, qSkip, qBatchSize, qSelector, qProjector), Reply(..), QueryOption(..), ResponseFlag(..), InsertOption(..), UpdateOption(..), DeleteOption(..), CursorId, FullCollection, Username, Password, pwKey)
-import qualified Database.MongoDB.Internal.Protocol as P (send, call, Request(Query))
+
+import Database.MongoDB.Internal.Protocol (Reply(..), QueryOption(..),
+                                           ResponseFlag(..), InsertOption(..),
+                                           UpdateOption(..), DeleteOption(..),
+                                           CursorId, FullCollection, Username,
+                                           Password, Pipe, Notice(..),
+                                           Request(GetMore, qOptions, qSkip,
+                                           qFullCollection, qBatchSize,
+                                           qSelector, qProjector),
+                                           pwKey)
 import Database.MongoDB.Internal.Util (MonadIO', loop, liftIOE, true1, (<.>))
-import Control.Concurrent.MVar.Lifted
-import Control.Monad.Error
-import Control.Monad.Reader
-import Control.Monad.State (StateT)
-import Control.Monad.Writer (WriterT, Monoid)
-import Control.Monad.RWS (RWST)
-import Control.Monad.Base (MonadBase(liftBase))
-import Control.Monad.Trans.Control (ComposeSt, MonadBaseControl(..), MonadTransControl(..), StM, StT, defaultLiftBaseWith, defaultRestoreM)
-import Control.Applicative (Applicative, (<$>))
-import Data.Maybe (listToMaybe, catMaybes)
-import Data.Int (Int32)
-import Data.Word (Word32)
+import qualified Database.MongoDB.Internal.Protocol as P
 
 -- * Monad
 
@@ -298,7 +317,7 @@ insert' opts col docs = do
 
 assignId :: Document -> IO Document
 -- ^ Assign a unique value to _id field if missing
-assignId doc = if X.any (("_id" ==) . label) doc
+assignId doc = if any (("_id" ==) . label) doc
 	then return doc
 	else (\oid -> ("_id" =: oid) : doc) <$> genObjectId
 
