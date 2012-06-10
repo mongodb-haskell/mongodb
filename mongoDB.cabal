@@ -1,69 +1,48 @@
-name: mongoDB
-version: 1.2.0
-build-type: Simple
-license: OtherLicense
-license-file: LICENSE
-copyright: Copyright (c) 2010-2012 10gen Inc.
-author: Tony Hannan
-maintainer: Tony Hannan <tonyhannan@gmail.com>
-build-depends:
-    array -any,
-    base <5,
-    binary -any,
-    bson-text -any,
-    text,
-    bytestring -any,
-    containers -any,
-    mtl >= 2,
-    cryptohash -any,
-    network -any,
-    parsec -any,
-    random -any,
-    random-shuffle -any,
-    monad-control >= 0.3.1,
-    lifted-base >= 0.1.0.3,
-    transformers-base >= 0.4.1
-stability: alpha
-homepage: http://github.com/TonyGen/mongoDB-haskell
-package-url:
-bug-reports:
-synopsis: Driver (client) for MongoDB, a free, scalable, fast, document DBMS
-description: This package lets you connect to MongoDB servers and update/query their data. Please see the example in Database.MongoDB and the tutorial from the homepage. For information about MongoDB itself, see www.mongodb.org.
-category: Database
-tested-with:
-data-files:
-data-dir: ""
-extra-source-files:
-extra-tmp-files:
-exposed-modules:
-    Database.MongoDB
-    Database.MongoDB.Admin
-    Database.MongoDB.Connection
-    Database.MongoDB.Internal.Protocol
-    Database.MongoDB.Internal.Util
-    Database.MongoDB.Query
-    System.IO.Pipeline
-    System.IO.Pool
-exposed: True
-buildable: True
-build-tools:
-cpp-options:
-cc-options:
-ld-options:
-pkgconfig-depends:
-frameworks:
-c-sources:
-extensions:
-extra-libraries:
-extra-lib-dirs:
-includes:
-install-includes:
-include-dirs:
-hs-source-dirs: .
-other-modules:
-ghc-prof-options: -auto-all
-ghc-shared-options:
-ghc-options: -Wall
-hugs-options:
-nhc98-options:
-jhc-options:
+Name:           mongoDB
+Version:        1.3.0
+Synopsis:       Driver (client) for MongoDB, a free, scalable, fast, document
+                DBMS
+Description:    This package lets you connect to MongoDB servers and
+                update/query their data. Please see the example in
+                Database.MongoDB and the tutorial from the homepage. For
+                information about MongoDB itself, see www.mongodb.org.
+Category:       Database
+Homepage:       http://github.com/TonyGen/mongoDB-haskell
+Author:         Tony Hannan
+Maintainer:     Tony Hannan <tonyhannan@gmail.com>
+Copyright:      Copyright (c) 2010-2012 10gen Inc.
+License:        OtherLicense
+License-file:   LICENSE
+Cabal-version:  >= 1.2
+Build-type:     Simple
+Stability:      alpha
+
+Library
+  GHC-options:      -Wall
+  GHC-prof-options: -auto-all
+
+  Build-depends:      array -any
+                    , base <5
+                    , binary -any
+                    , bson -any
+                    , text
+                    , bytestring -any
+                    , containers -any
+                    , mtl >= 2
+                    , cryptohash -any
+                    , network -any
+                    , parsec -any
+                    , random -any
+                    , random-shuffle -any
+                    , monad-control >= 0.3.1
+                    , lifted-base >= 0.1.0.3
+                    , transformers-base >= 0.4.1
+
+  Exposed-modules:  Database.MongoDB
+                    Database.MongoDB.Admin
+                    Database.MongoDB.Connection
+                    Database.MongoDB.Internal.Protocol
+                    Database.MongoDB.Internal.Util
+                    Database.MongoDB.Query
+                    System.IO.Pipeline
+                    System.IO.Pool
