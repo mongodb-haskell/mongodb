@@ -7,7 +7,7 @@ Description:    This package lets you connect to MongoDB servers and
                 Database.MongoDB and the tutorial from the homepage. For
                 information about MongoDB itself, see www.mongodb.org.
 Category:       Database
-Homepage:       http://github.com/TonyGen/mongoDB-haskell
+Homepage:       http://github.com/selectel/mongodb-haskell
 Author:         Tony Hannan
 Maintainer:     Fedor Gogolev <knsd@knsd.net>
 Copyright:      Copyright (c) 2010-2012 10gen Inc.
