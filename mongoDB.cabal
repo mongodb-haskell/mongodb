@@ -24,7 +24,7 @@ Library
   Build-depends:      array -any
                     , base <5
                     , binary -any
-                    , bson -any
+                    , bson >= 0.2.0 && < 0.3.0
                     , text
                     , bytestring -any
                     , containers -any
