@@ -60,8 +60,9 @@ import Control.Monad.Trans.Control (ComposeSt, MonadBaseControl(..),
                                     MonadTransControl(..), StM, StT,
                                     defaultLiftBaseWith, defaultRestoreM)
 import Control.Monad.Writer (WriterT, Monoid)
-import Data.Bson (Document, Field(..), Label, Value(String,Doc), Javascript,
-                  at, valueAt, lookup, look, genObjectId, (=:), (=?))
+import Data.Bson (Document, Field(..), Label, Val, Value(String,Doc),
+                  Javascript, at, valueAt, lookup, look, genObjectId, (=:),
+                  (=?))
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -694,7 +695,7 @@ runCommand1 :: (MonadIO' m) => Text -> Action m Document
 -- ^ @runCommand1 foo = runCommand [foo =: 1]@
 runCommand1 c = runCommand [c =: (1 :: Int)]
 
-eval :: (MonadIO' m) => Javascript -> Action m Document
+eval :: (MonadIO' m, Val v) => Javascript -> Action m v
 -- ^ Run code on server
 eval code = at "retval" <$> runCommand ["$eval" =: code]
 
