@@ -97,7 +97,7 @@ updateAssocs :: (Eq k) => k -> v -> [(k, v)] -> [(k, v)]
 updateAssocs key valu assocs = case back of [] -> (key, valu) : front; _ : back' -> front ++ (key, valu) : back'
 	where (front, back) = break ((key ==) . fst) assocs
 
-bitOr :: (Bits a) => [a] -> a
+bitOr :: (Num a, Bits a) => [a] -> a
 -- ^ bit-or all numbers together
 bitOr = foldl (.|.) 0
 
