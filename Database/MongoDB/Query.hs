@@ -47,7 +47,7 @@ import Data.Int (Int32)
 import Data.Maybe (listToMaybe, catMaybes)
 import Data.Word (Word32)
 
-import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
+import Control.Concurrent.MVar.Lifted (MVar, newMVar, mkWeakMVar,
                                        readMVar, modifyMVar)
 import Control.Monad.Base (MonadBase(liftBase))
 import Control.Monad.Error (ErrorT, Error(..), MonadError, runErrorT,
@@ -509,7 +509,7 @@ newCursor :: (MonadIO m, MonadBaseControl IO m) => Database -> Collection -> Bat
 newCursor db col batchSize dBatch = do
 	var <- newMVar dBatch
 	let cursor = Cursor (db <.> col) batchSize var
-	addMVarFinalizer var (closeCursor cursor)
+	mkWeakMVar var (closeCursor cursor)
 	return cursor
 
 nextBatch :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m [Document]

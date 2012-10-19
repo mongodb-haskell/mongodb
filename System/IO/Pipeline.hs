@@ -20,7 +20,7 @@ import GHC.Conc (ThreadStatus(..), threadStatus)
 
 import Control.Monad.Trans (liftIO)
 import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
-                                       putMVar, readMVar, addMVarFinalizer)
+                                       putMVar, readMVar, mkWeakMVar)
 import Control.Monad.Error (ErrorT(ErrorT), runErrorT)
 
 onException :: (Monad m) => ErrorT e m a -> m () -> ErrorT e m a
@@ -58,7 +58,7 @@ newPipeline stream = do
 	rec
 		let pipe = Pipeline{..}
 		listenThread <- forkIO (listen pipe)
-	addMVarFinalizer vStream $ do
+	mkWeakMVar vStream $ do
 		killThread listenThread
 		closeStream stream
 	return pipe
