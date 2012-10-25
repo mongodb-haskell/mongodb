@@ -1,6 +1,6 @@
 -- | Query and update documents
 
-{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP #-}
 
 module Database.MongoDB.Query (
 	-- * Monad
@@ -47,8 +47,13 @@ import Data.Int (Int32)
 import Data.Maybe (listToMaybe, catMaybes)
 import Data.Word (Word32)
 
-import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
+#if MIN_VERSION_base(4,6,0)
+import Control.Concurrent.MVar.Lifted (MVar, newMVar, mkWeakMVar,
                                        readMVar, modifyMVar)
+#else
+import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
+                                         readMVar, modifyMVar)
+#endif
 import Control.Monad.Base (MonadBase(liftBase))
 import Control.Monad.Error (ErrorT, Error(..), MonadError, runErrorT,
                             throwError)
@@ -77,6 +82,10 @@ import Database.MongoDB.Internal.Protocol (Reply(..), QueryOption(..),
                                            pwKey)
 import Database.MongoDB.Internal.Util (MonadIO', loop, liftIOE, true1, (<.>))
 import qualified Database.MongoDB.Internal.Protocol as P
+
+#if !MIN_VERSION_base(4,6,0)
+--mkWeakMVar = addMVarFinalizer
+#endif
 
 -- * Monad
 
@@ -509,8 +518,11 @@ newCursor :: (MonadIO m, MonadBaseControl IO m) => Database -> Collection -> Bat
 newCursor db col batchSize dBatch = do
 	var <- newMVar dBatch
 	let cursor = Cursor (db <.> col) batchSize var
-	addMVarFinalizer var (closeCursor cursor)
+	mkWeakMVar var (closeCursor cursor)
 	return cursor
+#if !MIN_VERSION_base(4,6,0)
+  where mkWeakMVar = addMVarFinalizer
+#endif
 
 nextBatch :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m [Document]
 -- ^ Return next batch of documents in query result, which will be empty if finished.

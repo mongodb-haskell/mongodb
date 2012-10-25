@@ -3,6 +3,7 @@
 A pipeline closes itself when a read or write causes an error, so you can detect a broken pipeline by checking isClosed.  It also closes itself when garbage collected, or you can close it explicitly. -}
 
 {-# LANGUAGE DoRec, RecordWildCards, NamedFieldPuns, ScopedTypeVariables #-}
+{-# LANGUAGE CPP #-}
 
 module System.IO.Pipeline (
 	IOE,
@@ -19,9 +20,19 @@ import Control.Monad (forever)
 import GHC.Conc (ThreadStatus(..), threadStatus)
 
 import Control.Monad.Trans (liftIO)
+#if MIN_VERSION_base(4,6,0)
 import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
-                                       putMVar, readMVar, addMVarFinalizer)
+                                       putMVar, readMVar, mkWeakMVar)
+#else
+import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
+                                         putMVar, readMVar, addMVarFinalizer)
+#endif
 import Control.Monad.Error (ErrorT(ErrorT), runErrorT)
+
+#if !MIN_VERSION_base(4,6,0)
+mkWeakMVar :: MVar a -> IO () -> IO ()
+mkWeakMVar = addMVarFinalizer
+#endif
 
 onException :: (Monad m) => ErrorT e m a -> m () -> ErrorT e m a
 -- ^ If first action throws an exception then run second action then re-throw
@@ -58,7 +69,7 @@ newPipeline stream = do
 	rec
 		let pipe = Pipeline{..}
 		listenThread <- forkIO (listen pipe)
-	addMVarFinalizer vStream $ do
+	mkWeakMVar vStream $ do
 		killThread listenThread
 		closeStream stream
 	return pipe
