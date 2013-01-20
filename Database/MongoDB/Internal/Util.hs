@@ -1,6 +1,7 @@
 -- | Miscellaneous general functions and Show, Eq, and Ord instances for PortID
 
 {-# LANGUAGE FlexibleInstances, UndecidableInstances, StandaloneDeriving #-}
+{-# LANGUAGE CPP #-}
 -- PortID instances
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -29,8 +30,10 @@ import Data.Text (Text)
 
 import qualified Data.Text as T
 
+#if !MIN_VERSION_network(2, 4, 1)
 deriving instance Show PortID
 deriving instance Eq PortID
+#endif
 deriving instance Ord PortID
 
 -- | MonadIO with extra Applicative and Functor superclasses
