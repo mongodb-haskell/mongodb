@@ -30,6 +30,8 @@ module Database.MongoDB.Query (
 	explain, find, findOne, fetch, count, distinct,
 	-- *** Cursor
 	Cursor, nextBatch, next, nextN, rest, closeCursor, isCursorClosed,
+	-- ** Aggregate
+	Pipeline, aggregate,
 	-- ** Group
 	Group(..), GroupKey(..), group,
 	-- ** MapReduce
@@ -123,6 +125,7 @@ data Failure =
 	| QueryFailure ErrorCode String  -- ^ Query failed for some reason as described in the string
 	| WriteFailure ErrorCode String  -- ^ Error observed by getLastError after a write, error description is in string
 	| DocNotFound Selection  -- ^ 'fetch' found no document matching selection
+	| AggregateFailure String -- ^ 'aggregate' returned an error
 	deriving (Show, Eq)
 
 type ErrorCode = Int
@@ -579,6 +582,19 @@ isCursorClosed :: (MonadIO m, MonadBase IO m) => Cursor -> Action m Bool
 isCursorClosed (Cursor _ _ var) = do
 		Batch _ cid docs <- fulfill =<< readMVar var
 		return (cid == 0 && null docs)
+
+-- ** Aggregate
+
+type Pipeline = [Document]
+-- ^ The Aggregate Pipeline
+
+aggregate :: MonadIO' m => Collection -> Pipeline -> Action m [Document]
+-- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
+aggregate aColl agg = do
+	response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg]
+	case true1 "ok" response of
+		True  -> lookup "result" response
+		False -> throwError $ AggregateFailure $ at "errmsg" response
 
 -- ** Group
 
