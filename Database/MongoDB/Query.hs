@@ -27,7 +27,7 @@ module Database.MongoDB.Query (
 	-- ** Query
 	Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData, Partial),
     Projector, Limit, Order, BatchSize,
-	explain, find, findOne, fetch, count, distinct,
+	explain, find, findOne, fetch, findAndModify, count, distinct,
 	-- *** Cursor
 	Cursor, nextBatch, next, nextN, rest, closeCursor, isCursorClosed,
 	-- ** Aggregate
@@ -67,7 +67,7 @@ import Control.Monad.Trans.Control (ComposeSt, MonadBaseControl(..),
                                     MonadTransControl(..), StM, StT,
                                     defaultLiftBaseWith, defaultRestoreM)
 import Control.Monad.Writer (WriterT, Monoid)
-import Data.Bson (Document, Field(..), Label, Val, Value(String,Doc),
+import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
                   (=?))
 import Data.Text (Text)
@@ -437,6 +437,34 @@ findOne q = do
 fetch :: (MonadIO m) => Query -> Action m Document
 -- ^ Same as 'findOne' except throw 'DocNotFound' if none match
 fetch q = findOne q >>= maybe (throwError $ DocNotFound $ selection q) return
+
+-- | runs the findAndModify command.
+-- Returns a single updated document (new option is set to true).
+-- Currently this API does not allow setting the remove option
+findAndModify :: (Applicative m, MonadIO m)
+              => Query
+              -> Document -- ^ updates
+              -> Action m (Either String Document)
+findAndModify (Query {
+    selection = Select sel collection
+  , project = project
+  , sort = sort
+  }) updates = do
+  result <- runCommand [
+     "findAndModify" := String collection
+   , "new"    := Bool True -- return updated document, not original document
+   , "query"  := Doc sel
+   , "update" := Doc updates
+   , "fields" := Doc project
+   , "sort"   := Doc sort
+   ]
+  return $ case findErr result of
+    Nothing -> case lookup "value" result of
+      Nothing -> Left "findAndModify: no document found (value field was empty)"
+      Just doc -> Right doc
+    Just e -> Left e
+    where
+      findErr result = lookup "err" (at "lastErrorObject" result)
 
 explain :: (MonadIO m) => Query -> Action m Document
 -- ^ Return performance stats of query execution
