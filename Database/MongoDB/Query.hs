@@ -48,6 +48,7 @@ import Control.Monad (unless, replicateM, liftM)
 import Data.Int (Int32)
 import Data.Maybe (listToMaybe, catMaybes)
 import Data.Word (Word32)
+import Data.Monoid (mappend)
 
 #if MIN_VERSION_base(4,6,0)
 import Control.Concurrent.MVar.Lifted (MVar, newMVar, mkWeakMVar,
@@ -450,21 +451,32 @@ findAndModify (Query {
   , project = project
   , sort = sort
   }) updates = do
-  result <- runCommand [
-     "findAndModify" := String collection
-   , "new"    := Bool True -- return updated document, not original document
-   , "query"  := Doc sel
-   , "update" := Doc updates
-   , "fields" := Doc project
-   , "sort"   := Doc sort
-   ]
-  return $ case findErr result of
-    Nothing -> case lookup "value" result of
-      Nothing -> Left "findAndModify: no document found (value field was empty)"
-      Just doc -> Right doc
-    Just e -> Left e
-    where
-      findErr result = lookup "err" (at "lastErrorObject" result)
+    result <- runCommand
+        [ "findAndModify" := String collection
+        , "new"    := Bool True -- return updated document, not original document
+        , "query"  := Doc sel
+        , "update" := Doc updates
+        , "fields" := Doc project
+        , "sort"   := Doc sort
+        ]
+    return $
+      case lookup "value" result of
+          Left err   -> leftErr err
+          Right mdoc -> case mdoc of
+              Nothing  -> leftErr $ show result
+              Just doc -> case lookupErr result of
+                  Just e -> leftErr e
+                  Nothing -> Right doc
+  where
+    leftErr err = Left $ "findAndModify: no document found: "
+        `mappend` show collection
+        `mappend` "from query: " `mappend` show sel
+        `mappend` err
+
+    -- return Nothing means ok, Just is the error message
+    lookupErr result = case lookup "lastErrorObject" result of
+        Right errObject -> lookup "err" errObject
+        Left err -> Just err
 
 explain :: (MonadIO m) => Query -> Action m Document
 -- ^ Return performance stats of query execution
