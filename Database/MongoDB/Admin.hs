@@ -35,7 +35,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Set (Set)
 import System.IO.Unsafe (unsafePerformIO)
 
-import qualified Data.HashTable as H
+import qualified Data.HashTable.IO as H
 import qualified Data.Set as Set
 
 import Control.Monad.Trans (MonadIO, liftIO)
@@ -148,7 +148,7 @@ dropIndexes coll = do
 
 -- *** Index cache
 
-type DbIndexCache = H.HashTable Database IndexCache
+type DbIndexCache = H.BasicHashTable Database IndexCache
 -- ^ Cache the indexes we create so repeatedly calling ensureIndex only hits database the first time. Clear cache every once in a while so if someone else deletes index we will recreate it on ensureIndex.
 
 type IndexCache = IORef (Set (Collection, IndexName))
@@ -156,7 +156,7 @@ type IndexCache = IORef (Set (Collection, IndexName))
 dbIndexCache :: DbIndexCache
 -- ^ initialize cache and fork thread that clears it every 15 minutes
 dbIndexCache = unsafePerformIO $ do
-	table <- H.new (==) (H.hashString . T.unpack)
+	table <- H.new
 	_ <- forkIO . forever $ threadDelay 900000000 >> clearDbIndexCache
 	return table
 {-# NOINLINE dbIndexCache #-}

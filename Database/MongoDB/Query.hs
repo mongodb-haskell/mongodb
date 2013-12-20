@@ -561,7 +561,7 @@ newCursor :: (MonadIO m, MonadBaseControl IO m) => Database -> Collection -> Bat
 newCursor db col batchSize dBatch = do
 	var <- newMVar dBatch
 	let cursor = Cursor (db <.> col) batchSize var
-	mkWeakMVar var (closeCursor cursor)
+	_ <- mkWeakMVar var (closeCursor cursor)
 	return cursor
 #if !MIN_VERSION_base(4,6,0)
   where mkWeakMVar = addMVarFinalizer
