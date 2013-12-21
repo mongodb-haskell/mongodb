@@ -2,7 +2,7 @@
 
 A pipeline closes itself when a read or write causes an error, so you can detect a broken pipeline by checking isClosed.  It also closes itself when garbage collected, or you can close it explicitly. -}
 
-{-# LANGUAGE RecursiveDo, RecordWildCards, NamedFieldPuns, ScopedTypeVariables #-}
+{-# LANGUAGE DoRec, RecordWildCards, NamedFieldPuns, ScopedTypeVariables #-}
 {-# LANGUAGE CPP #-}
 
 module System.IO.Pipeline (
