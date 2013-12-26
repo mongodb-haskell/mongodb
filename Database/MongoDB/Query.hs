@@ -6,7 +6,8 @@ module Database.MongoDB.Query (
     -- * Monad
     Action, access, Failure(..), ErrorCode,
     AccessMode(..), GetLastError, master, slaveOk, accessMode, 
-    MonadDB(..),
+    liftDB,
+    MongoContext, HasMongoContext(..),
     -- * Database
     Database, allDatabases, useDb, thisDatabase,
     -- ** Authentication
@@ -60,15 +61,12 @@ import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
                                          readMVar, modifyMVar)
 #endif
 import Control.Monad.Base (MonadBase(liftBase))
-import Control.Monad.Error (ErrorT, Error(..))
-import Control.Monad.Reader (ReaderT, runReaderT, ask, asks, local)
-import Control.Monad.RWS (RWST)
-import Control.Monad.State (StateT)
+import Control.Monad.Error (Error(..))
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask, asks, local)
 import Control.Monad.Trans (MonadIO, MonadTrans, lift, liftIO)
 import Control.Monad.Trans.Control (ComposeSt, MonadBaseControl(..),
                                     MonadTransControl(..), StM, StT,
                                     defaultLiftBaseWith, defaultRestoreM)
-import Control.Monad.Writer (WriterT, Monoid)
 import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
                   (=?))
@@ -192,30 +190,17 @@ call ns r = Action $ do
     promise <- liftIOE ConnectionFailure $ P.call pipe ns r
     return (liftIOE ConnectionFailure promise)
 
--- | If you stack a monad on top of 'Action' then make it an instance of this class and use 'liftDB' to execute a DB Action within it. Instances already exist for the basic mtl transformers.
-class (Monad m, MonadBaseControl IO (BaseMonad m), Applicative (BaseMonad m), Functor (BaseMonad m)) => MonadDB m where
-    type BaseMonad m :: * -> *
-    liftDB :: Action (BaseMonad m) a -> m a
+class HasMongoContext env where
+    mongoContext :: env -> MongoContext
+instance HasMongoContext MongoContext where
+    mongoContext = id
 
-instance (MonadBaseControl IO m, Applicative m, Functor m) => MonadDB (Action m) where
-    type BaseMonad (Action m) = m
-    liftDB = id
-
-instance (MonadDB m, Error e) => MonadDB (ErrorT e m) where
-    type BaseMonad (ErrorT e m) = BaseMonad m
-    liftDB = lift . liftDB
-instance (MonadDB m) => MonadDB (ReaderT r m) where
-    type BaseMonad (ReaderT r m) = BaseMonad m
-    liftDB = lift . liftDB
-instance (MonadDB m) => MonadDB (StateT s m) where
-    type BaseMonad (StateT s m) = BaseMonad m
-    liftDB = lift . liftDB
-instance (MonadDB m, Monoid w) => MonadDB (WriterT w m) where
-    type BaseMonad (WriterT w m) = BaseMonad m
-    liftDB = lift . liftDB
-instance (MonadDB m, Monoid w) => MonadDB (RWST r w s m) where
-    type BaseMonad (RWST r w s m) = BaseMonad m
-    liftDB = lift . liftDB
+liftDB :: (MonadReader env m, HasMongoContext env, MonadIO m)
+       => Action IO a
+       -> m a
+liftDB (Action m) = do
+    env <- ask
+    liftIO $ runReaderT m (mongoContext env)
 
 -- * Database
 
