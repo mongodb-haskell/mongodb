@@ -46,7 +46,7 @@ module Database.MongoDB.Query (
 import Prelude hiding (lookup)
 import Control.Applicative (Applicative, (<$>))
 import Control.Exception (Exception, throwIO)
-import Control.Monad (unless, replicateM, liftM)
+import Control.Monad (unless, replicateM)
 import Data.Int (Int32)
 import Data.Maybe (listToMaybe, catMaybes)
 import Data.Word (Word32)
@@ -60,13 +60,11 @@ import Control.Concurrent.MVar.Lifted (MVar, newMVar, mkWeakMVar,
 import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
                                          readMVar, modifyMVar)
 #endif
-import Control.Monad.Base (MonadBase(liftBase))
+import Control.Monad.Base (MonadBase)
 import Control.Monad.Error (Error(..))
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask, asks, local)
-import Control.Monad.Trans (MonadIO, MonadTrans, lift, liftIO)
-import Control.Monad.Trans.Control (ComposeSt, MonadBaseControl(..),
-                                    MonadTransControl(..), StM, StT,
-                                    defaultLiftBaseWith, defaultRestoreM)
+import Control.Monad.Trans (MonadIO, liftIO)
+import Control.Monad.Trans.Control (MonadBaseControl(..))
 import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
                   (=?))
@@ -91,30 +89,12 @@ import qualified Database.MongoDB.Internal.Protocol as P
 
 -- * Monad
 
-newtype Action m a = Action {unAction :: ReaderT MongoContext m a}
-    deriving (Functor, Applicative, Monad, MonadIO)
+type Action = ReaderT MongoContext
 -- ^ A monad on top of m (which must be a MonadIO) that may access the database and may fail with a DB 'Failure'
-
-instance MonadBase b m => MonadBase b (Action m) where
-     liftBase = Action . liftBase
-
-instance (MonadIO m, MonadBaseControl b m) => MonadBaseControl b (Action m) where
-     newtype StM (Action m) a = StMT {unStMT :: ComposeSt Action m a}
-     liftBaseWith = defaultLiftBaseWith StMT
-     restoreM     = defaultRestoreM   unStMT
-
-instance MonadTrans Action where
-     lift = Action . lift
-
-instance MonadTransControl Action where
-    newtype StT Action a = StActionT {unStAction :: StT (ReaderT MongoContext) a}
-    liftWith f = Action $ liftWith $ \runReader' ->
-                            f (liftM StActionT . runReader' . unAction)
-    restoreT = Action . restoreT . liftM unStAction
 
 access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m a
 -- ^ Run action against database on server at other end of pipe. Use access mode for any reads and writes. Return Left on connection failure or read/write failure.
-access myPipe myAccessMode myDatabase (Action action) = runReaderT action MongoContext{..}
+access myPipe myAccessMode myDatabase action = runReaderT action MongoContext{..}
 
 -- | A connection failure, or a read or write exception like cursor expired or inserting a duplicate key.
 -- Note, unexpected data from the server is not a Failure, rather it is a programming error (you should call 'error' in this case) because the client and server are incompatible and requires a programming change.
@@ -154,7 +134,7 @@ slaveOk = ReadStaleOk
 
 accessMode :: (Monad m) => AccessMode -> Action m a -> Action m a
 -- ^ Run action with given 'AccessMode'
-accessMode mode (Action act) = Action $ local (\ctx -> ctx {myAccessMode = mode}) act
+accessMode mode act = local (\ctx -> ctx {myAccessMode = mode}) act
 
 readMode :: AccessMode -> ReadMode
 readMode ReadStaleOk = StaleOk
@@ -179,13 +159,13 @@ myWriteMode = writeMode . myAccessMode
 
 send :: (MonadIO m) => [Notice] -> Action m ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw 'ConnectionFailure' if pipe fails.
-send ns = Action $ do
+send ns = do
     pipe <- asks myPipe
     liftIOE ConnectionFailure $ P.send pipe ns
 
 call :: (MonadIO m) => [Notice] -> Request -> Action m (IO Reply)
 -- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
-call ns r = Action $ do
+call ns r = do
     pipe <- asks myPipe
     promise <- liftIOE ConnectionFailure $ P.call pipe ns r
     return (liftIOE ConnectionFailure promise)
@@ -198,7 +178,7 @@ instance HasMongoContext MongoContext where
 liftDB :: (MonadReader env m, HasMongoContext env, MonadIO m)
        => Action IO a
        -> m a
-liftDB (Action m) = do
+liftDB m = do
     env <- ask
     liftIO $ runReaderT m (mongoContext env)
 
@@ -212,11 +192,11 @@ allDatabases = map (at "name") . at "databases" <$> useDb "admin" (runCommand1 "
 
 thisDatabase :: (Monad m) => Action m Database
 -- ^ Current database in use
-thisDatabase = Action $ asks myDatabase
+thisDatabase = asks myDatabase
 
 useDb :: (Monad m) => Database -> Action m a -> Action m a
 -- ^ Run action against given database
-useDb db (Action act) = Action $ local (\ctx -> ctx {myDatabase = db}) act
+useDb db act = local (\ctx -> ctx {myDatabase = db}) act
 
 -- * Authentication
 
@@ -272,7 +252,7 @@ data WriteMode =
 
 write :: (MonadIO m) => Notice -> Action m ()
 -- ^ Send write to server, and if write-mode is 'Safe' then include getLastError request and raise 'WriteFailure' if it reports an error.
-write notice = Action (asks myWriteMode) >>= \mode -> case mode of
+write notice = asks myWriteMode >>= \mode -> case mode of
     NoConfirm -> send [notice]
     Confirm params -> do
         let q = query (("getlasterror" =: (1 :: Int)) : params) "$cmd"
@@ -483,7 +463,7 @@ distinct k (Select sel col) = at "values" <$> runCommand ["distinct" =: col, "ke
 queryRequest :: (Monad m) => Bool -> Query -> Action m (Request, Limit)
 -- ^ Translate Query to Protocol.Query. If first arg is true then add special $explain attribute.
 queryRequest isExplain Query{..} = do
-    ctx <- Action ask
+    ctx <- ask
     return $ queryRequest' (myReadMode ctx) (myDatabase ctx)
  where
     queryRequest' rm db = (P.Query{..}, remainingLimit) where
@@ -535,7 +515,7 @@ fromReply limit Reply{..} = do
 
 fulfill :: (MonadIO m) => DelayedBatch -> Action m Batch
 -- ^ Demand and wait for result, raise failure if exception
-fulfill = Action . liftIO
+fulfill = liftIO
 
 -- *** Cursor
 
