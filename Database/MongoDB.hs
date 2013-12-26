@@ -40,10 +40,10 @@ Simple example below. Use with language extensions /OvererloadedStrings/ & /Exte
 -}
 
 module Database.MongoDB (
-	module Data.Bson,
-	module Database.MongoDB.Connection,
-	module Database.MongoDB.Query,
-	module Database.MongoDB.Admin
+    module Data.Bson,
+    module Database.MongoDB.Connection,
+    module Database.MongoDB.Query,
+    module Database.MongoDB.Admin
 ) where
 
 import Data.Bson

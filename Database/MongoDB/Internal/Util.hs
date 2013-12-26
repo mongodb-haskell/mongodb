@@ -98,7 +98,7 @@ runIOE (ErrorT action) = action >>= either ioError return
 updateAssocs :: (Eq k) => k -> v -> [(k, v)] -> [(k, v)]
 -- ^ Change or insert value of key in association list
 updateAssocs key valu assocs = case back of [] -> (key, valu) : front; _ : back' -> front ++ (key, valu) : back'
-	where (front, back) = break ((key ==) . fst) assocs
+    where (front, back) = break ((key ==) . fst) assocs
 
 bitOr :: (Num a, Bits a) => [a] -> a
 -- ^ bit-or all numbers together
@@ -111,20 +111,20 @@ a <.> b = T.append a (T.cons '.' b)
 true1 :: Label -> Document -> Bool
 -- ^ Is field's value a 1 or True (MongoDB use both Int and Bools for truth values). Error if field not in document or field not a Num or Bool.
 true1 k doc = case valueAt k doc of
-	Bool b -> b
-	Float n -> n == 1
-	Int32 n -> n == 1
-	Int64 n -> n == 1
-	_ -> error $ "expected " ++ show k ++ " to be Num or Bool in " ++ show doc
+    Bool b -> b
+    Float n -> n == 1
+    Int32 n -> n == 1
+    Int64 n -> n == 1
+    _ -> error $ "expected " ++ show k ++ " to be Num or Bool in " ++ show doc
 
 hGetN :: Handle -> Int -> IO L.ByteString
 -- ^ Read N bytes from hande, blocking until all N bytes are read. If EOF is reached before N bytes then raise EOF exception.
 hGetN h n = assert (n >= 0) $ do
-	bytes <- L.hGet h n
-	let x = fromEnum $ L.length bytes
-	if x >= n then return bytes
-		else if x == 0 then ioError (mkIOError eofErrorType "hGetN" (Just h) Nothing)
-			else L.append bytes <$> hGetN h (n - x)
+    bytes <- L.hGet h n
+    let x = fromEnum $ L.length bytes
+    if x >= n then return bytes
+        else if x == 0 then ioError (mkIOError eofErrorType "hGetN" (Just h) Nothing)
+            else L.append bytes <$> hGetN h (n - x)
 
 byteStringHex :: S.ByteString -> String
 -- ^ Hexadecimal string representation of a byte string. Each byte yields two hexadecimal characters.
