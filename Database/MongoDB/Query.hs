@@ -93,7 +93,7 @@ import qualified Database.MongoDB.Internal.Protocol as P
 
 -- * Monad
 
-newtype Action m a = Action {unAction :: ReaderT Context m a}
+newtype Action m a = Action {unAction :: ReaderT MongoContext m a}
     deriving (Functor, Applicative, Monad, MonadIO)
 -- ^ A monad on top of m (which must be a MonadIO) that may access the database and may fail with a DB 'Failure'
 
@@ -109,14 +109,14 @@ instance MonadTrans Action where
      lift = Action . lift
 
 instance MonadTransControl Action where
-    newtype StT Action a = StActionT {unStAction :: StT (ReaderT Context) a}
+    newtype StT Action a = StActionT {unStAction :: StT (ReaderT MongoContext) a}
     liftWith f = Action $ liftWith $ \runReader' ->
                             f (liftM StActionT . runReader' . unAction)
     restoreT = Action . restoreT . liftM unStAction
 
 access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m a
 -- ^ Run action against database on server at other end of pipe. Use access mode for any reads and writes. Return Left on connection failure or read/write failure.
-access myPipe myAccessMode myDatabase (Action action) = runReaderT action Context{..}
+access myPipe myAccessMode myDatabase (Action action) = runReaderT action MongoContext{..}
 
 -- | A connection failure, or a read or write exception like cursor expired or inserting a duplicate key.
 -- Note, unexpected data from the server is not a Failure, rather it is a programming error (you should call 'error' in this case) because the client and server are incompatible and requires a programming change.
@@ -168,15 +168,15 @@ writeMode UnconfirmedWrites = NoConfirm
 writeMode (ConfirmWrites z) = Confirm z
 
 -- | Values needed when executing a db operation
-data Context = Context {
+data MongoContext = MongoContext {
     myPipe :: Pipe, -- ^ operations read/write to this pipelined TCP connection to a MongoDB server
     myAccessMode :: AccessMode, -- ^ read/write operation will use this access mode
     myDatabase :: Database } -- ^ operations query/update this database
 
-myReadMode :: Context -> ReadMode
+myReadMode :: MongoContext -> ReadMode
 myReadMode = readMode . myAccessMode
 
-myWriteMode :: Context -> WriteMode
+myWriteMode :: MongoContext -> WriteMode
 myWriteMode = writeMode . myAccessMode
 
 send :: (MonadIO m) => [Notice] -> Action m ()
