@@ -8,8 +8,7 @@
 module Database.MongoDB.Internal.Util where
 
 import Control.Applicative (Applicative(..), (<$>))
-import Control.Arrow (left)
-import Control.Exception (assert)
+import Control.Exception (assert, handle, throwIO, Exception)
 import Control.Monad (liftM, liftM2)
 import Data.Bits (Bits, (.|.))
 import Data.Word (Word8)
@@ -23,7 +22,7 @@ import System.Random.Shuffle (shuffle')
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString as S
 
-import Control.Monad.Error (MonadError(..), ErrorT(..), Error(..))
+import Control.Monad.Error (MonadError(..), Error(..))
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.Bson
 import Data.Text (Text)
@@ -87,13 +86,9 @@ untilSuccess' _ f (x : xs) = catchError (f x) (\e -> untilSuccess' e f xs)
 whenJust :: (Monad m) => Maybe a -> (a -> m ()) -> m ()
 whenJust mVal act = maybe (return ()) act mVal
 
-liftIOE :: (MonadIO m) => (e -> e') -> ErrorT e IO a -> ErrorT e' m a
+liftIOE :: (MonadIO m, Exception e, Exception e') => (e -> e') -> IO a -> m a
 -- ^ lift IOE monad to ErrorT monad over some MonadIO m
-liftIOE f = ErrorT . liftIO . fmap (left f) . runErrorT
-
-runIOE :: ErrorT IOError IO a -> IO a
--- ^ Run action while catching explicit error and rethrowing in IO monad
-runIOE (ErrorT action) = action >>= either ioError return
+liftIOE f = liftIO . handle (throwIO . f)
 
 updateAssocs :: (Eq k) => k -> v -> [(k, v)] -> [(k, v)]
 -- ^ Change or insert value of key in association list

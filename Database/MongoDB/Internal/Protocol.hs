@@ -24,7 +24,6 @@ module Database.MongoDB.Internal.Protocol (
 
 import Control.Applicative ((<$>))
 import Control.Arrow ((***))
-import Control.Exception (try)
 import Control.Monad (forM_, replicateM, unless)
 import Data.Binary.Get (Get, runGet)
 import Data.Binary.Put (Put, runPut)
@@ -36,7 +35,6 @@ import System.IO.Unsafe (unsafePerformIO)
 
 import qualified Data.ByteString.Lazy as L
 
-import Control.Monad.Error (ErrorT(..))
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.Bson (Document)
 import Data.Bson.Binary (getDocument, putDocument, getInt32, putInt32, getInt64,
@@ -48,7 +46,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 
 import Database.MongoDB.Internal.Util (whenJust, hGetN, bitOr, byteStringHex)
-import System.IO.Pipeline (IOE, Pipeline, newPipeline, IOStream(..))
+import System.IO.Pipeline (Pipeline, newPipeline, IOStream(..))
 
 import qualified System.IO.Pipeline as P
 
@@ -61,11 +59,11 @@ newPipe :: Handle -> IO Pipe
 -- ^ Create pipe over handle
 newPipe handle = newPipeline $ IOStream (writeMessage handle) (readMessage handle) (hClose handle)
 
-send :: Pipe -> [Notice] -> IOE ()
+send :: Pipe -> [Notice] -> IO ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
 send pipe notices = P.send pipe (notices, Nothing)
 
-call :: Pipe -> [Notice] -> Request -> IOE (IOE Reply)
+call :: Pipe -> [Notice] -> Request -> IO (IO Reply)
 -- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call and resulting promise will throw IOError if connection fails.
 call pipe notices request = do
     requestId <- genRequestId
@@ -81,9 +79,9 @@ type Message = ([Notice], Maybe (Request, RequestId))
 -- ^ A write notice(s) with getLastError request, or just query request.
 -- Note, that requestId will be out of order because request ids will be generated for notices after the request id supplied was generated. This is ok because the mongo server does not care about order just uniqueness.
 
-writeMessage :: Handle -> Message -> IOE ()
+writeMessage :: Handle -> Message -> IO ()
 -- ^ Write message to socket
-writeMessage handle (notices, mRequest) = ErrorT . try $ do
+writeMessage handle (notices, mRequest) = do
     forM_ notices $ \n -> writeReq . (Left n,) =<< genRequestId
     whenJust mRequest $ writeReq . (Right *** id)
     hFlush handle
@@ -99,9 +97,9 @@ writeMessage handle (notices, mRequest) = ErrorT . try $ do
 type Response = (ResponseTo, Reply)
 -- ^ Message received from a Mongo server in response to a Request
 
-readMessage :: Handle -> IOE Response
+readMessage :: Handle -> IO Response
 -- ^ read response from socket
-readMessage handle = ErrorT $ try readResp  where
+readMessage handle = readResp  where
     readResp = do
         len <- fromEnum . decodeSize <$> hGetN handle 4
         runGet getReply <$> hGetN handle len

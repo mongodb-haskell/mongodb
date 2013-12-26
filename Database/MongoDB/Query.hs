@@ -1,6 +1,6 @@
 -- | Query and update documents
 
-{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP, DeriveDataTypeable #-}
 
 module Database.MongoDB.Query (
     -- * Monad
@@ -44,11 +44,13 @@ module Database.MongoDB.Query (
 
 import Prelude hiding (lookup)
 import Control.Applicative (Applicative, (<$>))
+import Control.Exception (Exception, throwIO)
 import Control.Monad (unless, replicateM, liftM)
 import Data.Int (Int32)
 import Data.Maybe (listToMaybe, catMaybes)
 import Data.Word (Word32)
 import Data.Monoid (mappend)
+import Data.Typeable (Typeable)
 
 #if MIN_VERSION_base(4,6,0)
 import Control.Concurrent.MVar.Lifted (MVar, newMVar, mkWeakMVar,
@@ -58,8 +60,7 @@ import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
                                          readMVar, modifyMVar)
 #endif
 import Control.Monad.Base (MonadBase(liftBase))
-import Control.Monad.Error (ErrorT, Error(..), MonadError, runErrorT,
-                            throwError)
+import Control.Monad.Error (ErrorT, Error(..))
 import Control.Monad.Reader (ReaderT, runReaderT, ask, asks, local)
 import Control.Monad.RWS (RWST)
 import Control.Monad.State (StateT)
@@ -92,8 +93,8 @@ import qualified Database.MongoDB.Internal.Protocol as P
 
 -- * Monad
 
-newtype Action m a = Action {unAction :: ErrorT Failure (ReaderT Context m) a}
-    deriving (Functor, Applicative, Monad, MonadIO, MonadError Failure)
+newtype Action m a = Action {unAction :: ReaderT Context m a}
+    deriving (Functor, Applicative, Monad, MonadIO)
 -- ^ A monad on top of m (which must be a MonadIO) that may access the database and may fail with a DB 'Failure'
 
 instance MonadBase b m => MonadBase b (Action m) where
@@ -105,18 +106,17 @@ instance (MonadIO m, MonadBaseControl b m) => MonadBaseControl b (Action m) wher
      restoreM     = defaultRestoreM   unStMT
 
 instance MonadTrans Action where
-     lift = Action . lift . lift
+     lift = Action . lift
 
 instance MonadTransControl Action where
-    newtype StT Action a = StActionT {unStAction :: StT (ReaderT Context) (StT (ErrorT Failure) a)}
-    liftWith f = Action $ liftWith $ \runError ->
-                            liftWith $ \runReader' ->
-                              f (liftM StActionT . runReader' . runError . unAction)
-    restoreT = Action . restoreT . restoreT . liftM unStAction
+    newtype StT Action a = StActionT {unStAction :: StT (ReaderT Context) a}
+    liftWith f = Action $ liftWith $ \runReader' ->
+                            f (liftM StActionT . runReader' . unAction)
+    restoreT = Action . restoreT . liftM unStAction
 
-access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m (Either Failure a)
+access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m a
 -- ^ Run action against database on server at other end of pipe. Use access mode for any reads and writes. Return Left on connection failure or read/write failure.
-access myPipe myAccessMode myDatabase (Action action) = runReaderT (runErrorT action) Context{..}
+access myPipe myAccessMode myDatabase (Action action) = runReaderT action Context{..}
 
 -- | A connection failure, or a read or write exception like cursor expired or inserting a duplicate key.
 -- Note, unexpected data from the server is not a Failure, rather it is a programming error (you should call 'error' in this case) because the client and server are incompatible and requires a programming change.
@@ -127,7 +127,8 @@ data Failure =
     | WriteFailure ErrorCode String  -- ^ Error observed by getLastError after a write, error description is in string
     | DocNotFound Selection  -- ^ 'fetch' found no document matching selection
     | AggregateFailure String -- ^ 'aggregate' returned an error
-    deriving (Show, Eq)
+    deriving (Show, Eq, Typeable)
+instance Exception Failure
 
 type ErrorCode = Int
 -- ^ Error code from getLastError or query failure
@@ -184,7 +185,7 @@ send ns = Action $ do
     pipe <- asks myPipe
     liftIOE ConnectionFailure $ P.send pipe ns
 
-call :: (MonadIO m) => [Notice] -> Request -> Action m (ErrorT Failure IO Reply)
+call :: (MonadIO m) => [Notice] -> Request -> Action m (IO Reply)
 -- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
 call ns r = Action $ do
     pipe <- asks myPipe
@@ -293,7 +294,7 @@ write notice = Action (asks myWriteMode) >>= \mode -> case mode of
         Batch _ _ [doc] <- fulfill =<< request [notice] =<< queryRequest False q {limit = 1}
         case lookup "err" doc of
             Nothing -> return ()
-            Just err -> throwError $ WriteFailure (maybe 0 id $ lookup "code" doc) err
+            Just err -> liftIO $ throwIO $ WriteFailure (maybe 0 id $ lookup "code" doc) err
 
 -- ** Insert
 
@@ -437,7 +438,7 @@ findOne q = do
 
 fetch :: (MonadIO m) => Query -> Action m Document
 -- ^ Same as 'findOne' except throw 'DocNotFound' if none match
-fetch q = findOne q >>= maybe (throwError $ DocNotFound $ selection q) return
+fetch q = findOne q >>= maybe (liftIO $ throwIO $ DocNotFound $ selection q) return
 
 -- | runs the findAndModify command.
 -- Returns a single updated document (new option is set to true).
@@ -523,7 +524,7 @@ batchSizeRemainingLimit batchSize limit = if limit == 0
  where batchSize' = if batchSize == 1 then 2 else batchSize
     -- batchSize 1 is broken because server converts 1 to -1 meaning limit 1
 
-type DelayedBatch = ErrorT Failure IO Batch
+type DelayedBatch = IO Batch
 -- ^ A promised batch which may fail
 
 data Batch = Batch Limit CursorId [Document]
@@ -544,12 +545,12 @@ fromReply limit Reply{..} = do
     -- If response flag indicates failure then throw it, otherwise do nothing
     checkResponseFlag flag = case flag of
         AwaitCapable -> return ()
-        CursorNotFound -> throwError $ CursorNotFoundFailure rCursorId
-        QueryError -> throwError $ QueryFailure (at "code" $ head rDocuments) (at "$err" $ head rDocuments)
+        CursorNotFound -> throwIO $ CursorNotFoundFailure rCursorId
+        QueryError -> throwIO $ QueryFailure (at "code" $ head rDocuments) (at "$err" $ head rDocuments)
 
 fulfill :: (MonadIO m) => DelayedBatch -> Action m Batch
 -- ^ Demand and wait for result, raise failure if exception
-fulfill = Action . liftIOE id
+fulfill = Action . liftIO
 
 -- *** Cursor
 
@@ -634,7 +635,7 @@ aggregate aColl agg = do
     response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg]
     case true1 "ok" response of
         True  -> lookup "result" response
-        False -> throwError $ AggregateFailure $ at "errmsg" response
+        False -> liftIO $ throwIO $ AggregateFailure $ at "errmsg" response
 
 -- ** Group
 
