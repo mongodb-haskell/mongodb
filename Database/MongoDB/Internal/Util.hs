@@ -7,7 +7,7 @@
 
 module Database.MongoDB.Internal.Util where
 
-import Control.Applicative (Applicative(..), (<$>))
+import Control.Applicative ((<$>))
 import Control.Exception (assert, handle, throwIO, Exception)
 import Control.Monad (liftM, liftM2)
 import Data.Bits (Bits, (.|.))
@@ -34,10 +34,6 @@ deriving instance Show PortID
 deriving instance Eq PortID
 #endif
 deriving instance Ord PortID
-
--- | MonadIO with extra Applicative and Functor superclasses
-class (MonadIO m, Applicative m, Functor m) => MonadIO' m
-instance (MonadIO m, Applicative m, Functor m) => MonadIO' m
 
 -- | A monadic sort implementation derived from the non-monadic one in ghc's Prelude
 mergesortM :: Monad m => (a -> a -> m Ordering) -> [a] -> m [a]

@@ -44,9 +44,8 @@ module Database.MongoDB.Query (
 ) where
 
 import Prelude hiding (lookup)
-import Control.Applicative (Applicative, (<$>))
 import Control.Exception (Exception, throwIO)
-import Control.Monad (unless, replicateM)
+import Control.Monad (unless, replicateM, liftM)
 import Data.Int (Int32)
 import Data.Maybe (listToMaybe, catMaybes)
 import Data.Word (Word32)
@@ -80,7 +79,7 @@ import Database.MongoDB.Internal.Protocol (Reply(..), QueryOption(..),
                                            qFullCollection, qBatchSize,
                                            qSelector, qProjector),
                                            pwKey)
-import Database.MongoDB.Internal.Util (MonadIO', loop, liftIOE, true1, (<.>))
+import Database.MongoDB.Internal.Util (loop, liftIOE, true1, (<.>))
 import qualified Database.MongoDB.Internal.Protocol as P
 
 #if !MIN_VERSION_base(4,6,0)
@@ -186,9 +185,9 @@ liftDB m = do
 
 type Database = Text
 
-allDatabases :: (MonadIO' m) => Action m [Database]
+allDatabases :: (MonadIO m) => Action m [Database]
 -- ^ List all databases residing on server
-allDatabases = map (at "name") . at "databases" <$> useDb "admin" (runCommand1 "listDatabases")
+allDatabases = (map (at "name") . at "databases") `liftM` useDb "admin" (runCommand1 "listDatabases")
 
 thisDatabase :: (Monad m) => Action m Database
 -- ^ Current database in use
@@ -200,18 +199,18 @@ useDb db act = local (\ctx -> ctx {myDatabase = db}) act
 
 -- * Authentication
 
-auth :: (MonadIO' m) => Username -> Password -> Action m Bool
+auth :: (MonadIO m) => Username -> Password -> Action m Bool
 -- ^ Authenticate with the current database (if server is running in secure mode). Return whether authentication was successful or not. Reauthentication is required for every new pipe.
 auth usr pss = do
-    n <- at "nonce" <$> runCommand ["getnonce" =: (1 :: Int)]
-    true1 "ok" <$> runCommand ["authenticate" =: (1 :: Int), "user" =: usr, "nonce" =: n, "key" =: pwKey n usr pss]
+    n <- at "nonce" `liftM` runCommand ["getnonce" =: (1 :: Int)]
+    true1 "ok" `liftM` runCommand ["authenticate" =: (1 :: Int), "user" =: usr, "nonce" =: n, "key" =: pwKey n usr pss]
 
 -- * Collection
 
 type Collection = Text
 -- ^ Collection name (not prefixed with database)
 
-allCollections :: (MonadIO m, MonadBaseControl IO m, Functor m) => Action m [Collection]
+allCollections :: (MonadIO m, MonadBaseControl IO m) => Action m [Collection]
 -- ^ List all collections in this database
 allCollections = do
     db <- thisDatabase
@@ -263,11 +262,11 @@ write notice = asks myWriteMode >>= \mode -> case mode of
 
 -- ** Insert
 
-insert :: (MonadIO' m) => Collection -> Document -> Action m Value
+insert :: (MonadIO m) => Collection -> Document -> Action m Value
 -- ^ Insert document into collection and return its \"_id\" value, which is created automatically if not supplied
-insert col doc = head <$> insertMany col [doc]
+insert col doc = head `liftM` insertMany col [doc]
 
-insert_ :: (MonadIO' m) => Collection -> Document -> Action m ()
+insert_ :: (MonadIO m) => Collection -> Document -> Action m ()
 -- ^ Same as 'insert' except don't return _id
 insert_ col doc = insert col doc >> return ()
 
@@ -299,11 +298,11 @@ assignId :: Document -> IO Document
 -- ^ Assign a unique value to _id field if missing
 assignId doc = if any (("_id" ==) . label) doc
     then return doc
-    else (\oid -> ("_id" =: oid) : doc) <$> genObjectId
+    else (\oid -> ("_id" =: oid) : doc) `liftM` genObjectId
 
 -- ** Update 
 
-save :: (MonadIO' m) => Collection -> Document -> Action m ()
+save :: (MonadIO m) => Collection -> Document -> Action m ()
 -- ^ Save document to collection, meaning insert it if its new (has no \"_id\" field) or update it if its not new (has \"_id\" field)
 save col doc = case look "_id" doc of
     Nothing -> insert_ col doc
@@ -408,7 +407,7 @@ fetch q = findOne q >>= maybe (liftIO $ throwIO $ DocNotFound $ selection q) ret
 -- | runs the findAndModify command.
 -- Returns a single updated document (new option is set to true).
 -- Currently this API does not allow setting the remove option
-findAndModify :: (Applicative m, MonadIO m)
+findAndModify :: MonadIO m
               => Query
               -> Document -- ^ updates
               -> Action m (Either String Document)
@@ -450,15 +449,15 @@ explain q = do  -- same as findOne but with explain set to true
     Batch _ _ docs <- fulfill =<< request [] =<< queryRequest True q {limit = 1}
     return $ if null docs then error ("no explain: " ++ show q) else head docs
 
-count :: (MonadIO' m) => Query -> Action m Int
+count :: (MonadIO m) => Query -> Action m Int
 -- ^ Fetch number of documents satisfying query (including effect of skip and/or limit if present)
-count Query{selection = Select sel col, skip, limit} = at "n" <$> runCommand
+count Query{selection = Select sel col, skip, limit} = at "n" `liftM` runCommand
     (["count" =: col, "query" =: sel, "skip" =: (fromIntegral skip :: Int32)]
         ++ ("limit" =? if limit == 0 then Nothing else Just (fromIntegral limit :: Int32)))
 
-distinct :: (MonadIO' m) => Label -> Selection -> Action m [Value]
+distinct :: (MonadIO m) => Label -> Selection -> Action m [Value]
 -- ^ Fetch distinct values of field in selected documents
-distinct k (Select sel col) = at "values" <$> runCommand ["distinct" =: col, "key" =: k, "query" =: sel]
+distinct k (Select sel col) = at "values" `liftM` runCommand ["distinct" =: col, "key" =: k, "query" =: sel]
 
 queryRequest :: (Monad m) => Bool -> Query -> Action m (Request, Limit)
 -- ^ Translate Query to Protocol.Query. If first arg is true then add special $explain attribute.
@@ -570,11 +569,11 @@ next (Cursor fcol batchSize var) = modifyMVar var nextState where
                 then return (return $ Batch 0 0 [], Nothing)  -- finished
                 else fmap (,Nothing) $ nextBatch' fcol batchSize limit cid
 
-nextN :: (MonadIO m, MonadBaseControl IO m, Functor m) => Int -> Cursor -> Action m [Document]
+nextN :: (MonadIO m, MonadBaseControl IO m) => Int -> Cursor -> Action m [Document]
 -- ^ Return next N documents or less if end is reached
-nextN n c = catMaybes <$> replicateM n (next c)
+nextN n c = catMaybes `liftM` replicateM n (next c)
 
-rest :: (MonadIO m, MonadBaseControl IO m, Functor m) => Cursor -> Action m [Document]
+rest :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m [Document]
 -- ^ Return remaining documents in query result
 rest c = loop (next c)
 
@@ -594,7 +593,7 @@ isCursorClosed (Cursor _ _ var) = do
 type Pipeline = [Document]
 -- ^ The Aggregate Pipeline
 
-aggregate :: MonadIO' m => Collection -> Pipeline -> Action m [Document]
+aggregate :: MonadIO m => Collection -> Pipeline -> Action m [Document]
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
 aggregate aColl agg = do
     response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg]
@@ -627,9 +626,9 @@ groupDocument Group{..} =
     "initial" =: gInitial,
     "cond" =: gCond ]
 
-group :: (MonadIO' m) => Group -> Action m [Document]
+group :: (MonadIO m) => Group -> Action m [Document]
 -- ^ Execute group query and return resulting aggregate value for each distinct key
-group g = at "retval" <$> runCommand ["group" =: groupDocument g]
+group g = at "retval" `liftM` runCommand ["group" =: groupDocument g]
 
 -- ** MapReduce
 
@@ -699,7 +698,7 @@ mapReduce :: Collection -> MapFun -> ReduceFun -> MapReduce
 -- ^ MapReduce on collection with given map and reduce functions. Remaining attributes are set to their defaults, which are stated in their comments.
 mapReduce col map' red = MapReduce col map' red [] [] 0 Inline Nothing [] False
 
-runMR :: (MonadIO m, MonadBaseControl IO m, Applicative m) => MapReduce -> Action m Cursor
+runMR :: (MonadIO m, MonadBaseControl IO m) => MapReduce -> Action m Cursor
 -- ^ Run MapReduce and return cursor of results. Error if map/reduce fails (because of bad Javascript)
 runMR mr = do
     res <- runMR' mr
@@ -709,7 +708,7 @@ runMR mr = do
         Just x -> error $ "unexpected map-reduce result field: " ++ show x
         Nothing -> newCursor "" "" 0 $ return $ Batch 0 0 (at "results" res)
 
-runMR' :: (MonadIO' m) => MapReduce -> Action m MRResult
+runMR' :: (MonadIO m) => MapReduce -> Action m MRResult
 -- ^ Run MapReduce and return a MR result document containing stats and the results if Inlined. Error if the map/reduce failed (because of bad Javascript).
 runMR' mr = do
     doc <- runCommand (mrDocument mr)
@@ -720,18 +719,18 @@ runMR' mr = do
 type Command = Document
 -- ^ A command is a special query or action against the database. See <http://www.mongodb.org/display/DOCS/Commands> for details.
 
-runCommand :: (MonadIO' m) => Command -> Action m Document
+runCommand :: (MonadIO m) => Command -> Action m Document
 -- ^ Run command against the database and return its result
-runCommand c = maybe err id <$> findOne (query c "$cmd") where
+runCommand c = maybe err id `liftM` findOne (query c "$cmd") where
     err = error $ "Nothing returned for command: " ++ show c
 
-runCommand1 :: (MonadIO' m) => Text -> Action m Document
+runCommand1 :: (MonadIO m) => Text -> Action m Document
 -- ^ @runCommand1 foo = runCommand [foo =: 1]@
 runCommand1 c = runCommand [c =: (1 :: Int)]
 
-eval :: (MonadIO' m, Val v) => Javascript -> Action m v
+eval :: (MonadIO m, Val v) => Javascript -> Action m v
 -- ^ Run code on server
-eval code = at "retval" <$> runCommand ["$eval" =: code]
+eval code = at "retval" `liftM` runCommand ["$eval" =: code]
 
 
 {- Authors: Tony Hannan <tony@10gen.com>
