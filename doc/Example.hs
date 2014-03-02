@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings, ExtendedDefaultRules #-}
 
-import Database.MongoDB
+import Database.MongoDB    (Action, Document, Document, Value, access,
+                            close, connect, delete, exclude, find,
+                            host, insertMany, master, project, rest,
+                            runIOE, select, sort, (=:))
 import Control.Monad.Trans (liftIO)
 
 main :: IO ()
