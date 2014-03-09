@@ -269,7 +269,7 @@ whereJS sel js = ("$where" =: js) : sel
 
 class Select aQueryOrSelection where
 	select :: Selector -> Collection -> aQueryOrSelection
-	-- ^ 'Query' or 'Selection' that selects documents in collection that match selector. The choice of type depends on use, for example, in @find (select sel col)@ it is a Query, and in @delete (select sel col)@ it is a Selection.
+	-- ^ 'Query' or 'Selection' that selects documents in collection that match selector. The choice of type depends on use, for example, in @'find' (select sel col)@ it is a Query, and in @'delete' (select sel col)@ it is a Selection.
 
 instance Select Selection where
 	select = Select
