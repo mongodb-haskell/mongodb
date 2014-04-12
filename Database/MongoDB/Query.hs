@@ -5,7 +5,7 @@
 module Database.MongoDB.Query (
     -- * Monad
     Action, access, Failure(..), ErrorCode,
-    AccessMode(..), GetLastError, master, slaveOk, accessMode, 
+    AccessMode(..), GetLastError, master, slaveOk, accessMode,
     liftDB,
     MongoContext, HasMongoContext(..),
     -- * Database
@@ -233,13 +233,8 @@ whereJS :: Selector -> Javascript -> Selector
 whereJS sel js = ("$where" =: js) : sel
 
 class Select aQueryOrSelection where
-<<<<<<< HEAD
 	select :: Selector -> Collection -> aQueryOrSelection
 	-- ^ 'Query' or 'Selection' that selects documents in collection that match selector. The choice of type depends on use, for example, in @'find' (select sel col)@ it is a Query, and in @'delete' (select sel col)@ it is a Selection.
-=======
-    select :: Selector -> Collection -> aQueryOrSelection
-    -- ^ 'Query' or 'Selection' that selects documents in collection that match selector. The choice of type depends on use, for example, in @find (select sel col)@ it is a Query, and in @delete (select sel col)@ it is a Selection.
->>>>>>> refs/heads/pr-20
 
 instance Select Selection where
     select = Select
@@ -305,7 +300,7 @@ assignId doc = if any (("_id" ==) . label) doc
     then return doc
     else (\oid -> ("_id" =: oid) : doc) `liftM` genObjectId
 
--- ** Update 
+-- ** Update
 
 save :: (MonadIO m) => Collection -> Document -> Action m ()
 -- ^ Save document to collection, meaning insert it if its new (has no \"_id\" field) or update it if its not new (has \"_id\" field)
