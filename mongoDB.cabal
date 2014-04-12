@@ -46,4 +46,3 @@ Library
                     Database.MongoDB.Internal.Util
                     Database.MongoDB.Query
                     System.IO.Pipeline
-                    System.IO.Pool

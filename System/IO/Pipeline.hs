@@ -12,11 +12,10 @@ A pipeline closes itself when a read or write causes an error, so you can detect
 #endif
 
 module System.IO.Pipeline (
-	IOE,
-	-- * IOStream
-	IOStream(..),
-	-- * Pipeline
-	Pipeline, newPipeline, send, call, close, isClosed
+    -- * IOStream
+    IOStream(..),
+    -- * Pipeline
+    Pipeline, newPipeline, send, call, close, isClosed
 ) where
 
 import Prelude hiding (length)
@@ -33,95 +32,85 @@ import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
 import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
                                          putMVar, readMVar, addMVarFinalizer)
 #endif
-import Control.Monad.Error (ErrorT(ErrorT), runErrorT)
+import Control.Exception.Lifted (onException, throwIO, try)
 
 #if !MIN_VERSION_base(4,6,0)
 mkWeakMVar :: MVar a -> IO () -> IO ()
 mkWeakMVar = addMVarFinalizer
 #endif
 
-onException :: (Monad m) => ErrorT e m a -> m () -> ErrorT e m a
--- ^ If first action throws an exception then run second action then re-throw
-onException (ErrorT action) releaser = ErrorT $ do
-	e <- action
-	either (const releaser) (const $ return ()) e
-	return e
-
-type IOE = ErrorT IOError IO
--- ^ IO monad with explicit error
-
 -- * IOStream
 
 -- | An IO sink and source where value of type @o@ are sent and values of type @i@ are received.
 data IOStream i o = IOStream {
-	writeStream :: o -> IOE (),
-	readStream :: IOE i,
-	closeStream :: IO () }
+    writeStream :: o -> IO (),
+    readStream :: IO i,
+    closeStream :: IO () }
 
 -- * Pipeline
 
 -- | Thread-safe and pipelined connection
 data Pipeline i o = Pipeline {
-	vStream :: MVar (IOStream i o),  -- ^ Mutex on handle, so only one thread at a time can write to it
-	responseQueue :: Chan (MVar (Either IOError i)),  -- ^ Queue of threads waiting for responses. Every time a response arrive we pop the next thread and give it the response.
-	listenThread :: ThreadId
-	}
+    vStream :: MVar (IOStream i o),  -- ^ Mutex on handle, so only one thread at a time can write to it
+    responseQueue :: Chan (MVar (Either IOError i)),  -- ^ Queue of threads waiting for responses. Every time a response arrive we pop the next thread and give it the response.
+    listenThread :: ThreadId
+    }
 
 -- | Create new Pipeline over given handle. You should 'close' pipeline when finished, which will also close handle. If pipeline is not closed but eventually garbage collected, it will be closed along with handle.
 newPipeline :: IOStream i o -> IO (Pipeline i o)
 newPipeline stream = do
-	vStream <- newMVar stream
-	responseQueue <- newChan
-	rec
-		let pipe = Pipeline{..}
-		listenThread <- forkIO (listen pipe)
-	_ <- mkWeakMVar vStream $ do
-		killThread listenThread
-		closeStream stream
-	return pipe
+    vStream <- newMVar stream
+    responseQueue <- newChan
+    rec
+        let pipe = Pipeline{..}
+        listenThread <- forkIO (listen pipe)
+    _ <- mkWeakMVar vStream $ do
+        killThread listenThread
+        closeStream stream
+    return pipe
 
 close :: Pipeline i o -> IO ()
 -- ^ Close pipe and underlying connection
 close Pipeline{..} = do
-	killThread listenThread
-	closeStream =<< readMVar vStream
+    killThread listenThread
+    closeStream =<< readMVar vStream
 
 isClosed :: Pipeline i o -> IO Bool
 isClosed Pipeline{listenThread} = do
-	status <- threadStatus listenThread
-	return $ case status of
-		ThreadRunning -> False
-		ThreadFinished -> True
-		ThreadBlocked _ -> False
-		ThreadDied -> True
+    status <- threadStatus listenThread
+    return $ case status of
+        ThreadRunning -> False
+        ThreadFinished -> True
+        ThreadBlocked _ -> False
+        ThreadDied -> True
 --isPipeClosed Pipeline{..} = isClosed =<< readMVar vHandle  -- isClosed hangs while listen loop is waiting on read
 
 listen :: Pipeline i o -> IO ()
 -- ^ Listen for responses and supply them to waiting threads in order
 listen Pipeline{..} = do
-	stream <- readMVar vStream
-	forever $ do
-		e <- runErrorT $ readStream stream
-		var <- readChan responseQueue
-		putMVar var e
-		case e of
-			Left err -> closeStream stream >> ioError err  -- close and stop looping
-			Right _ -> return ()
+    stream <- readMVar vStream
+    forever $ do
+        e <- try $ readStream stream
+        var <- readChan responseQueue
+        putMVar var e
+        case e of
+            Left err -> closeStream stream >> ioError err  -- close and stop looping
+            Right _ -> return ()
 
-send :: Pipeline i o -> o -> IOE ()
+send :: Pipeline i o -> o -> IO ()
 -- ^ Send message to destination; the destination must not response (otherwise future 'call's will get these responses instead of their own).
 -- Throw IOError and close pipeline if send fails
 send p@Pipeline{..} message = withMVar vStream (flip writeStream message) `onException` close p
 
-call :: Pipeline i o -> o -> IOE (IOE i)
+call :: Pipeline i o -> o -> IO (IO i)
 -- ^ Send message to destination and return /promise/ of response from one message only. The destination must reply to the message (otherwise promises will have the wrong responses in them).
 -- Throw IOError and closes pipeline if send fails, likewise for promised response.
 call p@Pipeline{..} message = withMVar vStream doCall `onException` close p  where
-	doCall stream = do
-		writeStream stream message
-		var <- newEmptyMVar
-		liftIO $ writeChan responseQueue var
-		return $ ErrorT (readMVar var)  -- return promise
+    doCall stream = do
+        writeStream stream message
+        var <- newEmptyMVar
+        liftIO $ writeChan responseQueue var
+        return $ readMVar var >>= either throwIO return -- return promise
 
 
 {- Authors: Tony Hannan <tony@10gen.com>
