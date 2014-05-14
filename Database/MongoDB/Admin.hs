@@ -7,8 +7,8 @@ module Database.MongoDB.Admin (
     -- ** Collection
     CollectionOption(..), createCollection, renameCollection, dropCollection,
     validateCollection,
-    -- ** Index
-    Index(..), IndexName, index, ensureIndex, createIndex, dropIndex,
+	-- ** Index
+    Index(..), IndexOpts(..), IndexName, index, ensureIndex, createIndex, dropIndex, defaultIndexOpts,
     getIndexes, dropIndexes,
     -- ** User
     allUsers, addUser, removeUser,
