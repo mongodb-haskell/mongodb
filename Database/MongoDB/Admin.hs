@@ -1,14 +1,14 @@
 -- | Database administrative functions
 
-{-# LANGUAGE FlexibleContexts, OverloadedStrings, RecordWildCards #-}
+{-# LANGUAGE FlexibleContexts, OverloadedStrings, RecordWildCards, PatternGuards #-}
 
 module Database.MongoDB.Admin (
     -- * Admin
     -- ** Collection
     CollectionOption(..), createCollection, renameCollection, dropCollection,
     validateCollection,
-    -- ** Index
-    Index(..), IndexName, index, ensureIndex, createIndex, dropIndex,
+	-- ** Index
+    Index(..), IndexOpts(..), IndexName, index, ensureIndex, createIndex, dropIndex, defaultIndexOpts,
     getIndexes, dropIndexes,
     -- ** User
     allUsers, addUser, removeUser,
@@ -42,6 +42,7 @@ import Control.Monad.Trans (MonadIO, liftIO)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Bson (Document, Field(..), at, (=:), (=?), exclude, merge)
 import Data.Text (Text)
+import Data.Maybe (mapMaybe, catMaybes)
 
 import qualified Data.Text as T
 
@@ -91,25 +92,63 @@ validateCollection coll = runCommand ["validate" =: coll]
 
 type IndexName = Text
 
+data IndexOpts = IndexOpts
+                   { unique :: Bool
+                   , dropDups :: Bool
+                   , background :: Bool
+                   , sparse :: Bool
+                   , expireAfterSeconds :: Maybe Int
+                   , defaultLanguage :: Maybe Text
+                   , languageOverride :: Maybe Text
+                   -- too lazy to add this one
+                   -- , weights :: [Weight]
+                   -- nobody needs this
+                   -- , iVersion :: Int = 1
+                   } deriving (Show, Eq)
+
+-- | Unlike the shell, this defaults background to True
+defaultIndexOpts :: IndexOpts
+defaultIndexOpts = IndexOpts
+                     { unique = False
+                     , dropDups = False
+                     , background = True
+                     , sparse = False
+                     , expireAfterSeconds = Nothing
+                     , defaultLanguage = Nothing
+                     , languageOverride = Nothing
+                     }
+
 data Index = Index {
     iColl :: Collection,
     iKey :: Order,
     iName :: IndexName,
-    iUnique :: Bool,
-    iDropDups :: Bool
+    iOpts :: IndexOpts
     } deriving (Show, Eq)
 
 idxDocument :: Index -> Database -> Document
-idxDocument Index{..} db = [
-    "ns" =: db <.> iColl,
-    "key" =: iKey,
-    "name" =: iName,
-    "unique" =: iUnique,
-    "dropDups" =: iDropDups ]
+idxDocument Index{..} db =
+   [ "ns" =: db <.> iColl
+   , "key" =: iKey
+   , "name" =: iName
+   ] ++ mapMaybe addBool
+   [ ("unique", unique)
+   , ("dropDups", dropDups)
+   , ("background", background)
+   , ("sparse", sparse)
+   ] ++ catMaybes
+   [ addMay ("expireAfterSeconds", expireAfterSeconds)
+   , addMay ("defaultLanguage", defaultLanguage)
+   , addMay ("languageOverride", languageOverride)
+   ]
+  where
+    addBool (label, accessor) | accessor iOpts = Just (label =: True)
+                              | otherwise = Nothing
+    addMay (label, accessor)  | Just result <- accessor iOpts = Just (label =: result)
+                              | otherwise = Nothing
 
 index :: Collection -> Order -> Index
 -- ^ Spec of index of ordered keys on collection. Name is generated from keys. Unique and dropDups are False.
-index coll keys = Index coll keys (genName keys) False False
+index coll keys = Index coll keys (genName keys) defaultIndexOpts
 
 genName :: Order -> IndexName
 genName keys = T.intercalate "_" (map f keys)  where
