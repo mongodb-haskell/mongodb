@@ -3,13 +3,12 @@ Client interface to MongoDB database management system.
 
 Simple example below. Use with language extensions /OvererloadedStrings/ & /ExtendedDefaultRules/.
 
-> {-# LANGUAGE OverloadedStrings, ExtendedDefaultRules #-}
->
+
 > import Database.MongoDB
 > import Control.Monad.Trans (liftIO)
 >
 > main = do
->    pipe <- runIOE $ connect (host "127.0.0.1")
+>    pipe <- connect (host "127.0.0.1")
 >    e <- access pipe master "baseball" run
 >    close pipe
 >    print e

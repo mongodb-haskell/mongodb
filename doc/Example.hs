@@ -1,14 +1,17 @@
-{-# LANGUAGE OverloadedStrings, ExtendedDefaultRules #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ExtendedDefaultRules #-}
+
+module Main (main) where
 
 import Database.MongoDB    (Action, Document, Document, Value, access,
                             close, connect, delete, exclude, find,
                             host, insertMany, master, project, rest,
-                            runIOE, select, sort, (=:))
+                            select, sort, (=:))
 import Control.Monad.Trans (liftIO)
 
 main :: IO ()
 main = do
-    pipe <- runIOE $ connect (host "127.0.0.1")
+    pipe <- connect (host "127.0.0.1")
     e <- access pipe master "baseball" run
     close pipe
     print e
