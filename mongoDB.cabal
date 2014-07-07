@@ -7,7 +7,8 @@ Description:    This package lets you connect to MongoDB servers and
                 Database.MongoDB and the tutorial from the homepage. For
                 information about MongoDB itself, see www.mongodb.org.
 Category:       Database
-Homepage:       http://github.com/selectel/mongodb-haskell
+Homepage:       https://github.com/mongodb-haskell/mongodb
+Bug-reports:    https://github.com/mongodb-haskell/mongodb/issues
 Author:         Tony Hannan
 Maintainer:     Fedor Gogolev <knsd@knsd.net>
 Copyright:      Copyright (c) 2010-2012 10gen Inc.
@@ -46,3 +47,7 @@ Library
                     Database.MongoDB.Internal.Util
                     Database.MongoDB.Query
                     System.IO.Pipeline
+
+Source-repository head
+    Type:     git
+    Location: https://github.com/mongodb-haskell/mongodb
