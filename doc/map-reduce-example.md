@@ -11,8 +11,7 @@ To start, we'll insert some example data which we can perform map/reduce queries
     Prelude> :set prompt "> "
     > :set -XOverloadedStrings
     > import Database.MongoDB
-    > import Data.CompactString ()  -- only needed when using ghci
-    > pipe <- runIOE $ connect $ host "127.0.0.1"
+    > pipe <- connect $ host "127.0.0.1"
     > let run act = access pipe master "test" act
     > let docs = [ ["x" =: 1, "tags" =: ["dog", "cat"]], ["x" =: 2, "tags" =: ["cat"]], ["x" =: 3, "tags" =: ["mouse", "cat", "dog"]] ]
     > run $ insertMany "mr1" docs
@@ -34,14 +33,14 @@ Note: We can't just return values.length as the reduce function might be called 
 Finally, we run mapReduce, results by default will be return in an array in the result document (inlined):
 
     > run $ runMR' (mapReduce "mr1" mapFn reduceFn)
-    Right [ results: [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]], timeMillis: 379, counts: [ input: 4, emit: 6, reduce: 2, output: 3], ok: 1.0]
+    [ results: [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]], timeMillis: 379, counts: [ input: 4, emit: 6, reduce: 2, output: 3], ok: 1.0]
 
 Inlining only works if result set < 16MB. An alternative to inlining is outputing to a collection. But what to do if there is data already in the collection from a previous run of the same MapReduce? You have three alternatives in the MRMerge data type: Replace, Merge, and Reduce. See its documentation for details. To output to a collection, set the `rOut` field in `MapReduce`.
 
 	> run $ runMR' (mapReduce "mr1" mapFn reduceFn) {rOut = Output Replace "mr1out" Nothing}
-	Right [ result: "mr1out", timeMillis: 379, counts: [ input: 3, emit: 6, reduce: 2, output: 3], ok: 1.0]
+	[ result: "mr1out", timeMillis: 379, counts: [ input: 3, emit: 6, reduce: 2, output: 3], ok: 1.0]
 
 You can now query the mr1out collection to see the result, or run another MapReduce on it! A shortcut for running the map-reduce then querying the result collection right away is `runMR`.
 
 	> run $ rest =<< runMR (mapReduce "mr1" mapFn reduceFn) {rOut = Output Replace "mr1out" Nothing}
-	Right [[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]]
+	[[ _id: "cat", value: 3.0],[ _id: "dog", value: 2.0],[ _id: "mouse", value: 1.0]]
