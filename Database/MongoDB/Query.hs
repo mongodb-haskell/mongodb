@@ -28,7 +28,9 @@ module Database.MongoDB.Query (
     -- ** Query
     Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData, Partial),
     Projector, Limit, Order, BatchSize,
-    explain, find, findOne, fetch, findAndModify, count, distinct,
+    explain, find, findOne, fetch,
+    findAndModify, findAndModifyOpts, FindAndModifyOpts(..),
+    count, distinct,
     -- *** Cursor
     Cursor, nextBatch, next, nextN, rest, closeCursor, isCursorClosed,
     -- ** Aggregate
@@ -404,34 +406,72 @@ fetch :: (MonadIO m) => Query -> Action m Document
 -- ^ Same as 'findOne' except throw 'DocNotFound' if none match
 fetch q = findOne q >>= maybe (liftIO $ throwIO $ DocNotFound $ selection q) return
 
--- | runs the findAndModify command.
+data FindAndModifyOpts = FamRemove Bool
+                       | FamUpdate
+                         { famUpdate :: Document
+                         , famNew :: Bool
+                         , famUpsert :: Bool
+                         }
+                       deriving Show
+
+findAndModifyUpdate :: Document -> FindAndModifyOpts
+findAndModifyUpdate ups = FamUpdate
+                        { famNew = True
+                        , famUpsert = False
+                        , famUpdate = ups
+                        }
+
+-- | runs the findAndModify command as an update without an upsert and new set to true.
 -- Returns a single updated document (new option is set to true).
--- Currently this API does not allow setting the remove option
+--
+-- see 'findAndModifyOpts' if you want to use findAndModify in a differnt way
 findAndModify :: MonadIO m
               => Query
               -> Document -- ^ updates
               -> Action m (Either String Document)
-findAndModify (Query {
+findAndModify q ups = do
+  eres <- findAndModifyOpts q (findAndModifyUpdate ups)
+  return $ case eres of
+    Left l -> Left l
+    Right r -> case r of
+      -- mongoDB manual says this is only possible when update is True
+      Nothing  -> Left "findAndModify: impossible null result"
+      Just doc -> Right doc
+
+-- | runs the findAndModify command,
+-- allows more options than 'findAndModify'
+findAndModifyOpts :: MonadIO m
+                  => Query
+                  ->FindAndModifyOpts
+                  -> Action m (Either String (Maybe Document))
+findAndModifyOpts (Query {
     selection = Select sel collection
   , project = project
   , sort = sort
-  }) updates = do
+  }) famOpts = do
     result <- runCommand
-        [ "findAndModify" := String collection
-        , "new"    := Bool True -- return updated document, not original document
+       ([ "findAndModify" := String collection
         , "query"  := Doc sel
-        , "update" := Doc updates
         , "fields" := Doc project
         , "sort"   := Doc sort
-        ]
+        ] ++
+            case famOpts of
+              FamRemove shouldRemove -> [ "remove" := Bool shouldRemove ]
+              FamUpdate {..} ->
+                [ "update" := Doc famUpdate
+                , "new"    := Bool famNew    -- return updated document, not original document
+                , "upsert" := Bool famUpsert -- insert if nothing is found
+                ])
     return $
       case lookup "value" result of
           Left err   -> leftErr err
           Right mdoc -> case mdoc of
-              Nothing  -> leftErr $ show result
-              Just doc -> case lookupErr result of
+              Just doc@(_:_) -> case lookupErr result of
                   Just e -> leftErr e
-                  Nothing -> Right doc
+                  Nothing -> Right (Just doc)
+              _  -> case famOpts of
+                      FamUpdate { famUpsert = True, famNew = True } -> Right Nothing
+                      _ -> leftErr $ show result
   where
     leftErr err = Left $ "findAndModify: no document found: "
         `mappend` show collection
