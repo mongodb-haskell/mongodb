@@ -14,7 +14,7 @@ Maintainer:     Fedor Gogolev <knsd@knsd.net>
 Copyright:      Copyright (c) 2010-2012 10gen Inc.
 License:        OtherLicense
 License-file:   LICENSE
-Cabal-version:  >= 1.2
+Cabal-version:  >= 1.6
 Build-type:     Simple
 Stability:      alpha
 
