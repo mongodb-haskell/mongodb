@@ -29,7 +29,7 @@ module Database.MongoDB.Query (
     Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData, Partial),
     Projector, Limit, Order, BatchSize,
     explain, find, findOne, fetch,
-    findAndModify, findAndModifyOpts, FindAndModifyOpts(..),
+    findAndModify, findAndModifyOpts, FindAndModifyOpts(..), defFamUpdateOpts,
     count, distinct,
     -- *** Cursor
     Cursor, nextBatch, next, nextN, rest, closeCursor, isCursorClosed,
@@ -414,12 +414,12 @@ data FindAndModifyOpts = FamRemove Bool
                          }
                        deriving Show
 
-findAndModifyUpdate :: Document -> FindAndModifyOpts
-findAndModifyUpdate ups = FamUpdate
-                        { famNew = True
-                        , famUpsert = False
-                        , famUpdate = ups
-                        }
+defFamUpdateOpts :: Document -> FindAndModifyOpts
+defFamUpdateOpts ups = FamUpdate
+                       { famNew = True
+                       , famUpsert = False
+                       , famUpdate = ups
+                       }
 
 -- | runs the findAndModify command as an update without an upsert and new set to true.
 -- Returns a single updated document (new option is set to true).
@@ -430,7 +430,7 @@ findAndModify :: MonadIO m
               -> Document -- ^ updates
               -> Action m (Either String Document)
 findAndModify q ups = do
-  eres <- findAndModifyOpts q (findAndModifyUpdate ups)
+  eres <- findAndModifyOpts q (defFamUpdateOpts ups)
   return $ case eres of
     Left l -> Left l
     Right r -> case r of
