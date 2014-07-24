@@ -21,7 +21,7 @@ module Database.MongoDB.Query (
     -- ** Insert
     insert, insert_, insertMany, insertMany_, insertAll, insertAll_,
     -- ** Update
-    save, replace, repsert, Modifier, modify,
+    save, replace, repsert, upsert, Modifier, modify,
     -- ** Delete
     delete, deleteOne,
     -- * Read
@@ -305,10 +305,10 @@ assignId doc = if any (("_id" ==) . label) doc
 -- ** Update
 
 save :: (MonadIO m) => Collection -> Document -> Action m ()
--- ^ Save document to collection, meaning insert it if its new (has no \"_id\" field) or update it if its not new (has \"_id\" field)
+-- ^ Save document to collection, meaning insert it if its new (has no \"_id\" field) or upsert it if its not new (has \"_id\" field)
 save col doc = case look "_id" doc of
     Nothing -> insert_ col doc
-    Just i -> repsert (Select ["_id" := i] col) doc
+    Just i -> upsert (Select ["_id" := i] col) doc
 
 replace :: (MonadIO m) => Selection -> Document -> Action m ()
 -- ^ Replace first document in selection with given document
@@ -317,6 +317,11 @@ replace = update []
 repsert :: (MonadIO m) => Selection -> Document -> Action m ()
 -- ^ Replace first document in selection with given document, or insert document if selection is empty
 repsert = update [Upsert]
+{-# DEPRECATED repsert "use upsert instead" #-}
+
+upsert :: (MonadIO m) => Selection -> Document -> Action m ()
+-- ^ Update first document in selection with given document, or insert document if selection is empty
+upsert = update [Upsert]
 
 type Modifier = Document
 -- ^ Update operations on fields in a document. See <http://www.mongodb.org/display/DOCS/Updating#Updating-ModifierOperations>
