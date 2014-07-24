@@ -439,7 +439,7 @@ findAndModify q ups = do
   return $ case eres of
     Left l -> Left l
     Right r -> case r of
-      -- mongoDB manual says this is only possible when update is True
+      -- only possible when upsert is True and new is False
       Nothing  -> Left "findAndModify: impossible null result"
       Just doc -> Right doc
 
@@ -467,21 +467,20 @@ findAndModifyOpts (Query {
                 , "new"    := Bool famNew    -- return updated document, not original document
                 , "upsert" := Bool famUpsert -- insert if nothing is found
                 ])
-    return $
-      case lookup "value" result of
-          Left err   -> leftErr err
-          Right mdoc -> case mdoc of
-              Just doc@(_:_) -> case lookupErr result of
-                  Just e -> leftErr e
-                  Nothing -> Right (Just doc)
-              _  -> case famOpts of
-                      FamUpdate { famUpsert = True, famNew = True } -> Right Nothing
-                      _ -> leftErr $ show result
+    return $ case lookupErr result of
+        Just e -> leftErr e
+        Nothing -> case lookup "value" result of
+            Left err   -> leftErr $ "no document found: " `mappend` err
+            Right mdoc -> case mdoc of
+                Just doc@(_:_) -> Right (Just doc)
+                Just [] -> case famOpts of
+                    FamUpdate { famUpsert = True, famNew = False } -> Right Nothing
+                    _ -> leftErr $ show result
+                _  -> leftErr $ show result
   where
-    leftErr err = Left $ "findAndModify: no document found: "
-        `mappend` show collection
-        `mappend` "from query: " `mappend` show sel
-        `mappend` err
+    leftErr err = Left $ "findAndModify " `mappend` show collection
+        `mappend` "\nfrom query: " `mappend` show sel
+        `mappend` "\nerror: " `mappend` err
 
     -- return Nothing means ok, Just is the error message
     lookupErr result = case lookup "lastErrorObject" result of
