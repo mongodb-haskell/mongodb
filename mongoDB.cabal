@@ -14,13 +14,14 @@ Maintainer:     Fedor Gogolev <knsd@knsd.net>
 Copyright:      Copyright (c) 2010-2012 10gen Inc.
 License:        OtherLicense
 License-file:   LICENSE
-Cabal-version:  >= 1.6
+Cabal-version:  >= 1.10
 Build-type:     Simple
 Stability:      alpha
 
 Library
   GHC-options:      -Wall
   GHC-prof-options: -auto-all
+  default-language: Haskell2010
 
   Build-depends:      array -any
                     , base <5
@@ -51,3 +52,18 @@ Library
 Source-repository head
     Type:     git
     Location: https://github.com/mongodb-haskell/mongodb
+
+test-suite test
+  hs-source-dirs: test
+  main-is: main.hs
+  ghc-options:       -Wall
+  type: exitcode-stdio-1.0
+
+  build-depends:   mongoDB
+                 , base
+                 , mtl
+                 , hspec
+
+  default-language: Haskell2010
+  default-extensions: OverloadedStrings
+
