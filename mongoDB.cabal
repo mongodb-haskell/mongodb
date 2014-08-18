@@ -55,10 +55,9 @@ Source-repository head
 
 test-suite test
   hs-source-dirs: test
-  main-is: main.hs
+  main-is: Spec.hs
   ghc-options:       -Wall
   type: exitcode-stdio-1.0
-
   build-depends:   mongoDB
                  , base
                  , mtl
@@ -66,4 +65,3 @@ test-suite test
 
   default-language: Haskell2010
   default-extensions: OverloadedStrings
-

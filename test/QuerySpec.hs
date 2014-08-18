@@ -1,11 +1,12 @@
-module QueryTest (querySpec) where
+{-# LANGUAGE OverloadedStrings #-}
+module QuerySpec (spec) where
 import TestImport
 
 fakeDB :: MonadIO m => Action m a -> m a
 fakeDB = access (error "Pipe") (error "AccessMode") "fake"
 
-querySpec :: Spec
-querySpec =
+spec :: Spec
+spec =
   describe "useDb" $
     it "changes the db" $ do
       db1 <- fakeDB thisDatabase
