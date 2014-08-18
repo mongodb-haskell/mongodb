@@ -1,3 +1,14 @@
 language: haskell
+
 services:
   - mongodb
+
+before_install:
+  - cabal sandbox init && cabal install hpc-coveralls
+
+script:
+  - cabal configure --enable-tests --enable-library-coverage && cabal build
+  - .cabal-sandbox/bin/run-cabal-test --show-details=always
+
+after_script:
+  - .cabal-sandbox/bin/hpc-coveralls test --exclude-dir=test
