@@ -62,10 +62,10 @@ spec = around withCleanDatabase $ do
 
       before (insertDuplicatingDocument `catch` \(_ :: Failure) -> return ()) $ do
         it "inserts documents before it" $
-          db ( count $ select ["name" =: "Yankees", "league" =: "American"] "team") `shouldReturn` 1
+          db (count $ select ["name" =: "Yankees", "league" =: "American"] "team") `shouldReturn` 1
 
         it "doesn't insert documents after it" $
-          db ( count $ select ["name" =: "Indians", "league" =: "American"] "team") `shouldReturn` 0
+          db (count $ select ["name" =: "Indians", "league" =: "American"] "team") `shouldReturn` 0
 
       it "raises exception" $
         insertDuplicatingDocument `shouldThrow` anyException
