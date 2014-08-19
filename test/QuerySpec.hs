@@ -24,10 +24,9 @@ spec :: Spec
 spec = around withCleanDatabase $ do
   describe "useDb" $ do
     it "changes the db" $ do
-      db1 <- fakeDB thisDatabase
-      db1 `shouldBe` testDBName
-      db2 <- fakeDB $ useDb "another-mongodb-haskell-test" thisDatabase
-      db2 `shouldBe` "another-mongodb-haskell-test"
+      let anotherDBName = "another-mongodb-haskell-test"
+      fakeDB thisDatabase `shouldReturn` testDBName
+      fakeDB (useDb anotherDBName thisDatabase) `shouldReturn` anotherDBName
 
   describe "insert" $ do
     it "inserts a document to the collection and returns its _id" $ do
