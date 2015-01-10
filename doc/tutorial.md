@@ -16,13 +16,12 @@ Import the MongoDB driver library, and set OverloadedStrings so literal strings 
 
 	> :set -XOverloadedStrings
 	> import Database.MongoDB
-	> import Data.CompactString ()  -- only needed when using ghci
 
 ### Connecting
 
 Establish a connection to your local Mongo server on the standard port (27017):
 
-	> pipe <- runIOE $ connect $ host "127.0.0.1"
+	> pipe <- connect $ host "127.0.0.1"
 
 A host with non-standard port would look like `Host "127.0.0.1" (PortNumber 27001)`.
 
