@@ -1,5 +1,5 @@
 
-module Internal.ConnectionTest (
+module Internal.ConnectionSpec (
   spec,
 ) where
 
