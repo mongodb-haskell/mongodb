@@ -8,18 +8,15 @@
 module Database.MongoDB.Internal.Util where
 
 import Control.Applicative ((<$>))
-import Control.Exception (assert, handle, throwIO, Exception)
+import Control.Exception (handle, throwIO, Exception)
 import Control.Monad (liftM, liftM2)
 import Data.Bits (Bits, (.|.))
 import Data.Word (Word8)
 import Network (PortID(..))
 import Numeric (showHex)
-import System.IO (Handle)
-import System.IO.Error (mkIOError, eofErrorType)
 import System.Random (newStdGen)
 import System.Random.Shuffle (shuffle')
 
-import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString as S
 
 import Control.Monad.Error (MonadError(..), Error(..))
@@ -107,15 +104,6 @@ true1 k doc = case valueAt k doc of
     Int32 n -> n == 1
     Int64 n -> n == 1
     _ -> error $ "expected " ++ show k ++ " to be Num or Bool in " ++ show doc
-
-hGetN :: Handle -> Int -> IO L.ByteString
--- ^ Read N bytes from hande, blocking until all N bytes are read. If EOF is reached before N bytes then raise EOF exception.
-hGetN h n = assert (n >= 0) $ do
-    bytes <- L.hGet h n
-    let x = fromEnum $ L.length bytes
-    if x >= n then return bytes
-        else if x == 0 then ioError (mkIOError eofErrorType "hGetN" (Just h) Nothing)
-            else L.append bytes <$> hGetN h (n - x)
 
 byteStringHex :: S.ByteString -> String
 -- ^ Hexadecimal string representation of a byte string. Each byte yields two hexadecimal characters.
