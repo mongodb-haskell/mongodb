@@ -44,6 +44,7 @@ Library
   Exposed-modules:  Database.MongoDB
                     Database.MongoDB.Admin
                     Database.MongoDB.Connection
+                    Database.MongoDB.Internal.Connection
                     Database.MongoDB.Internal.Protocol
                     Database.MongoDB.Internal.Util
                     Database.MongoDB.Query
