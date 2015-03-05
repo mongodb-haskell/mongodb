@@ -62,7 +62,7 @@ test-suite test
   build-depends:   mongoDB
                  , base
                  , mtl
-                 , hspec
+                 , hspec >= 2
 
   default-language: Haskell2010
   default-extensions: OverloadedStrings

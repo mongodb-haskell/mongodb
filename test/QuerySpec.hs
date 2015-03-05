@@ -15,8 +15,8 @@ db action = do
     close pipe
     return result
 
-withCleanDatabase :: IO a -> IO ()
-withCleanDatabase action = dropDB >> action >> dropDB >> return ()
+withCleanDatabase :: ActionWith () -> IO ()
+withCleanDatabase action = dropDB >> action () >> dropDB >> return ()
   where
     dropDB = db $ dropDatabase testDBName
 
