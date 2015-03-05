@@ -44,6 +44,7 @@ Library
   Exposed-modules:  Database.MongoDB
                     Database.MongoDB.Admin
                     Database.MongoDB.Connection
+                    Database.MongoDB.Internal.Connection
                     Database.MongoDB.Internal.Protocol
                     Database.MongoDB.Internal.Util
                     Database.MongoDB.Query
@@ -61,7 +62,7 @@ test-suite test
   build-depends:   mongoDB
                  , base
                  , mtl
-                 , hspec
+                 , hspec >= 2
 
   default-language: Haskell2010
   default-extensions: OverloadedStrings
