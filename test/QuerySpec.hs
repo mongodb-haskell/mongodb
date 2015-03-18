@@ -121,3 +121,14 @@ spec = around withCleanDatabase $ do
 
       it "raises exception" $
         insertDuplicateWith insertAll_ `shouldThrow` anyException
+
+  describe "aggregate" $ do
+    it "aggregates to normalize and sort documents" $ do
+      db $ insertAll_ "users" [ ["_id" =: "jane", "joined" =: parseDate "2011-03-02", "likes" =: ["golf", "racquetball"]]
+                              , ["_id" =: "joe", "joined" =: parseDate "2012-07-02", "likes" =: ["tennis", "golf", "swimming"]]
+                              , ["_id" =: "jill", "joined" =: parseDate "2013-11-17", "likes" =: ["cricket", "golf"]]
+                              ]
+      result <- db $ aggregate "users" [ ["$project" =: ["name" =: ["$toUpper" =: "$_id"], "_id" =: 0]]
+                                       , ["$sort" =: ["name" =: 1]]
+                                       ]
+      result `shouldBe` [["name" =: "JANE"], ["name" =: "JILL"], ["name" =: "JOE"]]
