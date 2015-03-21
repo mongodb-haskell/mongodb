@@ -1,14 +1,50 @@
-language: haskell
+# See https://github.com/hvr/multi-ghc-travis for more information.
 
 services:
   - mongodb
 
+env:
+ # We use CABALVER=1.22 everywhere because it uses the flag --enable-coverage
+ # instead of --enable-library-coverage used by older versions.
+ - GHCVER=7.6.3  CABALVER=1.22
+ - GHCVER=7.8.4  CABALVER=1.22
+ - GHCVER=7.10.1 CABALVER=1.22
+ - GHCVER=head   CABALVER=head
+
+matrix:
+  allow_failures:
+   # The text here should match the last line above exactly.
+   - env: GHCVER=head   CABALVER=head
+
 before_install:
-  - cabal sandbox init && cabal install hpc-coveralls
+ - travis_retry sudo add-apt-repository -y ppa:hvr/ghc
+ - travis_retry sudo apt-get update
+ - travis_retry sudo apt-get install cabal-install-$CABALVER ghc-$GHCVER
+ - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
+ - cabal --version
+
+install:
+ - travis_retry cabal update
+ - cabal install --only-dependencies --enable-tests
+ - cabal install hpc-coveralls
 
 script:
-  - cabal configure --enable-tests --enable-library-coverage && cabal build
-  - .cabal-sandbox/bin/run-cabal-test --show-details=always
-
-after_script:
-  - .cabal-sandbox/bin/hpc-coveralls test --exclude-dir=test
+ - cabal configure --enable-tests --enable-coverage -v2
+ - cabal build
+ # cabal test fails due a to hpc error. Using run-cabal-test instead.
+ # - cabal test --show-details=always
+ - run-cabal-test --show-details=always
+ # Ignoring the exit code here. Need to register with coveralls.io?
+ - hpc-coveralls --exclude-dir=test test || true
+ # Ignoring the exit code here. cabal check recommends against
+ # 'ghc-prof-options: -auto-all'.
+ - cabal check || true
+ - cabal sdist
+ - export SRC_TGZ=$(cabal info . | awk '{print $2 ".tar.gz";exit}');
+   cd dist/;
+   if [ -f "$SRC_TGZ" ]; then
+      cabal install "$SRC_TGZ";
+   else
+      echo "expected '$SRC_TGZ' not found";
+      exit 1;
+   fi

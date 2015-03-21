@@ -3,7 +3,7 @@
 A pipeline closes itself when a read or write causes an error, so you can detect a broken pipeline by checking isClosed.  It also closes itself when garbage collected, or you can close it explicitly. -}
 
 {-# LANGUAGE RecordWildCards, NamedFieldPuns, ScopedTypeVariables #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP, FlexibleContexts #-}
 
 #if (__GLASGOW_HASKELL__ >= 706)
 {-# LANGUAGE RecursiveDo #-}
