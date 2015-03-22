@@ -20,6 +20,16 @@ withCleanDatabase action = dropDB >> action () >> dropDB >> return ()
   where
     dropDB = db $ dropDatabase testDBName
 
+insertDuplicateWith :: (Collection -> [Document] -> Action IO a) -> IO ()
+insertDuplicateWith testInsert = do
+  _id <- db $ insert "team" ["name" =: "Dodgers", "league" =: "American"]
+  _ <- db $ testInsert "team" [ ["name" =: "Yankees", "league" =: "American"]
+                              -- Try to insert document with duplicate key
+                              , ["name" =: "Dodgers", "league" =: "American", "_id" =: _id]
+                              , ["name" =: "Indians", "league" =: "American"]
+                              ]
+  return ()
+
 spec :: Spec
 spec = around withCleanDatabase $ do
   describe "useDb" $ do
@@ -50,17 +60,7 @@ spec = around withCleanDatabase $ do
                         , ["_id" =: _id2, "name" =: "Dodgers", "league" =: "American"]
                         ]
     context "Insert a document with duplicating key" $ do
-      let insertDuplicatingDocument = do
-            _id <- db $ insert "team" ["name" =: "Dodgers", "league" =: "American"]
-            _ <- db $ insertMany "team" [ ["name" =: "Yankees", "league" =: "American"]
-                                            -- Try to insert document with
-                                            -- duplicate key
-                                            , ["name" =: "Dodgers", "league" =: "American", "_id" =: _id]
-                                            , ["name" =: "Indians", "league" =: "American"]
-                                            ]
-            return ()
-
-      before (insertDuplicatingDocument `catch` \(_ :: Failure) -> return ()) $ do
+      before (insertDuplicateWith insertMany `catch` \(_ :: Failure) -> return ()) $ do
         it "inserts documents before it" $
           db (count $ select ["name" =: "Yankees", "league" =: "American"] "team") `shouldReturn` 1
 
@@ -68,7 +68,7 @@ spec = around withCleanDatabase $ do
           db (count $ select ["name" =: "Indians", "league" =: "American"] "team") `shouldReturn` 0
 
       it "raises exception" $
-        insertDuplicatingDocument `shouldThrow` anyException
+        insertDuplicateWith insertMany `shouldThrow` anyException
       -- TODO No way to call getLastError?
 
   describe "insertMany_" $ do
@@ -79,23 +79,13 @@ spec = around withCleanDatabase $ do
       ids `shouldBe` ()
 
     context "Insert a document with duplicating key" $ do
-      let insertDuplicatingDocument = do
-            _id <- db $ insert "team" ["name" =: "Dodgers", "league" =: "American"]
-            _ <- db $ insertMany_ "team" [ ["name" =: "Yankees", "league" =: "American"]
-                                             -- Try to insert document with
-                                             -- duplicate key
-                                             , ["name" =: "Dodgers", "league" =: "American", "_id" =: _id]
-                                             , ["name" =: "Indians", "league" =: "American"]
-                                             ]
-            return ()
-
-      before (insertDuplicatingDocument `catch` \(_ :: Failure) -> return ()) $ do
+      before (insertDuplicateWith insertMany_ `catch` \(_ :: Failure) -> return ()) $ do
         it "inserts documents before it" $
           db (count $ select ["name" =: "Yankees", "league" =: "American"] "team") `shouldReturn` 1
         it "doesn't insert documents after it" $
           db (count $ select ["name" =: "Indians", "league" =: "American"] "team") `shouldReturn` 0
       it "raises exception" $
-        insertDuplicatingDocument `shouldThrow` anyException
+        insertDuplicateWith insertMany_ `shouldThrow` anyException
 
   describe "insertAll" $ do
     it "inserts documents to the collection and returns their _ids" $ do
@@ -108,23 +98,13 @@ spec = around withCleanDatabase $ do
                         ]
 
     context "Insert a document with duplicating key" $ do
-      let insertDuplicatingDocument = do
-            _id <- db $ insert "team" ["name" =: "Dodgers", "league" =: "American"]
-            _ <- db $ insertAll "team" [ ["name" =: "Yankees", "league" =: "American"]
-                                            -- Try to insert document with
-                                            -- duplicate key
-                                            , ["name" =: "Dodgers", "league" =: "American", "_id" =: _id]
-                                            , ["name" =: "Indians", "league" =: "American"]
-                                            ]
-            return ()
-
-      before (insertDuplicatingDocument `catch` \(_ :: Failure) -> return ()) $ do
+      before (insertDuplicateWith insertAll `catch` \(_ :: Failure) -> return ()) $ do
         it "inserts all documents which can be inserted" $ do
           db (count $ select ["name" =: "Yankees", "league" =: "American"] "team") `shouldReturn` 1
           db (count $ select ["name" =: "Indians", "league" =: "American"] "team") `shouldReturn` 1
 
       it "raises exception" $
-        insertDuplicatingDocument `shouldThrow` anyException
+        insertDuplicateWith insertAll `shouldThrow` anyException
 
   describe "insertAll_" $ do
     it "inserts documents to the collection and returns their _ids" $ do
@@ -134,20 +114,21 @@ spec = around withCleanDatabase $ do
       ids `shouldBe` ()
 
     context "Insert a document with duplicating key" $ do
-      let insertDuplicatingDocument = do
-            _id <- db $ insert "team" ["name" =: "Dodgers", "league" =: "American"]
-            _ <- db $ insertAll_ "team" [ ["name" =: "Yankees", "league" =: "American"]
-                                             -- Try to insert document with
-                                             -- duplicate key
-                                             , ["name" =: "Dodgers", "league" =: "American", "_id" =: _id]
-                                             , ["name" =: "Indians", "league" =: "American"]
-                                             ]
-            return ()
-
-      before (insertDuplicatingDocument `catch` \(_ :: Failure) -> return ()) $ do
+      before (insertDuplicateWith insertAll_ `catch` \(_ :: Failure) -> return ()) $ do
         it "inserts all documents which can be inserted" $ do
           db (count $ select ["name" =: "Yankees", "league" =: "American"] "team") `shouldReturn` 1
           db (count $ select ["name" =: "Indians", "league" =: "American"] "team") `shouldReturn` 1
 
       it "raises exception" $
-        insertDuplicatingDocument `shouldThrow` anyException
+        insertDuplicateWith insertAll_ `shouldThrow` anyException
+
+  describe "aggregate" $ do
+    it "aggregates to normalize and sort documents" $ do
+      db $ insertAll_ "users" [ ["_id" =: "jane", "joined" =: parseDate "2011-03-02", "likes" =: ["golf", "racquetball"]]
+                              , ["_id" =: "joe", "joined" =: parseDate "2012-07-02", "likes" =: ["tennis", "golf", "swimming"]]
+                              , ["_id" =: "jill", "joined" =: parseDate "2013-11-17", "likes" =: ["cricket", "golf"]]
+                              ]
+      result <- db $ aggregate "users" [ ["$project" =: ["name" =: ["$toUpper" =: "$_id"], "_id" =: 0]]
+                                       , ["$sort" =: ["name" =: 1]]
+                                       ]
+      result `shouldBe` [["name" =: "JANE"], ["name" =: "JILL"], ["name" =: "JOE"]]
