@@ -7,7 +7,7 @@ module Database.MongoDB.Query (
     Action, access, Failure(..), ErrorCode,
     AccessMode(..), GetLastError, master, slaveOk, accessMode,
     liftDB,
-    MongoContext, HasMongoContext(..),
+    MongoContext(..), HasMongoContext(..),
     -- * Database
     Database, allDatabases, useDb, thisDatabase,
     -- ** Authentication
