@@ -5,7 +5,7 @@
 -- "Database.MongoDB.Query" and "Database.MongoDB.Connection" instead.
 
 {-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings #-}
-{-# LANGUAGE FlexibleContexts, TupleSections, TypeSynonymInstances #-}
+{-# LANGUAGE CPP, FlexibleContexts, TupleSections, TypeSynonymInstances #-}
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
 
 module Database.MongoDB.Internal.Protocol (
@@ -22,7 +22,9 @@ module Database.MongoDB.Internal.Protocol (
     Username, Password, Nonce, pwHash, pwKey
 ) where
 
+#if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<$>))
+#endif
 import Control.Arrow ((***))
 import Control.Monad (forM_, replicateM, unless)
 import Data.Binary.Get (Get, runGet)

@@ -7,7 +7,9 @@
 
 module Database.MongoDB.Internal.Util where
 
+#if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<$>))
+#endif
 import Control.Exception (handle, throwIO, Exception)
 import Control.Monad (liftM, liftM2)
 import Data.Bits (Bits, (.|.))
