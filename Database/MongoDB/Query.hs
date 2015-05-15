@@ -95,7 +95,7 @@ type Action = ReaderT MongoContext
 
 access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m a
 -- ^ Run action against database on server at other end of pipe. Use access mode for any reads and writes. Return Left on connection failure or read/write failure.
-access myPipe myAccessMode myDatabase action = runReaderT action MongoContext{..}
+access mongoPipe mongoAccessMode mongoDatabase action = runReaderT action MongoContext{..}
 
 -- | A connection failure, or a read or write exception like cursor expired or inserting a duplicate key.
 -- Note, unexpected data from the server is not a Failure, rather it is a programming error (you should call 'error' in this case) because the client and server are incompatible and requires a programming change.
@@ -135,7 +135,7 @@ slaveOk = ReadStaleOk
 
 accessMode :: (Monad m) => AccessMode -> Action m a -> Action m a
 -- ^ Run action with given 'AccessMode'
-accessMode mode act = local (\ctx -> ctx {myAccessMode = mode}) act
+accessMode mode act = local (\ctx -> ctx {mongoAccessMode = mode}) act
 
 readMode :: AccessMode -> ReadMode
 readMode ReadStaleOk = StaleOk
@@ -148,26 +148,26 @@ writeMode (ConfirmWrites z) = Confirm z
 
 -- | Values needed when executing a db operation
 data MongoContext = MongoContext {
-    myPipe :: Pipe, -- ^ operations read/write to this pipelined TCP connection to a MongoDB server
-    myAccessMode :: AccessMode, -- ^ read/write operation will use this access mode
-    myDatabase :: Database } -- ^ operations query/update this database
+    mongoPipe :: Pipe, -- ^ operations read/write to this pipelined TCP connection to a MongoDB server
+    mongoAccessMode :: AccessMode, -- ^ read/write operation will use this access mode
+    mongoDatabase :: Database } -- ^ operations query/update this database
 
-myReadMode :: MongoContext -> ReadMode
-myReadMode = readMode . myAccessMode
+mongoReadMode :: MongoContext -> ReadMode
+mongoReadMode = readMode . mongoAccessMode
 
-myWriteMode :: MongoContext -> WriteMode
-myWriteMode = writeMode . myAccessMode
+mongoWriteMode :: MongoContext -> WriteMode
+mongoWriteMode = writeMode . mongoAccessMode
 
 send :: (MonadIO m) => [Notice] -> Action m ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw 'ConnectionFailure' if pipe fails.
 send ns = do
-    pipe <- asks myPipe
+    pipe <- asks mongoPipe
     liftIOE ConnectionFailure $ P.send pipe ns
 
 call :: (MonadIO m) => [Notice] -> Request -> Action m (IO Reply)
 -- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
 call ns r = do
-    pipe <- asks myPipe
+    pipe <- asks mongoPipe
     promise <- liftIOE ConnectionFailure $ P.call pipe ns r
     return (liftIOE ConnectionFailure promise)
 
@@ -193,11 +193,11 @@ allDatabases = (map (at "name") . at "databases") `liftM` useDb "admin" (runComm
 
 thisDatabase :: (Monad m) => Action m Database
 -- ^ Current database in use
-thisDatabase = asks myDatabase
+thisDatabase = asks mongoDatabase
 
 useDb :: (Monad m) => Database -> Action m a -> Action m a
 -- ^ Run action against given database
-useDb db act = local (\ctx -> ctx {myDatabase = db}) act
+useDb db act = local (\ctx -> ctx {mongoDatabase = db}) act
 
 -- * Authentication
 
@@ -253,7 +253,7 @@ data WriteMode =
 
 write :: (MonadIO m) => Notice -> Action m ()
 -- ^ Send write to server, and if write-mode is 'Safe' then include getLastError request and raise 'WriteFailure' if it reports an error.
-write notice = asks myWriteMode >>= \mode -> case mode of
+write notice = asks mongoWriteMode >>= \mode -> case mode of
     NoConfirm -> send [notice]
     Confirm params -> do
         let q = query (("getlasterror" =: (1 :: Int)) : params) "$cmd"
@@ -507,7 +507,7 @@ queryRequest :: (Monad m) => Bool -> Query -> Action m (Request, Limit)
 -- ^ Translate Query to Protocol.Query. If first arg is true then add special $explain attribute.
 queryRequest isExplain Query{..} = do
     ctx <- ask
-    return $ queryRequest' (myReadMode ctx) (myDatabase ctx)
+    return $ queryRequest' (mongoReadMode ctx) (mongoDatabase ctx)
  where
     queryRequest' rm db = (P.Query{..}, remainingLimit) where
         qOptions = readModeOption rm ++ options
