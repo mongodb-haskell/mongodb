@@ -51,7 +51,9 @@ import Control.Monad (unless, replicateM, liftM)
 import Data.Int (Int32)
 import Data.Maybe (listToMaybe, catMaybes)
 import Data.Word (Word32)
+#if !MIN_VERSION_base(4,8,0)
 import Data.Monoid (mappend)
+#endif
 import Data.Typeable (Typeable)
 
 #if MIN_VERSION_base(4,6,0)
@@ -235,8 +237,8 @@ whereJS :: Selector -> Javascript -> Selector
 whereJS sel js = ("$where" =: js) : sel
 
 class Select aQueryOrSelection where
-	select :: Selector -> Collection -> aQueryOrSelection
-	-- ^ 'Query' or 'Selection' that selects documents in collection that match selector. The choice of type depends on use, for example, in @'find' (select sel col)@ it is a Query, and in @'delete' (select sel col)@ it is a Selection.
+    select :: Selector -> Collection -> aQueryOrSelection
+    -- ^ 'Query' or 'Selection' that selects documents in collection that match selector. The choice of type depends on use, for example, in @'find' (select sel col)@ it is a Query, and in @'delete' (select sel col)@ it is a Selection.
 
 instance Select Selection where
     select = Select

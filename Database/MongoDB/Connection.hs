@@ -18,7 +18,11 @@ module Database.MongoDB.Connection (
 import Prelude hiding (lookup)
 import Data.IORef (IORef, newIORef, readIORef)
 import Data.List (intersect, partition, (\\), delete)
+
+#if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<$>))
+#endif
+
 import Control.Monad (forM_)
 import Network (HostName, PortID(..), connectTo)
 import System.IO.Unsafe (unsafePerformIO)

@@ -1,6 +1,6 @@
 -- | Database administrative functions
 
-{-# LANGUAGE FlexibleContexts, OverloadedStrings, RecordWildCards #-}
+{-# LANGUAGE CPP, FlexibleContexts, OverloadedStrings, RecordWildCards #-}
 
 module Database.MongoDB.Admin (
     -- * Admin
@@ -28,7 +28,9 @@ module Database.MongoDB.Admin (
 ) where
 
 import Prelude hiding (lookup)
+#if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<$>))
+#endif
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, unless, liftM)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
