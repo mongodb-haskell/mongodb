@@ -34,6 +34,7 @@ import Control.Applicative ((<$>))
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, unless, liftM)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe (maybeToList)
 import Data.Set (Set)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -98,7 +99,8 @@ data Index = Index {
     iKey :: Order,
     iName :: IndexName,
     iUnique :: Bool,
-    iDropDups :: Bool
+    iDropDups :: Bool,
+    iExpireAfterSeconds :: Maybe Int
     } deriving (Show, Eq)
 
 idxDocument :: Index -> Database -> Document
@@ -107,11 +109,11 @@ idxDocument Index{..} db = [
     "key" =: iKey,
     "name" =: iName,
     "unique" =: iUnique,
-    "dropDups" =: iDropDups ]
+    "dropDups" =: iDropDups ] ++ (maybeToList $ fmap ((=:) "expireAfterSeconds") iExpireAfterSeconds)
 
 index :: Collection -> Order -> Index
 -- ^ Spec of index of ordered keys on collection. Name is generated from keys. Unique and dropDups are False.
-index coll keys = Index coll keys (genName keys) False False
+index coll keys = Index coll keys (genName keys) False False Nothing
 
 genName :: Order -> IndexName
 genName keys = T.intercalate "_" (map f keys)  where
