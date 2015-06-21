@@ -5,6 +5,8 @@ module QuerySpec (spec) where
 import TestImport
 import Control.Exception
 
+import qualified Data.Text as T
+
 testDBName :: Database
 testDBName = "mongodb-haskell-test"
 
@@ -121,6 +123,17 @@ spec = around withCleanDatabase $ do
 
       it "raises exception" $
         insertDuplicateWith insertAll_ `shouldThrow` anyException
+
+  describe "insertAll_" $ do
+    it "inserts documents and receives 100 000 of them" $ do
+      let docs = (flip map) [0..200000] $ \i ->
+              ["name" =: (T.pack $ "name " ++ (show i))]
+      db $ insertAll_ "bigCollection" docs
+      db $ do
+        cur <- find $ (select [] "bigCollection") {limit = 100000, batchSize = 100000}
+        returnedDocs <- rest cur
+
+        liftIO $ (length returnedDocs) `shouldBe` 100000
 
   describe "aggregate" $ do
     it "aggregates to normalize and sort documents" $ do
