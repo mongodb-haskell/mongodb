@@ -63,6 +63,7 @@ import Control.Concurrent.MVar.Lifted (MVar, newMVar, mkWeakMVar,
 import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
                                          readMVar, modifyMVar)
 #endif
+import Control.Applicative ((<$>))
 import Control.Monad (when)
 import Control.Monad.Base (MonadBase)
 import Control.Monad.Error (Error(..))
@@ -528,12 +529,14 @@ queryRequest isExplain Query{..} = do
 batchSizeRemainingLimit :: BatchSize -> (Maybe Limit) -> (Int32, Maybe Limit)
 -- ^ Given batchSize and limit return P.qBatchSize and remaining limit
 batchSizeRemainingLimit batchSize mLimit =
-  case mLimit of
-    Nothing    -> (fromIntegral batchSize, Nothing)
-    Just limit ->
-      if 0 < batchSize && batchSize < limit
-        then (fromIntegral batchSize, Just limit)
-        else (fromIntegral limit, Just limit)
+  let remaining =
+        case mLimit of
+          Nothing    -> batchSize
+          Just limit ->
+            if 0 < batchSize && batchSize < limit
+              then batchSize
+              else limit
+  in (fromIntegral remaining, mLimit)
 
 type DelayedBatch = IO Batch
 -- ^ A promised batch which may fail
@@ -587,9 +590,15 @@ nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
     let newLimit = do
               limit <- mLimit
               return $ limit - (min limit $ fromIntegral $ length docs)
-    dBatch' <- if cid /= 0 && newLimit /= (Just 0) then nextBatch' fcol batchSize newLimit cid else return $ return (Batch (Just 0) 0 [])
-    when (newLimit == (Just 0)) $ unless (cid == 0) $ send [KillCursors [cid]]
-    return (dBatch', maybe docs (\l -> take (fromIntegral l) docs) mLimit)
+    let emptyBatch = return $ Batch (Just 0) 0 []
+    let getNextBatch = nextBatch' fcol batchSize newLimit cid
+    let resultDocs = (maybe id (take . fromIntegral) mLimit) docs
+    case (cid, newLimit) of
+      (0, _)      -> return (emptyBatch, resultDocs)
+      (_, Just 0) -> do
+        send [KillCursors [cid]]
+        return (emptyBatch, resultDocs)
+      (_, _)      -> (, resultDocs) <$> getNextBatch
 
 fulfill' :: (MonadIO m) => FullCollection -> BatchSize -> DelayedBatch -> Action m Batch
 -- Discard pre-fetched batch if empty with nonzero cid.
