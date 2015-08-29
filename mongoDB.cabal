@@ -73,3 +73,27 @@ test-suite test
 
   default-language: Haskell2010
   default-extensions: OverloadedStrings
+
+Benchmark bench
+  main-is:            Benchmark.hs
+  type:               exitcode-stdio-1.0
+  Build-depends:      array -any
+                    , base < 5
+                    , binary -any
+                    , bson >= 0.3 && < 0.4
+                    , text
+                    , bytestring -any
+                    , containers -any
+                    , mtl >= 2
+                    , cryptohash -any
+                    , network -any
+                    , parsec -any
+                    , random -any
+                    , random-shuffle -any
+                    , monad-control >= 0.3.1
+                    , lifted-base >= 0.1.0.3
+                    , transformers-base >= 0.4.1
+                    , hashtables >= 1.1.2.0
+                    , criterion
+  default-language: Haskell2010
+  default-extensions: OverloadedStrings
