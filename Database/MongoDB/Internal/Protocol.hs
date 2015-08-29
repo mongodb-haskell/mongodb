@@ -26,7 +26,7 @@ module Database.MongoDB.Internal.Protocol (
 import Control.Applicative ((<$>))
 #endif
 import Control.Arrow ((***))
-import Control.Monad (forM_, replicateM, unless)
+import Control.Monad (forM, replicateM, unless)
 import Data.Binary.Get (Get, runGet)
 import Data.Binary.Put (Put, runPut)
 import Data.Bits (bit, testBit)
@@ -34,6 +34,7 @@ import Data.Int (Int32, Int64)
 import Data.IORef (IORef, newIORef, atomicModifyIORef)
 import System.IO (Handle)
 import System.IO.Unsafe (unsafePerformIO)
+import Data.Maybe (maybeToList)
 
 import qualified Data.ByteString.Lazy as L
 
@@ -93,16 +94,20 @@ type Message = ([Notice], Maybe (Request, RequestId))
 writeMessage :: Connection -> Message -> IO ()
 -- ^ Write message to connection
 writeMessage conn (notices, mRequest) = do
-    forM_ notices $ \n -> writeReq . (Left n,) =<< genRequestId
-    whenJust mRequest $ writeReq . (Right *** id)
+    noticeStrings <- forM notices $ \n -> do
+          requestId <- genRequestId
+          let s = runPut $ putNotice n requestId
+          return $ (lenBytes s) `L.append` s
+
+    let requestString = do
+          (request, requestId) <- mRequest
+          let s = runPut $ putRequest request requestId
+          return $ (lenBytes s) `L.append` s
+
+    Connection.write conn $ L.toStrict $ L.concat $ noticeStrings ++ (maybeToList requestString)
     Connection.flush conn
  where
-    writeReq (e, requestId) = do
-        Connection.writeLazy conn lenBytes
-        Connection.writeLazy conn bytes
-     where
-        bytes = runPut $ (either putNotice putRequest e) requestId
-        lenBytes = encodeSize . toEnum . fromEnum $ L.length bytes
+    lenBytes bytes = encodeSize . toEnum . fromEnum $ L.length bytes
     encodeSize = runPut . putInt32 . (+ 4)
 
 type Response = (ResponseTo, Reply)
