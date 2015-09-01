@@ -5,7 +5,6 @@
 module Database.MongoDB.Internal.Connection (
     Connection(..),
     readExactly,
-    writeLazy,
     fromHandle,
 ) where
 
@@ -51,9 +50,6 @@ readExactly conn count = go mempty count
       else go (acc <> Lazy.ByteString.fromStrict chunk) (n - len)
   eof = mkIOError eofErrorType "Database.MongoDB.Internal.Connection"
                   Nothing Nothing
-
-writeLazy :: Connection -> Lazy.ByteString -> IO ()
-writeLazy conn = mapM_ (write conn) . Lazy.ByteString.toChunks
 
 fromHandle :: Handle -> IO Connection
 -- ^ Make connection form handle
