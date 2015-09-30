@@ -135,6 +135,18 @@ spec = around withCleanDatabase $ do
 
         liftIO $ (length returnedDocs) `shouldBe` 100000
 
+  describe "rest" $ do
+    it "returns all documents from the collection" $ do
+      let docs = (flip map) [0..6000] $ \i ->
+              ["name" =: (T.pack $ "name " ++ (show i))]
+          collectionName = "smallCollection"
+      db $ insertAll_ collectionName docs
+      db $ do
+        cur <- find $ (select [] collectionName)
+        returnedDocs <- rest cur
+
+        liftIO $ (length returnedDocs) `shouldBe` 6001
+
   describe "aggregate" $ do
     it "aggregates to normalize and sort documents" $ do
       db $ insertAll_ "users" [ ["_id" =: "jane", "joined" =: parseDate "2011-03-02", "likes" =: ["golf", "racquetball"]]

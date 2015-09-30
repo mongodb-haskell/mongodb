@@ -49,7 +49,7 @@ import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO)
 import Control.Monad (unless, replicateM, liftM)
 import Data.Int (Int32)
-import Data.Maybe (listToMaybe, catMaybes)
+import Data.Maybe (listToMaybe, catMaybes, isNothing)
 import Data.Word (Word32)
 #if !MIN_VERSION_base(4,8,0)
 import Data.Monoid (mappend)
@@ -628,7 +628,7 @@ next (Cursor fcol batchSize var) = modifyMVar var nextState where
                     let newLimit = do
                               limit <- mLimit
                               return $ limit - 1
-                    dBatch' <- if null docs' && cid /= 0 && (newLimit > (Just 0))
+                    dBatch' <- if null docs' && cid /= 0 && ((newLimit > (Just 0)) || (isNothing newLimit))
                         then nextBatch' fcol batchSize newLimit cid
                         else return $ return (Batch newLimit cid docs')
                     when (newLimit == (Just 0)) $ unless (cid == 0) $ send [KillCursors [cid]]
