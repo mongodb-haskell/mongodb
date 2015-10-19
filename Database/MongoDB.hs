@@ -1,7 +1,7 @@
 {- |
 Client interface to MongoDB database management system.
 
-Simple example below. Use with language extensions /OvererloadedStrings/ & /ExtendedDefaultRules/.
+Simple example below. Use with language extensions /OverloadedStrings/ & /ExtendedDefaultRules/.
 
 
 > import Database.MongoDB
