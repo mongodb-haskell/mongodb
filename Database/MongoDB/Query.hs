@@ -11,7 +11,7 @@ module Database.MongoDB.Query (
     -- * Database
     Database, allDatabases, useDb, thisDatabase,
     -- ** Authentication
-    Username, Password, auth,
+    Username, Password, auth, authMongoCR, authSCRAMSHA1,
     -- * Collection
     Collection, allCollections,
     -- ** Selection
@@ -87,6 +87,18 @@ import Database.MongoDB.Internal.Protocol (Reply(..), QueryOption(..),
                                            pwKey)
 import Database.MongoDB.Internal.Util (loop, liftIOE, true1, (<.>))
 import qualified Database.MongoDB.Internal.Protocol as P
+
+import qualified Crypto.Nonce as Nonce
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString.Base64 as B64
+import qualified Data.ByteString.Char8 as B
+import qualified Crypto.Hash.MD5 as MD5
+import qualified Crypto.Hash.SHA1 as SHA1
+import qualified Crypto.MAC.HMAC as HMAC
+import Data.Bits (xor)
+import qualified Data.Map as Map
+import Text.Read (readMaybe)
 
 #if !MIN_VERSION_base(4,6,0)
 --mkWeakMVar = addMVarFinalizer
@@ -205,11 +217,75 @@ useDb db act = local (\ctx -> ctx {mongoDatabase = db}) act
 
 -- * Authentication
 
-auth :: (MonadIO m) => Username -> Password -> Action m Bool
--- ^ Authenticate with the current database (if server is running in secure mode). Return whether authentication was successful or not. Reauthentication is required for every new pipe.
-auth usr pss = do
+auth :: MonadIO m => Username -> Password -> Action m Bool
+-- ^ Authenticate with the current database (if server is running in secure mode). Return whether authentication was successful or not. Reauthentication is required for every new pipe. SCRAM-SHA-1 will be used for server versions 3.0+, MONGO-CR for lower versions.
+auth un pw = do
+    let serverVersion = liftM (at "version") $ useDb "admin" $ runCommand ["buildinfo" =: (1 :: Int)]
+    mmv <- liftM (readMaybe . T.unpack . head . T.splitOn ".") $ serverVersion
+    maybe (return False) performAuth mmv
+    where
+    performAuth majorVersion =
+        case (majorVersion >= (3 :: Int)) of
+            True -> authSCRAMSHA1 un pw
+            False -> authMongoCR un pw
+
+authMongoCR :: (MonadIO m) => Username -> Password -> Action m Bool
+-- ^ Authenticate with the current database, using the MongoDB-CR authentication mechanism (default in MongoDB server < 3.0)
+authMongoCR usr pss = do
     n <- at "nonce" `liftM` runCommand ["getnonce" =: (1 :: Int)]
     true1 "ok" `liftM` runCommand ["authenticate" =: (1 :: Int), "user" =: usr, "nonce" =: n, "key" =: pwKey n usr pss]
+
+authSCRAMSHA1 :: MonadIO m => Username -> Password -> Action m Bool
+-- ^ Authenticate with the current database, using the SCRAM-SHA-1 authentication mechanism (default in MongoDB server >= 3.0)
+authSCRAMSHA1 un pw = do
+    let hmac = HMAC.hmac SHA1.hash 64
+    nonce <- (Nonce.new >>= Nonce.nonce128 >>= return . B64.encode)
+    let firstBare = B.concat [B.pack $ "n=" ++ (T.unpack un) ++ ",r=", nonce]
+    let client1 = ["saslStart" =: (1 :: Int), "mechanism" =: ("SCRAM-SHA-1" :: String), "payload" =: (B.unpack . B64.encode $ B.concat [B.pack "n,,", firstBare]), "autoAuthorize" =: (1 :: Int)]
+    server1 <- runCommand client1
+    
+    shortcircuit (true1 "ok" server1) $ do
+        let serverPayload1 = B64.decodeLenient . B.pack . at "payload" $ server1
+        let serverData1 = parseSCRAM serverPayload1
+        let iterations = read . B.unpack $ Map.findWithDefault "1" "i" serverData1
+        let salt = B64.decodeLenient $ Map.findWithDefault "" "s" serverData1
+        let snonce = Map.findWithDefault "" "r" serverData1
+        
+        shortcircuit (B.isInfixOf nonce snonce) $ do
+            let withoutProof = B.concat [B.pack "c=biws,r=", snonce]
+            let digestS = B.pack $ T.unpack un ++ ":mongo:" ++ T.unpack pw
+            let digest = B16.encode $ MD5.hash digestS
+            let saltedPass = scramHI digest salt iterations
+            let clientKey = hmac saltedPass (B.pack "Client Key")
+            let storedKey = SHA1.hash clientKey
+            let authMsg = B.concat [firstBare, B.pack ",", serverPayload1, B.pack ",", withoutProof]
+            let clientSig = hmac storedKey authMsg
+            let pval = B64.encode . BS.pack $ BS.zipWith xor clientKey clientSig
+            let clientFinal = B.concat [withoutProof, B.pack ",p=", pval]
+            let serverKey = hmac saltedPass (B.pack "Server Key")
+            let serverSig = B64.encode $ hmac serverKey authMsg
+            let client2 = ["saslContinue" =: (1 :: Int), "conversationId" =: (at "conversationId" server1 :: Int), "payload" =: (B.unpack $ B64.encode clientFinal)]
+            server2 <- runCommand client2
+            
+            shortcircuit (true1 "ok" server2) $ do
+                let serverPayload2 = B64.decodeLenient . B.pack $ at "payload" server2
+                let serverData2 = parseSCRAM serverPayload2
+                let serverSigComp = Map.findWithDefault "" "v" serverData2
+                return (serverSig == serverSigComp)
+    where
+    shortcircuit True f = f
+    shortcircuit False _ = return False
+
+scramHI :: B.ByteString -> B.ByteString -> Int -> B.ByteString
+scramHI digest salt iters = snd $ foldl com (u1, u1) [1..(iters-1)]
+    where
+    hmacd = HMAC.hmac SHA1.hash 64 digest
+    u1 = hmacd (B.concat [salt, BS.pack [0, 0, 0, 1]])
+    com (u,uc) _ = let u' = hmacd u in (u', BS.pack $ BS.zipWith xor uc u')
+
+parseSCRAM :: B.ByteString -> Map.Map B.ByteString B.ByteString
+parseSCRAM = Map.fromList . fmap cleanup . (fmap $ T.breakOn "=") . T.splitOn "," . T.pack . B.unpack
+    where cleanup (t1, t2) = (B.pack $ T.unpack t1, B.pack . T.unpack $ T.drop 1 t2)
 
 -- * Collection
 
