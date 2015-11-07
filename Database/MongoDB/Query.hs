@@ -243,14 +243,14 @@ authSCRAMSHA1 un pw = do
     let firstBare = B.concat [B.pack $ "n=" ++ (T.unpack un) ++ ",r=", nonce]
     let client1 = ["saslStart" =: (1 :: Int), "mechanism" =: ("SCRAM-SHA-1" :: String), "payload" =: (B.unpack . B64.encode $ B.concat [B.pack "n,,", firstBare]), "autoAuthorize" =: (1 :: Int)]
     server1 <- runCommand client1
-    
+
     shortcircuit (true1 "ok" server1) $ do
         let serverPayload1 = B64.decodeLenient . B.pack . at "payload" $ server1
         let serverData1 = parseSCRAM serverPayload1
         let iterations = read . B.unpack $ Map.findWithDefault "1" "i" serverData1
         let salt = B64.decodeLenient $ Map.findWithDefault "" "s" serverData1
         let snonce = Map.findWithDefault "" "r" serverData1
-        
+
         shortcircuit (B.isInfixOf nonce snonce) $ do
             let withoutProof = B.concat [B.pack "c=biws,r=", snonce]
             let digestS = B.pack $ T.unpack un ++ ":mongo:" ++ T.unpack pw
@@ -266,7 +266,7 @@ authSCRAMSHA1 un pw = do
             let serverSig = B64.encode $ hmac serverKey authMsg
             let client2 = ["saslContinue" =: (1 :: Int), "conversationId" =: (at "conversationId" server1 :: Int), "payload" =: (B.unpack $ B64.encode clientFinal)]
             server2 <- runCommand client2
-            
+
             shortcircuit (true1 "ok" server2) $ do
                 let serverPayload2 = B64.decodeLenient . B.pack $ at "payload" server2
                 let serverData2 = parseSCRAM serverPayload2

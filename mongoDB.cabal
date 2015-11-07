@@ -43,7 +43,7 @@ Library
                     , hashtables >= 1.1.2.0
                     , base16-bytestring >= 0.1.1.6
                     , base64-bytestring >= 1.0.0.1
-                    , nonce >= 1.0.2 
+                    , nonce >= 1.0.2
 
   Exposed-modules:  Database.MongoDB
                     Database.MongoDB.Admin
