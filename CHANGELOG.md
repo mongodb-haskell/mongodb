@@ -1,6 +1,12 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
+
+## [2.0.9] - 2015-11-07
+
+### Added
+- SCRAM-SHA-1 authentication for mongo 3.0
+
 ## [2.0.8] - 2015-10-03
 
 ### Fixed
