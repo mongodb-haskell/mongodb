@@ -271,7 +271,16 @@ authSCRAMSHA1 un pw = do
                 let serverPayload2 = B64.decodeLenient . B.pack $ at "payload" server2
                 let serverData2 = parseSCRAM serverPayload2
                 let serverSigComp = Map.findWithDefault "" "v" serverData2
-                return (serverSig == serverSigComp)
+
+                shortcircuit (serverSig == serverSigComp) $ do
+                  let done = true1 "done" server2
+                  if done
+                    then return True
+                    else do
+                      let client2 = ["saslContinue" =: (1 :: Int), "conversationId" =: (at "conversationId" server1 :: Int), "payload" =: String ""]
+                      server3 <- runCommand client2
+                      shortcircuit (true1 "ok" server3) $ do
+                        return True
     where
     shortcircuit True f = f
     shortcircuit False _ = return False
