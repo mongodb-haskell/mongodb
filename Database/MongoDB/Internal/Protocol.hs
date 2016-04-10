@@ -11,7 +11,7 @@
 module Database.MongoDB.Internal.Protocol (
     FullCollection,
     -- * Pipe
-    Pipe, newPipe, newPipeWith, send, call,
+    Pipe, newPipe, send, call,
     -- ** Notice
     Notice(..), InsertOption(..), UpdateOption(..), DeleteOption(..), CursorId,
     -- ** Request
@@ -36,6 +36,7 @@ import System.IO (Handle)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Maybe (maybeToList)
 
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 
 import Control.Monad.Trans (MonadIO, liftIO)
@@ -49,12 +50,10 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 
 import Database.MongoDB.Internal.Util (whenJust, bitOr, byteStringHex)
+import System.IO (hClose, hFlush)
 import System.IO.Pipeline (Pipeline, newPipeline, IOStream(..))
 
 import qualified System.IO.Pipeline as P
-
-import Database.MongoDB.Internal.Connection (Connection)
-import qualified Database.MongoDB.Internal.Connection as Connection
 
 -- * Pipe
 
@@ -63,13 +62,9 @@ type Pipe = Pipeline Response Message
 
 newPipe :: Handle -> IO Pipe
 -- ^ Create pipe over handle
-newPipe handle = Connection.fromHandle handle >>= newPipeWith
-
-newPipeWith :: Connection -> IO Pipe
--- ^ Create pipe over connection
-newPipeWith conn = newPipeline $ IOStream (writeMessage conn)
-                                          (readMessage conn)
-                                          (Connection.close conn)
+newPipe handle = newPipeline $ IOStream (writeMessage handle)
+                                        (readMessage handle)
+                                        (hClose handle)
 
 send :: Pipe -> [Notice] -> IO ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
@@ -91,9 +86,9 @@ type Message = ([Notice], Maybe (Request, RequestId))
 -- ^ A write notice(s) with getLastError request, or just query request.
 -- Note, that requestId will be out of order because request ids will be generated for notices after the request id supplied was generated. This is ok because the mongo server does not care about order just uniqueness.
 
-writeMessage :: Connection -> Message -> IO ()
+writeMessage :: Handle -> Message -> IO ()
 -- ^ Write message to connection
-writeMessage conn (notices, mRequest) = do
+writeMessage h (notices, mRequest) = do
     noticeStrings <- forM notices $ \n -> do
           requestId <- genRequestId
           let s = runPut $ putNotice n requestId
@@ -104,8 +99,8 @@ writeMessage conn (notices, mRequest) = do
           let s = runPut $ putRequest request requestId
           return $ (lenBytes s) `L.append` s
 
-    Connection.write conn $ L.toStrict $ L.concat $ noticeStrings ++ (maybeToList requestString)
-    Connection.flush conn
+    B.hPut h $ L.toStrict $ L.concat $ noticeStrings ++ (maybeToList requestString)
+    hFlush h
  where
     lenBytes bytes = encodeSize . toEnum . fromEnum $ L.length bytes
     encodeSize = runPut . putInt32 . (+ 4)
@@ -113,13 +108,13 @@ writeMessage conn (notices, mRequest) = do
 type Response = (ResponseTo, Reply)
 -- ^ Message received from a Mongo server in response to a Request
 
-readMessage :: Connection -> IO Response
+readMessage :: Handle -> IO Response
 -- ^ read response from a connection
-readMessage conn = readResp  where
+readMessage h = readResp  where
     readResp = do
-        len <- fromEnum . decodeSize <$> Connection.readExactly conn 4
-        runGet getReply <$> Connection.readExactly conn len
-    decodeSize = subtract 4 . runGet getInt32
+        len <- fromEnum . decodeSize <$> B.hGet h 4
+        runGet getReply <$> (L.fromStrict <$> B.hGet h len)
+    decodeSize = subtract 4 . runGet getInt32 . L.fromStrict
 
 type FullCollection = Text
 -- ^ Database name and collection name with period (.) in between. Eg. \"myDb.myCollection\"

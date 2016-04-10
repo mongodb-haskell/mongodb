@@ -26,6 +26,7 @@ Library
 
   Build-depends:      array -any
                     , base <5
+                    , base64-bytestring
                     , binary -any
                     , bson >= 0.3 && < 0.4
                     , text
@@ -48,7 +49,6 @@ Library
   Exposed-modules:  Database.MongoDB
                     Database.MongoDB.Admin
                     Database.MongoDB.Connection
-                    Database.MongoDB.Internal.Connection
                     Database.MongoDB.Internal.Protocol
                     Database.MongoDB.Internal.Util
                     Database.MongoDB.Query
@@ -82,6 +82,8 @@ Benchmark bench
   type:               exitcode-stdio-1.0
   Build-depends:      array -any
                     , base < 5
+                    , base64-bytestring
+                    , base16-bytestring
                     , binary -any
                     , bson >= 0.3 && < 0.4
                     , text
@@ -95,6 +97,7 @@ Benchmark bench
                     , random-shuffle -any
                     , monad-control >= 0.3.1
                     , lifted-base >= 0.1.0.3
+                    , nonce
                     , transformers-base >= 0.4.1
                     , hashtables >= 1.1.2.0
                     , criterion
