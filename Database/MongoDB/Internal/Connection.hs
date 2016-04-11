@@ -4,20 +4,13 @@
 
 module Database.MongoDB.Internal.Connection (
     Connection(..),
-    readExactly,
     fromHandle,
 ) where
 
 import Prelude hiding (read)
-import Data.Monoid
-import Data.IORef
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Lazy as Lazy (ByteString)
-import qualified Data.ByteString.Lazy as Lazy.ByteString
-import Control.Monad
 import System.IO
-import System.IO.Error (mkIOError, eofErrorType)
 
 -- | Abstract connection interface
 --
