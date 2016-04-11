@@ -8,6 +8,14 @@
 {-# LANGUAGE CPP, FlexibleContexts, TupleSections, TypeSynonymInstances #-}
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
 
+{-# LANGUAGE NamedFieldPuns, ScopedTypeVariables #-}
+
+#if (__GLASGOW_HASKELL__ >= 706)
+{-# LANGUAGE RecursiveDo #-}
+#else
+{-# LANGUAGE DoRec #-}
+#endif
+
 module Database.MongoDB.Internal.Protocol (
     FullCollection,
     -- * Pipe
@@ -19,7 +27,8 @@ module Database.MongoDB.Internal.Protocol (
     -- ** Reply
     Reply(..), ResponseFlag(..),
     -- * Authentication
-    Username, Password, Nonce, pwHash, pwKey
+    Username, Password, Nonce, pwHash, pwKey,
+    isClosed, close
 ) where
 
 #if !MIN_VERSION_base(4,8,0)
@@ -35,6 +44,13 @@ import Data.IORef (IORef, newIORef, atomicModifyIORef)
 import System.IO (Handle)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Maybe (maybeToList)
+import GHC.Conc (ThreadStatus(..), threadStatus)
+import Control.Monad (forever)
+import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
+import Control.Concurrent (ThreadId, forkIO, killThread)
+
+import Control.Exception.Lifted (onException, throwIO, try)
+import qualified Control.Exception.Lifted as CEL
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
@@ -51,9 +67,92 @@ import qualified Data.Text.Encoding as TE
 
 import Database.MongoDB.Internal.Util (whenJust, bitOr, byteStringHex)
 import System.IO (hClose, hFlush)
-import System.IO.Pipeline (Pipeline, newPipeline, IOStream(..))
 
-import qualified System.IO.Pipeline as P
+#if MIN_VERSION_base(4,6,0)
+import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
+                                       putMVar, readMVar, mkWeakMVar)
+#else
+import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
+                                         putMVar, readMVar, addMVarFinalizer)
+#endif
+
+#if !MIN_VERSION_base(4,6,0)
+mkWeakMVar :: MVar a -> IO () -> IO ()
+mkWeakMVar = addMVarFinalizer
+#endif
+
+-- * IOStream
+
+-- | An IO sink and source where value of type @o@ are sent and values of type @i@ are received.
+data IOStream i o = IOStream {
+    writeStream :: o -> IO (),
+    readStream :: IO i,
+    closeStream :: IO () }
+
+-- * Pipeline
+
+-- | Thread-safe and pipelined connection
+data Pipeline i o = Pipeline {
+    vStream :: MVar (IOStream i o),  -- ^ Mutex on handle, so only one thread at a time can write to it
+    responseQueue :: Chan (MVar (Either IOError i)),  -- ^ Queue of threads waiting for responses. Every time a response arrive we pop the next thread and give it the response.
+    listenThread :: ThreadId
+    }
+
+-- | Create new Pipeline over given handle. You should 'close' pipeline when finished, which will also close handle. If pipeline is not closed but eventually garbage collected, it will be closed along with handle.
+newPipeline :: IOStream i o -> IO (Pipeline i o)
+newPipeline stream = do
+    vStream <- newMVar stream
+    responseQueue <- newChan
+    rec
+        let pipe = Pipeline{..}
+        listenThread <- forkIO (listen pipe)
+    _ <- mkWeakMVar vStream $ do
+        killThread listenThread
+        closeStream stream
+    return pipe
+
+close :: Pipeline i o -> IO ()
+-- ^ Close pipe and underlying connection
+close Pipeline{..} = do
+    killThread listenThread
+    closeStream =<< readMVar vStream
+
+isClosed :: Pipeline i o -> IO Bool
+isClosed Pipeline{listenThread} = do
+    status <- threadStatus listenThread
+    return $ case status of
+        ThreadRunning -> False
+        ThreadFinished -> True
+        ThreadBlocked _ -> False
+        ThreadDied -> True
+--isPipeClosed Pipeline{..} = isClosed =<< readMVar vHandle  -- isClosed hangs while listen loop is waiting on read
+
+listen :: Pipeline i o -> IO ()
+-- ^ Listen for responses and supply them to waiting threads in order
+listen Pipeline{..} = do
+    stream <- readMVar vStream
+    forever $ do
+        e <- try $ readStream stream
+        var <- readChan responseQueue
+        putMVar var e
+        case e of
+            Left err -> closeStream stream >> ioError err  -- close and stop looping
+            Right _ -> return ()
+
+psend :: Pipeline i o -> o -> IO ()
+-- ^ Send message to destination; the destination must not response (otherwise future 'call's will get these responses instead of their own).
+-- Throw IOError and close pipeline if send fails
+psend p@Pipeline{..} message = withMVar vStream (flip writeStream message) `onException` close p
+
+pcall :: Pipeline i o -> o -> IO (IO i)
+-- ^ Send message to destination and return /promise/ of response from one message only. The destination must reply to the message (otherwise promises will have the wrong responses in them).
+-- Throw IOError and closes pipeline if send fails, likewise for promised response.
+pcall p@Pipeline{..} message = withMVar vStream doCall `onException` close p  where
+    doCall stream = do
+        writeStream stream message
+        var <- newEmptyMVar
+        liftIO $ writeChan responseQueue var
+        return $ readMVar var >>= either throwIO return -- return promise
 
 -- * Pipe
 
@@ -68,13 +167,13 @@ newPipe handle = newPipeline $ IOStream (writeMessage handle)
 
 send :: Pipe -> [Notice] -> IO ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
-send pipe notices = P.send pipe (notices, Nothing)
+send pipe notices = psend pipe (notices, Nothing)
 
 call :: Pipe -> [Notice] -> Request -> IO (IO Reply)
 -- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call and resulting promise will throw IOError if connection fails.
 call pipe notices request = do
     requestId <- genRequestId
-    promise <- P.call pipe (notices, Just (request, requestId))
+    promise <- pcall pipe (notices, Just (request, requestId))
     return $ check requestId <$> promise
  where
     check requestId (responseTo, reply) = if requestId == responseTo then reply else

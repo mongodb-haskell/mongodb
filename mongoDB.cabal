@@ -52,7 +52,6 @@ Library
                     Database.MongoDB.Internal.Protocol
                     Database.MongoDB.Internal.Util
                     Database.MongoDB.Query
-                    System.IO.Pipeline
 
 Source-repository head
     Type:     git

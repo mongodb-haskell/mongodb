@@ -42,12 +42,11 @@ import Data.Text (Text)
 import qualified Data.Bson as B
 import qualified Data.Text as T
 
-import Database.MongoDB.Internal.Protocol (Pipe, newPipe)
+import Database.MongoDB.Internal.Protocol (Pipe, newPipe, close, isClosed)
 import Database.MongoDB.Internal.Util (untilSuccess, liftIOE,
                                        updateAssocs, shuffle, mergesortM)
 import Database.MongoDB.Query (Command, Failure(ConnectionFailure), access,
                               slaveOk, runCommand)
-import System.IO.Pipeline (close, isClosed)
 
 adminCommand :: Command -> Pipe -> IO Document
 -- ^ Run command against admin database on server connected to pipe. Fail if connection fails.
