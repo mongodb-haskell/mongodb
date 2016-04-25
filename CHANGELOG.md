@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [Unreleased] - 2015-12-22
+### Removed
+- System.IO.Pipeline module
+- Internal.Connection module
+
 ## [2.0.10] - 2015-12-22
 
 ### Fixed
