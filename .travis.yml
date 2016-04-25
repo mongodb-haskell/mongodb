@@ -27,18 +27,16 @@ install:
  - travis_retry cabal update
  # Install the combined dependencies for this package and all other packages
  # needed to reduce conflicts.
- - cabal install hpc-coveralls
  - cabal sandbox init
- - cabal install --only-dependencies --enable-tests . hpc-coveralls
+ - cabal install --only-dependencies --enable-tests
 
 script:
- - cabal configure --enable-tests --enable-coverage -v2
+ - cabal configure --enable-tests -v2
  - cabal build
  # cabal test fails due a to hpc error. Using run-cabal-test instead.
  # - cabal test --show-details=always
- - run-cabal-test --show-details=always
+ - cabal test --show-details=always
  # Ignoring the exit code here. Need to register with coveralls.io?
- - hpc-coveralls --exclude-dir=test test || true
  # Ignoring the exit code here. cabal check recommends against
  # 'ghc-prof-options: -auto-all'.
  - cabal check || true
