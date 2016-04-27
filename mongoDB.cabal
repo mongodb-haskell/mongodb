@@ -82,6 +82,8 @@ Benchmark bench
   type:               exitcode-stdio-1.0
   Build-depends:      array -any
                     , base < 5
+                    , base64-bytestring
+                    , base16-bytestring
                     , binary -any
                     , bson >= 0.3 && < 0.4
                     , text
@@ -90,6 +92,7 @@ Benchmark bench
                     , mtl >= 2
                     , cryptohash -any
                     , network -any
+                    , nonce
                     , parsec -any
                     , random -any
                     , random-shuffle -any
