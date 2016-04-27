@@ -117,8 +117,8 @@ readMessage :: Connection -> IO Response
 -- ^ read response from a connection
 readMessage conn = readResp  where
     readResp = do
-        len <- fromEnum . decodeSize <$> Connection.readExactly conn 4
-        runGet getReply <$> Connection.readExactly conn len
+        len <- fromEnum . decodeSize . L.fromStrict <$> Connection.readExactly conn 4
+        runGet getReply . L.fromStrict <$> Connection.readExactly conn len
     decodeSize = subtract 4 . runGet getInt32
 
 type FullCollection = Text
