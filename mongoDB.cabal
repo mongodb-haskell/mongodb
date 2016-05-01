@@ -34,11 +34,14 @@ Library
                     , mtl >= 2
                     , cryptohash -any
                     , network -any
+                    , io-region -any
                     , parsec -any
                     , random -any
                     , random-shuffle -any
                     , monad-control >= 0.3.1
                     , lifted-base >= 0.1.0.3
+                    , tls >= 1.2.0
+                    , data-default-class -any
                     , transformers-base >= 0.4.1
                     , hashtables >= 1.1.2.0
                     , base16-bytestring >= 0.1.1.6
@@ -49,6 +52,7 @@ Library
                     Database.MongoDB.Admin
                     Database.MongoDB.Connection
                     Database.MongoDB.Internal.Connection
+                    Database.MongoDB.Internal.Tls
                     Database.MongoDB.Internal.Protocol
                     Database.MongoDB.Internal.Util
                     Database.MongoDB.Query
