@@ -16,7 +16,7 @@ import System.IO
 --
 -- `read` should return `ByteString.null` on EOF
 data Connection = Connection {
-    readExactly :: Int -> IO ByteString,
+    read  :: Int -> IO ByteString,
     write :: ByteString -> IO (),
     flush :: IO (),
     close :: IO ()}
@@ -25,7 +25,7 @@ fromHandle :: Handle -> IO Connection
 -- ^ Make connection form handle
 fromHandle handle = do
   return Connection
-    { readExactly = ByteString.hGet handle
+    { read  = ByteString.hGet handle
     , write = ByteString.hPut handle
     , flush = hFlush handle
     , close = hClose handle

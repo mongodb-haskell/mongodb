@@ -56,7 +56,7 @@ tlsConnection :: TLS.Context -> IO () -> IO Connection
 tlsConnection ctx close = do
   restRef <- newIORef mempty
   return Connection
-    { Connection.readExactly = \count -> let
+    { Connection.read = \count -> let
           readSome = do
             rest <- readIORef restRef
             writeIORef restRef mempty
