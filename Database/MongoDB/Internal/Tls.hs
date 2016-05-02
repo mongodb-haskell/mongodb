@@ -11,8 +11,6 @@ where
 
 import Data.IORef
 import Data.Monoid
-import Data.Text (Text)
-import qualified Data.Text as Text
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as Lazy.ByteString
 import Data.Default.Class (def)
@@ -25,20 +23,19 @@ import Database.MongoDB.Internal.Protocol (newPipeWith)
 import Database.MongoDB.Internal.Connection (Connection(Connection))
 import qualified Database.MongoDB.Internal.Connection as Connection
 import System.IO.Error (mkIOError, eofErrorType)
-import qualified Network
+import Network (connectTo, HostName, PortID)
 import qualified Network.TLS as TLS
 import qualified Network.TLS.Extra.Cipher as TLS
 import qualified Control.IO.Region as Region
 
 -- | Connect to mongodb using TLS
-connect :: Text -> Int -> IO Pipe
+connect :: HostName -> PortID -> IO Pipe
 connect host port = bracketOnError Region.open Region.close $ \r -> do
   handle <- Region.alloc_ r
-    (Network.connectTo (Text.unpack host)
-                       (Network.PortNumber $ fromIntegral port))
+    (connectTo host port)
     hClose
 
-  let params = (TLS.defaultParamsClient (Text.unpack host) "")
+  let params = (TLS.defaultParamsClient host "")
         { TLS.clientSupported = def
             { TLS.supportedCiphers = TLS.ciphersuite_all}
         , TLS.clientHooks = def
