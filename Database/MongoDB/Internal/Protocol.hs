@@ -34,7 +34,6 @@ module Database.MongoDB.Internal.Protocol (
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<$>))
 #endif
-import Control.Arrow ((***))
 import Control.Monad (forM, replicateM, unless)
 import Data.Binary.Get (Get, runGet)
 import Data.Binary.Put (Put, runPut)
@@ -50,7 +49,6 @@ import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent (ThreadId, forkIO, killThread)
 
 import Control.Exception.Lifted (onException, throwIO, try)
-import qualified Control.Exception.Lifted as CEL
 
 import qualified Data.ByteString.Lazy as L
 
@@ -64,8 +62,7 @@ import qualified Crypto.Hash.MD5 as MD5
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 
-import Database.MongoDB.Internal.Util (whenJust, bitOr, byteStringHex)
-import System.IO (hClose, hFlush)
+import Database.MongoDB.Internal.Util (bitOr, byteStringHex)
 
 import Database.MongoDB.Internal.Connection (Connection)
 import qualified Database.MongoDB.Internal.Connection as Connection
