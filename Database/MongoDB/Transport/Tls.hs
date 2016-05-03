@@ -3,7 +3,7 @@
 
 -- | TLS connection to mongodb
 
-module Database.MongoDB.Internal.Tls
+module Database.MongoDB.Transport.Tls
 (
   connect,
 )
