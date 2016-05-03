@@ -20,8 +20,8 @@ import Control.Monad (when, unless)
 import System.IO
 import Database.MongoDB (Pipe)
 import Database.MongoDB.Internal.Protocol (newPipeWith)
-import Database.MongoDB.Internal.Connection (Connection(Connection))
-import qualified Database.MongoDB.Internal.Connection as Connection
+import Database.MongoDB.Transport (Transport(Transport))
+import qualified Database.MongoDB.Transport as T
 import System.IO.Error (mkIOError, eofErrorType)
 import Network (connectTo, HostName, PortID)
 import qualified Network.TLS as TLS
@@ -49,11 +49,11 @@ connect host port = bracketOnError Region.open Region.close $ \r -> do
   conn <- tlsConnection context (Region.close r)
   newPipeWith conn
 
-tlsConnection :: TLS.Context -> IO () -> IO Connection
+tlsConnection :: TLS.Context -> IO () -> IO Transport
 tlsConnection ctx close = do
   restRef <- newIORef mempty
-  return Connection
-    { Connection.read = \count -> let
+  return Transport
+    { T.read = \count -> let
           readSome = do
             rest <- readIORef restRef
             writeIORef restRef mempty
@@ -75,10 +75,10 @@ tlsConnection ctx close = do
                   unread rest
                 return (acc <> Lazy.ByteString.fromStrict res)
               else go (acc <> Lazy.ByteString.fromStrict chunk) (n - len)
-          eof = mkIOError eofErrorType "Database.MongoDB.Internal.Connection"
+          eof = mkIOError eofErrorType "Database.MongoDB.Transport"
                 Nothing Nothing
        in Lazy.ByteString.toStrict <$> go mempty count
-    , Connection.write = TLS.sendData ctx . Lazy.ByteString.fromStrict
-    , Connection.flush = TLS.contextFlush ctx
-    , Connection.close = close
+    , T.write = TLS.sendData ctx . Lazy.ByteString.fromStrict
+    , T.flush = TLS.contextFlush ctx
+    , T.close = close
     }

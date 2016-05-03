@@ -2,8 +2,8 @@
 -- | This module defines a connection interface. It could be a regular
 -- network connection, TLS connection, a mock or anything else.
 
-module Database.MongoDB.Internal.Connection (
-    Connection(..),
+module Database.MongoDB.Transport (
+    Transport(..),
     fromHandle,
 ) where
 
@@ -12,19 +12,19 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import System.IO
 
--- | Abstract connection interface
+-- | Abstract transport interface
 --
 -- `read` should return `ByteString.null` on EOF
-data Connection = Connection {
+data Transport = Transport {
     read  :: Int -> IO ByteString,
     write :: ByteString -> IO (),
     flush :: IO (),
     close :: IO ()}
 
-fromHandle :: Handle -> IO Connection
+fromHandle :: Handle -> IO Transport
 -- ^ Make connection form handle
 fromHandle handle = do
-  return Connection
+  return Transport
     { read  = ByteString.hGet handle
     , write = ByteString.hPut handle
     , flush = hFlush handle
