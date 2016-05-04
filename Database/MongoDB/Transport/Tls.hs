@@ -3,7 +3,7 @@
 
 {-|
 Module      : MongoDB TLS
-Description : TLS transport to mongodb
+Description : TLS transport for mongodb
 Copyright   : (c)	Yuras Shumovich, 2016
 License     : Apache 2.0
 Maintainer  : Victor Denisov denisovenator@gmail.com
@@ -11,7 +11,9 @@ Stability   : experimental
 Portability : POSIX
 
 This module is for connecting to TLS enabled mongodb servers.
-Be aware that this module is highly experimental and is barely tested.
+ATTENTION!!! Be aware that this module is highly experimental and is
+barely tested. The current implementation doesn't verify server's identity.
+It only allows you to connect to a mongodb server using TLS protocol.
 -}
 module Database.MongoDB.Transport.Tls
 (connect)
