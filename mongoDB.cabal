@@ -34,7 +34,6 @@ Library
                     , mtl >= 2
                     , cryptohash -any
                     , network -any
-                    , io-region -any
                     , parsec -any
                     , random -any
                     , random-shuffle -any

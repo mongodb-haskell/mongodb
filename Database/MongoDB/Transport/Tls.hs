@@ -1,12 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- | TLS connection to mongodb
+{-|
+Module      : MongoDB TLS
+Description : TLS transport to mongodb
+Copyright   : (c)	Yuras Shumovich, 2016
+License     : Apache 2.0
+Maintainer  : Victor Denisov denisovenator@gmail.com
+Stability   : experimental
+Portability : POSIX
 
+This module is for connecting to TLS enabled mongodb servers.
+Be aware that this module is highly experimental and is barely tested.
+-}
 module Database.MongoDB.Transport.Tls
-(
-  connect,
-)
+(connect)
 where
 
 import Data.IORef
@@ -26,14 +34,10 @@ import System.IO.Error (mkIOError, eofErrorType)
 import Network (connectTo, HostName, PortID)
 import qualified Network.TLS as TLS
 import qualified Network.TLS.Extra.Cipher as TLS
-import qualified Control.IO.Region as Region
 
 -- | Connect to mongodb using TLS
 connect :: HostName -> PortID -> IO Pipe
-connect host port = bracketOnError Region.open Region.close $ \r -> do
-  handle <- Region.alloc_ r
-    (connectTo host port)
-    hClose
+connect host port = bracketOnError (connectTo host port) hClose $ \handle -> do
 
   let params = (TLS.defaultParamsClient host "")
         { TLS.clientSupported = def
@@ -41,16 +45,14 @@ connect host port = bracketOnError Region.open Region.close $ \r -> do
         , TLS.clientHooks = def
             { TLS.onServerCertificate = \_ _ _ _ -> return []}
         }
-  context <- Region.alloc_ r
-    (TLS.contextNew handle params)
-    TLS.contextClose
+  context <- TLS.contextNew handle params
   TLS.handshake context
 
-  conn <- tlsConnection context (Region.close r)
+  conn <- tlsConnection context
   newPipeWith conn
 
-tlsConnection :: TLS.Context -> IO () -> IO Transport
-tlsConnection ctx close = do
+tlsConnection :: TLS.Context -> IO Transport
+tlsConnection ctx = do
   restRef <- newIORef mempty
   return Transport
     { T.read = \count -> let
@@ -80,5 +82,5 @@ tlsConnection ctx close = do
        in Lazy.ByteString.toStrict <$> go mempty count
     , T.write = TLS.sendData ctx . Lazy.ByteString.fromStrict
     , T.flush = TLS.contextFlush ctx
-    , T.close = close
+    , T.close = TLS.contextClose ctx
     }
