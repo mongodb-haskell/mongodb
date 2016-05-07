@@ -11,11 +11,11 @@ import Database.MongoDB.Query
 import qualified Data.Text as T
 
 main = defaultMain [
-    bgroup "insert" [ bench "100" $ nfIO doInserts ]
+    bgroup "insert" [ bench "1000" $ nfIO doInserts ]
   ]
 
 doInserts = do
-    let docs = (flip map) [0..100] $ \i ->
+    let docs = (flip map) [0..1000] $ \i ->
             ["name" M.=: (T.pack $ "name " ++ (show i))]
 
     pipe <- M.connect (M.host "127.0.0.1")

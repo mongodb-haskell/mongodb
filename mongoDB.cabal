@@ -39,6 +39,8 @@ Library
                     , random-shuffle -any
                     , monad-control >= 0.3.1
                     , lifted-base >= 0.1.0.3
+                    , tls >= 1.2.0
+                    , data-default-class -any
                     , transformers-base >= 0.4.1
                     , hashtables >= 1.1.2.0
                     , base16-bytestring >= 0.1.1.6
@@ -48,11 +50,11 @@ Library
   Exposed-modules:  Database.MongoDB
                     Database.MongoDB.Admin
                     Database.MongoDB.Connection
-                    Database.MongoDB.Internal.Connection
                     Database.MongoDB.Internal.Protocol
                     Database.MongoDB.Internal.Util
                     Database.MongoDB.Query
-                    System.IO.Pipeline
+                    Database.MongoDB.Transport
+                    Database.MongoDB.Transport.Tls
 
 Source-repository head
     Type:     git
@@ -82,6 +84,8 @@ Benchmark bench
   type:               exitcode-stdio-1.0
   Build-depends:      array -any
                     , base < 5
+                    , base64-bytestring
+                    , base16-bytestring
                     , binary -any
                     , bson >= 0.3 && < 0.4
                     , text
@@ -90,6 +94,7 @@ Benchmark bench
                     , mtl >= 2
                     , cryptohash -any
                     , network -any
+                    , nonce
                     , parsec -any
                     , random -any
                     , random-shuffle -any
