@@ -1,6 +1,6 @@
 -- | Query and update documents
 
-{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP, DeriveDataTypeable #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP, DeriveDataTypeable, ScopedTypeVariables #-}
 
 module Database.MongoDB.Query (
     -- * Monad
@@ -48,7 +48,7 @@ module Database.MongoDB.Query (
 import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO)
 import Control.Monad (unless, replicateM, liftM)
-import Data.Int (Int32)
+import Data.Int (Int32, Int64)
 import Data.Maybe (listToMaybe, catMaybes, isNothing)
 import Data.Word (Word32)
 #if !MIN_VERSION_base(4,8,0)
@@ -72,7 +72,7 @@ import Control.Monad.Trans (MonadIO, liftIO)
 import Control.Monad.Trans.Control (MonadBaseControl(..))
 import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
-                  (=?))
+                  (=?), (!?), Val(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -315,9 +315,28 @@ type Collection = Text
 allCollections :: (MonadIO m, MonadBaseControl IO m) => Action m [Collection]
 -- ^ List all collections in this database
 allCollections = do
-    db <- thisDatabase
-    docs <- rest =<< find (query [] "system.namespaces") {sort = ["name" =: (1 :: Int)]}
-    return . filter (not . isSpecial db) . map dropDbPrefix $ map (at "name") docs
+    p <- asks mongoPipe
+    let sd = P.serverData p
+    if (maxWireVersion sd <= 2)
+      then do
+        db <- thisDatabase
+        docs <- rest =<< find (query [] "system.namespaces") {sort = ["name" =: (1 :: Int)]}
+        return . filter (not . isSpecial db) . map dropDbPrefix $ map (at "name") docs
+      else do
+        r <- runCommand1 "listCollections"
+        let curData = do
+                   (Doc curDoc) <- r !? "cursor"
+                   (curId :: Int64) <- curDoc !? "id"
+                   (curNs :: Text) <- curDoc !? "ns"
+                   (firstBatch :: [Value]) <- curDoc !? "firstBatch"
+                   return $ (curId, curNs, ((catMaybes (map cast' firstBatch)) :: [Document]))
+        case curData of
+          Nothing -> return []
+          Just (curId, curNs, firstBatch) -> do
+            db <- thisDatabase
+            nc <- newCursor db curNs 0 $ return $ Batch Nothing curId firstBatch
+            docs <- rest nc
+            return $ catMaybes $ map (\d -> (d !? "name")) docs
  where
     dropDbPrefix = T.tail . T.dropWhile (/= '.')
     isSpecial db col = T.any (== '$') col && db <.> col /= "local.oplog.$main"
