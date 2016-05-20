@@ -28,7 +28,7 @@ module Database.MongoDB.Internal.Protocol (
     Reply(..), ResponseFlag(..),
     -- * Authentication
     Username, Password, Nonce, pwHash, pwKey,
-    isClosed, close
+    isClosed, close, ServerData(..), Pipeline(..)
 ) where
 
 #if !MIN_VERSION_base(4,8,0)
@@ -83,15 +83,22 @@ mkWeakMVar = addMVarFinalizer
 -- * Pipeline
 
 -- | Thread-safe and pipelined connection
-data Pipeline = Pipeline {
-    vStream :: MVar Transport,  -- ^ Mutex on handle, so only one thread at a time can write to it
-    responseQueue :: Chan (MVar (Either IOError Response)),  -- ^ Queue of threads waiting for responses. Every time a response arrive we pop the next thread and give it the response.
-    listenThread :: ThreadId
+data Pipeline = Pipeline
+    { vStream :: MVar Transport -- ^ Mutex on handle, so only one thread at a time can write to it
+    , responseQueue :: Chan (MVar (Either IOError Response)) -- ^ Queue of threads waiting for responses. Every time a response arrive we pop the next thread and give it the response.
+    , listenThread :: ThreadId
+    , serverData :: ServerData
     }
 
+data ServerData = ServerData
+                { isMaster :: Bool
+                , minWireVersion :: Int
+                , maxWireVersion :: Int
+                }
+
 -- | Create new Pipeline over given handle. You should 'close' pipeline when finished, which will also close handle. If pipeline is not closed but eventually garbage collected, it will be closed along with handle.
-newPipeline :: Transport -> IO Pipeline
-newPipeline stream = do
+newPipeline :: ServerData -> Transport -> IO Pipeline
+newPipeline serverData stream = do
     vStream <- newMVar stream
     responseQueue <- newChan
     rec
@@ -150,13 +157,13 @@ pcall p@Pipeline{..} message = withMVar vStream doCall `onException` close p  wh
 type Pipe = Pipeline
 -- ^ Thread-safe TCP connection with pipelined requests
 
-newPipe :: Handle -> IO Pipe
+newPipe :: ServerData -> Handle -> IO Pipe
 -- ^ Create pipe over handle
-newPipe handle = T.fromHandle handle >>= newPipeWith
+newPipe sd handle = T.fromHandle handle >>= (newPipeWith sd)
 
-newPipeWith :: Transport -> IO Pipe
+newPipeWith :: ServerData -> Transport -> IO Pipe
 -- ^ Create pipe over connection
-newPipeWith conn = newPipeline conn
+newPipeWith sd conn = newPipeline sd conn
 
 send :: Pipe -> [Notice] -> IO ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.

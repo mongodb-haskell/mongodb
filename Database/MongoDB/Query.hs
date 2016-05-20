@@ -42,7 +42,7 @@ module Database.MongoDB.Query (
     MRResult, mapReduce, runMR, runMR',
     -- * Command
     Command, runCommand, runCommand1,
-    eval,
+    eval, retrieveServerData
 ) where
 
 import Prelude hiding (lookup)
@@ -84,7 +84,7 @@ import Database.MongoDB.Internal.Protocol (Reply(..), QueryOption(..),
                                            Request(GetMore, qOptions, qSkip,
                                            qFullCollection, qBatchSize,
                                            qSelector, qProjector),
-                                           pwKey)
+                                           pwKey, ServerData(..))
 import Database.MongoDB.Internal.Util (loop, liftIOE, true1, (<.>))
 import qualified Database.MongoDB.Internal.Protocol as P
 
@@ -99,6 +99,7 @@ import qualified Crypto.MAC.HMAC as HMAC
 import Data.Bits (xor)
 import qualified Data.Map as Map
 import Text.Read (readMaybe)
+import Data.Maybe (fromMaybe)
 
 #if !MIN_VERSION_base(4,6,0)
 --mkWeakMVar = addMVarFinalizer
@@ -295,6 +296,16 @@ scramHI digest salt iters = snd $ foldl com (u1, u1) [1..(iters-1)]
 parseSCRAM :: B.ByteString -> Map.Map B.ByteString B.ByteString
 parseSCRAM = Map.fromList . fmap cleanup . (fmap $ T.breakOn "=") . T.splitOn "," . T.pack . B.unpack
     where cleanup (t1, t2) = (B.pack $ T.unpack t1, B.pack . T.unpack $ T.drop 1 t2)
+
+retrieveServerData :: (MonadIO m) => Action m ServerData
+retrieveServerData = do
+  d <- runCommand1 "isMaster"
+  let newSd = ServerData
+                { isMaster = (fromMaybe False $ lookup "ismaster" d)
+                , minWireVersion = (fromMaybe 0 $ lookup "minWireVersion" d)
+                , maxWireVersion = (fromMaybe 0 $ lookup "maxWireVersion" d)
+                }
+  return newSd
 
 -- * Collection
 
