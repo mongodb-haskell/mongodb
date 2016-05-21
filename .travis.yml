@@ -20,7 +20,7 @@ env:
 matrix:
   allow_failures:
    # The text here should match the last line above exactly.
-   - env: GHCVER=head   CABALVER=head
+   - env: GHCVER=head   CABALVER=head  MONGO=3.2.6
 
 before_install:
 
