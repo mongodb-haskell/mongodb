@@ -2,6 +2,12 @@
 
 {-# LANGUAGE CPP, OverloadedStrings, ScopedTypeVariables, TupleSections #-}
 
+#if (__GLASGOW_HASKELL__ >= 706)
+{-# LANGUAGE RecursiveDo #-}
+#else
+{-# LANGUAGE DoRec #-}
+#endif
+
 module Database.MongoDB.Connection (
     -- * Util
     Secs,
@@ -46,7 +52,7 @@ import Database.MongoDB.Internal.Protocol (Pipe, newPipe, close, isClosed)
 import Database.MongoDB.Internal.Util (untilSuccess, liftIOE,
                                        updateAssocs, shuffle, mergesortM)
 import Database.MongoDB.Query (Command, Failure(ConnectionFailure), access,
-                              slaveOk, runCommand)
+                              slaveOk, runCommand, retrieveServerData)
 
 adminCommand :: Command -> Pipe -> IO Document
 -- ^ Run command against admin database on server connected to pipe. Fail if connection fails.
@@ -113,7 +119,10 @@ connect' :: Secs -> Host -> IO Pipe
 connect' timeoutSecs (Host hostname port) = do
     mh <- timeout (round $ timeoutSecs * 1000000) (connectTo hostname port)
     handle <- maybe (ioError $ userError "connect timed out") return mh
-    newPipe handle
+    rec
+      p <- newPipe sd handle
+      sd <- access p slaveOk "admin" retrieveServerData
+    return p
 
 -- * Replica Set
 

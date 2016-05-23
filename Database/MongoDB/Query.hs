@@ -1,6 +1,6 @@
 -- | Query and update documents
 
-{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP, DeriveDataTypeable #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP, DeriveDataTypeable, ScopedTypeVariables #-}
 
 module Database.MongoDB.Query (
     -- * Monad
@@ -42,13 +42,13 @@ module Database.MongoDB.Query (
     MRResult, mapReduce, runMR, runMR',
     -- * Command
     Command, runCommand, runCommand1,
-    eval,
+    eval, retrieveServerData
 ) where
 
 import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO)
 import Control.Monad (unless, replicateM, liftM)
-import Data.Int (Int32)
+import Data.Int (Int32, Int64)
 import Data.Maybe (listToMaybe, catMaybes, isNothing)
 import Data.Word (Word32)
 #if !MIN_VERSION_base(4,8,0)
@@ -72,7 +72,7 @@ import Control.Monad.Trans (MonadIO, liftIO)
 import Control.Monad.Trans.Control (MonadBaseControl(..))
 import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
-                  (=?))
+                  (=?), (!?), Val(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -84,7 +84,7 @@ import Database.MongoDB.Internal.Protocol (Reply(..), QueryOption(..),
                                            Request(GetMore, qOptions, qSkip,
                                            qFullCollection, qBatchSize,
                                            qSelector, qProjector),
-                                           pwKey)
+                                           pwKey, ServerData(..))
 import Database.MongoDB.Internal.Util (loop, liftIOE, true1, (<.>))
 import qualified Database.MongoDB.Internal.Protocol as P
 
@@ -99,6 +99,7 @@ import qualified Crypto.MAC.HMAC as HMAC
 import Data.Bits (xor)
 import qualified Data.Map as Map
 import Text.Read (readMaybe)
+import Data.Maybe (fromMaybe)
 
 #if !MIN_VERSION_base(4,6,0)
 --mkWeakMVar = addMVarFinalizer
@@ -296,6 +297,16 @@ parseSCRAM :: B.ByteString -> Map.Map B.ByteString B.ByteString
 parseSCRAM = Map.fromList . fmap cleanup . (fmap $ T.breakOn "=") . T.splitOn "," . T.pack . B.unpack
     where cleanup (t1, t2) = (B.pack $ T.unpack t1, B.pack . T.unpack $ T.drop 1 t2)
 
+retrieveServerData :: (MonadIO m) => Action m ServerData
+retrieveServerData = do
+  d <- runCommand1 "isMaster"
+  let newSd = ServerData
+                { isMaster = (fromMaybe False $ lookup "ismaster" d)
+                , minWireVersion = (fromMaybe 0 $ lookup "minWireVersion" d)
+                , maxWireVersion = (fromMaybe 0 $ lookup "maxWireVersion" d)
+                }
+  return newSd
+
 -- * Collection
 
 type Collection = Text
@@ -304,9 +315,28 @@ type Collection = Text
 allCollections :: (MonadIO m, MonadBaseControl IO m) => Action m [Collection]
 -- ^ List all collections in this database
 allCollections = do
-    db <- thisDatabase
-    docs <- rest =<< find (query [] "system.namespaces") {sort = ["name" =: (1 :: Int)]}
-    return . filter (not . isSpecial db) . map dropDbPrefix $ map (at "name") docs
+    p <- asks mongoPipe
+    let sd = P.serverData p
+    if (maxWireVersion sd <= 2)
+      then do
+        db <- thisDatabase
+        docs <- rest =<< find (query [] "system.namespaces") {sort = ["name" =: (1 :: Int)]}
+        return . filter (not . isSpecial db) . map dropDbPrefix $ map (at "name") docs
+      else do
+        r <- runCommand1 "listCollections"
+        let curData = do
+                   (Doc curDoc) <- r !? "cursor"
+                   (curId :: Int64) <- curDoc !? "id"
+                   (curNs :: Text) <- curDoc !? "ns"
+                   (firstBatch :: [Value]) <- curDoc !? "firstBatch"
+                   return $ (curId, curNs, ((catMaybes (map cast' firstBatch)) :: [Document]))
+        case curData of
+          Nothing -> return []
+          Just (curId, curNs, firstBatch) -> do
+            db <- thisDatabase
+            nc <- newCursor db curNs 0 $ return $ Batch Nothing curId firstBatch
+            docs <- rest nc
+            return $ catMaybes $ map (\d -> (d !? "name")) docs
  where
     dropDbPrefix = T.tail . T.dropWhile (/= '.')
     isSpecial db col = T.any (== '$') col && db <.> col /= "local.oplog.$main"

@@ -10,6 +10,9 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 ### Removed
 - System.IO.Pipeline module
 
+### Fixed
+- allCollections request for mongo versions above 3.0
+
 ## [2.0.10] - 2015-12-22
 
 ### Fixed

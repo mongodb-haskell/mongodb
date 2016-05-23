@@ -4,6 +4,7 @@
 module QuerySpec (spec) where
 import TestImport
 import Control.Exception
+import qualified Data.List as L
 
 import qualified Data.Text as T
 
@@ -146,6 +147,14 @@ spec = around withCleanDatabase $ do
         returnedDocs <- rest cur
 
         liftIO $ (length returnedDocs) `shouldBe` 6001
+
+  describe "allCollections" $ do
+    it "returns all collections in a database" $ do
+      _ <- db $ insert "team1" ["name" =: "Yankees", "league" =: "American"]
+      _ <- db $ insert "team2" ["name" =: "Yankees", "league" =: "American"]
+      _ <- db $ insert "team3" ["name" =: "Yankees", "league" =: "American"]
+      collections <- db $ allCollections
+      liftIO $ (L.sort collections) `shouldContain` ["team1", "team2", "team3"]
 
   describe "aggregate" $ do
     it "aggregates to normalize and sort documents" $ do

@@ -1,5 +1,12 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+
+#if (__GLASGOW_HASKELL__ >= 706)
+{-# LANGUAGE RecursiveDo #-}
+#else
+{-# LANGUAGE DoRec #-}
+#endif
 
 {-|
 Module      : MongoDB TLS
@@ -36,6 +43,7 @@ import System.IO.Error (mkIOError, eofErrorType)
 import Network (connectTo, HostName, PortID)
 import qualified Network.TLS as TLS
 import qualified Network.TLS.Extra.Cipher as TLS
+import Database.MongoDB.Query (access, slaveOk, retrieveServerData)
 
 -- | Connect to mongodb using TLS
 connect :: HostName -> PortID -> IO Pipe
@@ -51,7 +59,10 @@ connect host port = bracketOnError (connectTo host port) hClose $ \handle -> do
   TLS.handshake context
 
   conn <- tlsConnection context
-  newPipeWith conn
+  rec
+    p <- newPipeWith sd conn
+    sd <- access p slaveOk "admin" retrieveServerData
+  return p
 
 tlsConnection :: TLS.Context -> IO Transport
 tlsConnection ctx = do

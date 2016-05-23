@@ -62,7 +62,7 @@ Source-repository head
 
 test-suite test
   hs-source-dirs: test
-  main-is: Spec.hs
+  main-is: Main.hs
   ghc-options:       -Wall -with-rtsopts "-K32m"
   type: exitcode-stdio-1.0
   build-depends:   mongoDB
