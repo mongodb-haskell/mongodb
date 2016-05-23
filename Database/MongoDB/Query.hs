@@ -412,8 +412,28 @@ insert' :: (MonadIO m) => [InsertOption] -> Collection -> [Document] -> Action m
 insert' opts col docs = do
     db <- thisDatabase
     docs' <- liftIO $ mapM assignId docs
-    write (Insert (db <.> col) opts docs')
-    return $ map (valueAt "_id") docs'
+
+    p <- asks mongoPipe
+    let sd = P.serverData p
+    if (maxWireVersion sd < 2)
+      then do
+        write (Insert (db <.> col) opts docs')
+        return $ map (valueAt "_id") docs'
+      else do
+        doc <- runCommand $
+          [ "insert" =: col
+          , "ordered" =: (KeepGoing `notElem` opts)
+          , "documents" =: docs'
+          ]
+        liftIO $ putStrLn $ show doc
+        case (look "writeErrors" doc, look "writeConcernError" doc) of
+          (Nothing, Nothing) -> return $ map (valueAt "_id") docs'
+          (Just err, Nothing) -> do
+            liftIO $ throwIO $ WriteFailure (maybe 0 id $ lookup "ok" doc) (show err)
+          (Nothing, Just err) -> do
+            liftIO $ throwIO $ WriteFailure (maybe 0 id $ lookup "ok" doc) (show err)
+          (Just err, Just writeConcernErr) -> do
+            liftIO $ throwIO $ WriteFailure (maybe 0 id $ lookup "ok" doc) (show err ++ show writeConcernErr)
 
 assignId :: Document -> IO Document
 -- ^ Assign a unique value to _id field if missing
