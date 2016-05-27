@@ -304,6 +304,9 @@ retrieveServerData = do
                 { isMaster = (fromMaybe False $ lookup "ismaster" d)
                 , minWireVersion = (fromMaybe 0 $ lookup "minWireVersion" d)
                 , maxWireVersion = (fromMaybe 0 $ lookup "maxWireVersion" d)
+                , maxMessageSizeBytes = (fromMaybe 48000000 $ lookup "maxMessageSizeBytes" d)
+                , maxBsonObjectSize = (fromMaybe (16 * 1024 * 1024) $ lookup "maxBsonObjectSize" d)
+                , maxWriteBatchSize = (fromMaybe 1000 $ lookup "maxWriteBatchSize" d)
                 }
   return newSd
 

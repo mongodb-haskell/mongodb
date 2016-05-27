@@ -91,9 +91,12 @@ data Pipeline = Pipeline
     }
 
 data ServerData = ServerData
-                { isMaster :: Bool
-                , minWireVersion :: Int
-                , maxWireVersion :: Int
+                { isMaster            :: Bool
+                , minWireVersion      :: Int
+                , maxWireVersion      :: Int
+                , maxMessageSizeBytes :: Int
+                , maxBsonObjectSize   :: Int
+                , maxWriteBatchSize   :: Int
                 }
 
 -- | Create new Pipeline over given handle. You should 'close' pipeline when finished, which will also close handle. If pipeline is not closed but eventually garbage collected, it will be closed along with handle.
