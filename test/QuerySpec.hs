@@ -2,6 +2,7 @@
 {-# OPTIONS_GHC -fno-warn-type-defaults #-}
 
 module QuerySpec (spec) where
+import Data.String (IsString(..))
 import TestImport
 import Control.Exception
 import qualified Data.List as L
@@ -32,6 +33,15 @@ insertDuplicateWith testInsert = do
                               , ["name" =: "Indians", "league" =: "American"]
                               ]
   return ()
+
+bigDocument :: Document
+bigDocument = (flip map) [1..10000] $ \i -> (fromString $ "team" ++ (show i)) =: ("team " ++ (show i) ++ " name")
+
+fineGrainedBigDocument :: Document
+fineGrainedBigDocument = (flip map) [1..1000] $ \i -> (fromString $ "team" ++ (show i)) =: ("team " ++ (show i) ++ " name")
+
+hugeDocument :: Document
+hugeDocument = (flip map) [1..1000000] $ \i -> (fromString $ "team" ++ (show i)) =: ("team " ++ (show i) ++ " name")
 
 spec :: Spec
 spec = around withCleanDatabase $ do
@@ -77,9 +87,12 @@ spec = around withCleanDatabase $ do
   describe "insertMany_" $ do
     it "inserts documents to the collection and returns nothing" $ do
       ids <- db $ insertMany_ "team" [ ["name" =: "Yankees", "league" =: "American"]
-                                         , ["name" =: "Dodgers", "league" =: "American"]
-                                         ]
+                                     , ["name" =: "Dodgers", "league" =: "American"]
+                                     ]
       ids `shouldBe` ()
+    it "fails if the document is too big" $ do
+      (db $ insertMany_ "hugeDocCollection" [hugeDocument]) `shouldThrow` anyException
+
 
     context "Insert a document with duplicating key" $ do
       before (insertDuplicateWith insertMany_ `catch` \(_ :: Failure) -> return ()) $ do
@@ -135,6 +148,31 @@ spec = around withCleanDatabase $ do
         returnedDocs <- rest cur
 
         liftIO $ (length returnedDocs) `shouldBe` 100000
+
+  describe "insertAll_" $ do
+    it "inserts big documents" $ do
+      let docs = replicate 100 bigDocument
+      db $ insertAll_ "bigDocCollection" docs
+      db $ do
+        cur <- find $ (select [] "bigDocCollection") {limit = 100000, batchSize = 100000}
+        returnedDocs <- rest cur
+
+        liftIO $ (length returnedDocs) `shouldBe` 100
+    it "inserts fine grained big documents" $ do
+      let docs = replicate 1000 fineGrainedBigDocument
+      db $ insertAll_ "bigDocFineGrainedCollection" docs
+      db $ do
+        cur <- find $ (select [] "bigDocFineGrainedCollection") {limit = 100000, batchSize = 100000}
+        returnedDocs <- rest cur
+
+        liftIO $ (length returnedDocs) `shouldBe` 1000
+    it "skips one too big document" $ do
+      db $ insertAll_ "hugeDocCollection" [hugeDocument]
+      db $ do
+        cur <- find $ (select [] "hugeDocCollection") {limit = 100000, batchSize = 100000}
+        returnedDocs <- rest cur
+
+        liftIO $ (length returnedDocs) `shouldBe` 0
 
   describe "rest" $ do
     it "returns all documents from the collection" $ do
