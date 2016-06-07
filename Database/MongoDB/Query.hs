@@ -454,7 +454,6 @@ insertBlock opts col docs = do
         return $ map (valueAt "_id") docs'
       else do
         doc <- runCommand $ insertCommandDocument opts col docs'
-        liftIO $ putStrLn $ show doc
         case (look "writeErrors" doc, look "writeConcernError" doc) of
           (Nothing, Nothing) -> return $ map (valueAt "_id") docs'
           (Just err, Nothing) -> do
