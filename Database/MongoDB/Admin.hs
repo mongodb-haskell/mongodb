@@ -196,7 +196,8 @@ allUsers :: (MonadIO m, MonadBaseControl IO m, Functor m) => Action m [Document]
 allUsers = map (exclude ["_id"]) <$> (rest =<< find
     (select [] "system.users") {sort = ["user" =: (1 :: Int)], project = ["user" =: (1 :: Int), "readOnly" =: (1 :: Int)]})
 
-addUser :: (MonadIO m) => Bool -> Username -> Password -> Action m ()
+addUser :: (MonadBaseControl IO m, MonadIO m)
+        => Bool -> Username -> Password -> Action m ()
 -- ^ Add user with password with read-only access if bool is True or read-write access if bool is False
 addUser readOnly user pass = do
     mu <- findOne (select ["user" =: user] "system.users")
