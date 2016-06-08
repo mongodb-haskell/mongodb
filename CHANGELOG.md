@@ -8,6 +8,10 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 - TLS implementation. So far it is an experimental feature.
 - Insert using command syntax with mongo server >= 2.6
 
+### Changed
+- All messages will be strictly evaluated before sending them to mongodb server.
+No more closed handles because of bad arguments.
+
 ### Removed
 - System.IO.Pipeline module
 
