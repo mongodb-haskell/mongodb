@@ -7,10 +7,13 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 ### Added
 - TLS implementation. So far it is an experimental feature.
 - Insert using command syntax with mongo server >= 2.6
+- UpdateMany and UpdateAll commands. They use bulk operations from mongo
+  version 2.6 and above. With versions below 2.6 it sends many updates.
 
 ### Changed
 - All messages will be strictly evaluated before sending them to mongodb server.
 No more closed handles because of bad arguments.
+- Update command is reimplemented in terms of UpdateMany.
 
 ### Removed
 - System.IO.Pipeline module
