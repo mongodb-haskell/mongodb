@@ -6,7 +6,6 @@ import Data.String (IsString(..))
 import TestImport
 import Control.Exception
 import Control.Monad (forM_)
-import Database.MongoDB.Internal.Protocol (UpdateOption(..))
 import qualified Data.List as L
 
 import qualified Data.Text as T

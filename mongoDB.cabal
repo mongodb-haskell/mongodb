@@ -50,11 +50,11 @@ Library
   Exposed-modules:  Database.MongoDB
                     Database.MongoDB.Admin
                     Database.MongoDB.Connection
-                    Database.MongoDB.Internal.Protocol
-                    Database.MongoDB.Internal.Util
                     Database.MongoDB.Query
                     Database.MongoDB.Transport
                     Database.MongoDB.Transport.Tls
+  Other-modules:    Database.MongoDB.Internal.Protocol
+                    Database.MongoDB.Internal.Util
 
 Source-repository head
     Type:     git

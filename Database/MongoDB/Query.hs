@@ -42,7 +42,8 @@ module Database.MongoDB.Query (
     MRResult, mapReduce, runMR, runMR',
     -- * Command
     Command, runCommand, runCommand1,
-    eval, retrieveServerData, updateMany, updateAll, UpdateResult
+    eval, retrieveServerData, updateMany, updateAll, UpdateResult,
+    UpdateOption(..)
 ) where
 
 import Prelude hiding (lookup)
