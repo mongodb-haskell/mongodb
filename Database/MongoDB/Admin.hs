@@ -204,7 +204,8 @@ addUser readOnly user pass = do
     let usr = merge ["readOnly" =: readOnly, "pwd" =: pwHash user pass] (maybe ["user" =: user] id mu)
     save "system.users" usr
 
-removeUser :: (MonadIO m) => Username -> Action m ()
+removeUser :: (MonadIO m, MonadBaseControl IO m)
+           => Username -> Action m ()
 removeUser user = delete (select ["user" =: user] "system.users")
 
 -- ** Database
