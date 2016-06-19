@@ -418,11 +418,12 @@ insertAll_ :: (MonadIO m) => Collection -> [Document] -> Action m ()
 -- ^ Same as 'insertAll' except don't return _ids
 insertAll_ col docs = insertAll col docs >> return ()
 
-insertCommandDocument :: [InsertOption] -> Collection -> [Document] -> Document
-insertCommandDocument opts col docs =
+insertCommandDocument :: [InsertOption] -> Collection -> [Document] -> Document -> Document
+insertCommandDocument opts col docs writeConcern =
           [ "insert" =: col
           , "ordered" =: (KeepGoing `notElem` opts)
           , "documents" =: docs
+          , "writeConcern" =: writeConcern
           ]
 
 insert' :: (MonadIO m)
@@ -431,7 +432,11 @@ insert' :: (MonadIO m)
 insert' opts col docs = do
   p <- asks mongoPipe
   let sd = P.serverData p
-  let docSize = sizeOfDocument $ insertCommandDocument opts col []
+  mode <- asks mongoWriteMode
+  let writeConcern = case mode of
+                        NoConfirm -> ["w" =: (0 :: Int)]
+                        Confirm params -> params
+  let docSize = sizeOfDocument $ insertCommandDocument opts col [] writeConcern
   chunks <- forM (splitAtLimit
                       (not (KeepGoing `elem` opts))
                       (maxBsonObjectSize sd - docSize)
@@ -458,7 +463,11 @@ insertBlock opts col docs = do
         write (Insert (db <.> col) opts docs')
         return $ map (valueAt "_id") docs'
       else do
-        doc <- runCommand $ insertCommandDocument opts col docs'
+        mode <- asks mongoWriteMode
+        let writeConcern = case mode of
+                              NoConfirm -> ["w" =: (0 :: Int)]
+                              Confirm params -> params
+        doc <- runCommand $ insertCommandDocument opts col docs' writeConcern
         case (look "writeErrors" doc, look "writeConcernError" doc) of
           (Nothing, Nothing) -> return $ map (valueAt "_id") docs'
           (Just err, Nothing) -> do
