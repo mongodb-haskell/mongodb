@@ -21,7 +21,7 @@ Extra-Source-Files: CHANGELOG.md
 
 Library
   GHC-options:      -Wall
-  GHC-prof-options: -auto-all
+  GHC-prof-options: -auto-all-exported
   default-language: Haskell2010
 
   Build-depends:      array -any
