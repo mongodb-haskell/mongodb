@@ -261,7 +261,7 @@ spec = around withCleanDatabase $ do
                                                      , ["league" =: "MiLB"    , "name" =: "Giants" , "score" =: (1 :: Int)]
                                                      ]
     it "can handle big updates" $ do
-      let docs = (flip map) [0..200000] $ \i ->
+      let docs = (flip map) [0..20000] $ \i ->
               ["name" =: (T.pack $ "name " ++ (show i))]
       ids <- db $ insertAll "bigCollection" docs
       let updateDocs = (flip map) ids (\i -> ( [ "_id" =: i]
@@ -290,6 +290,75 @@ spec = around withCleanDatabase $ do
       (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "American", "name" =: "Yankees", "score" =: (Nothing :: Maybe Int)]
                                                      , ["league" =: "MiLB"    , "name" =: "Giants" , "score" =: (3 :: Int)]
                                                      ]
+
+  describe "delete" $ do
+    it "actually deletes something" $ do
+      _ <- db $ insert "team" ["name" =: ("Giants" :: String)]
+      db $ delete $ select ["name" =: "Giants"] "team"
+      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+      length updatedResult `shouldBe` 0
+    it "deletes all matching entries" $ do
+      _ <- db $ insert "team" ["name" =: ("Giants" :: String)]
+      _ <- db $ insert "team" [ "name"  =: ("Giants" :: String)
+                              , "score" =: (10 :: Int)
+                              ]
+      db $ delete $ select ["name" =: "Giants"] "team"
+      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+      length updatedResult `shouldBe` 0
+    it "works if there is no matching document" $ do
+      db $ delete $ select ["name" =: "Giants"] "team"
+      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+      length updatedResult `shouldBe` 0
+
+  describe "deleteOne" $ do
+    it "actually deletes something" $ do
+      _ <- db $ insert "team" ["name" =: ("Giants" :: String)]
+      db $ deleteOne $ select ["name" =: "Giants"] "team"
+      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+      length updatedResult `shouldBe` 0
+    it "deletes only one matching entry" $ do
+      _ <- db $ insert "team" ["name" =: ("Giants" :: String)]
+      _ <- db $ insert "team" [ "name"  =: ("Giants" :: String)
+                              , "score" =: (10 :: Int)
+                              ]
+      db $ deleteOne $ select ["name" =: "Giants"] "team"
+      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+      length updatedResult `shouldBe` 1
+    it "works if there is no matching document" $ do
+      db $ deleteOne $ select ["name" =: "Giants"] "team"
+      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+      length updatedResult `shouldBe` 0
+
+  describe "deleteMany" $ do
+    it "actually deletes something" $ do
+      _ <- db $ insert "team" ["name" =: ("Giants" :: String)]
+      _ <- db $ insert "team" ["name" =: ("Yankees" :: String)]
+      _ <- db $ deleteMany "team" [ (["name" =: ("Giants" :: String)], [])
+                                  , (["name" =: ("Yankees" :: String)], [])
+                                  ]
+      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+      length updatedResult `shouldBe` 0
+
+  describe "deleteAll" $ do
+    it "actually deletes something" $ do
+      _ <- db $ insert "team" [ "name"  =: ("Giants" :: String)
+                              , "score" =: (Nothing :: Maybe Int)
+                              ]
+      _ <- db $ insert "team" [ "name" =: ("Yankees" :: String)
+                              , "score" =: (1 :: Int)
+                              ]
+      _ <- db $ deleteAll "team" [ (["name" =: ("Giants" :: String)], [])
+                                 , (["name" =: ("Yankees" :: String)], [])
+                                 ]
+      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+      length updatedResult `shouldBe` 0
+    it "can handle big deletes" $ do
+      let docs = (flip map) [0..20000] $ \i ->
+              ["name" =: (T.pack $ "name " ++ (show i))]
+      _ <- db $ insertAll "bigCollection" docs
+      _ <- db $ deleteAll "bigCollection" $ map (\d -> (d, [])) docs
+      updatedResult <- db $ rest =<< find ((select [] "bigCollection") {project = ["_id" =: (0 :: Int)]})
+      length updatedResult `shouldBe` 0
 
   describe "allCollections" $ do
     it "returns all collections in a database" $ do

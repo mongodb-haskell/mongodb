@@ -43,7 +43,8 @@ module Database.MongoDB.Query (
     -- * Command
     Command, runCommand, runCommand1,
     eval, retrieveServerData, updateMany, updateAll, UpdateResult,
-    UpdateOption(..)
+    UpdateOption(..),
+    deleteMany, deleteAll, DeleteResult, DeleteOption(..)
 ) where
 
 import Prelude hiding (lookup)
@@ -149,6 +150,8 @@ type GetLastError = Document
 -- ^ Parameters for getLastError command. For example @[\"w\" =: 2]@ tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See <http://www.mongodb.org/display/DOCS/Last+Error+Commands> for more options.
 
 data UpdateResult = UpdateResult
+
+data DeleteResult = DeleteResult
 
 master :: AccessMode
 -- ^ Same as 'ConfirmWrites' []
@@ -440,7 +443,7 @@ insert' opts col docs = do
   chunks <- forM (splitAtLimit
                       (not (KeepGoing `elem` opts))
                       (maxBsonObjectSize sd - docSize)
-                                           -- ^ size of auxiliary part of insert
+                                           -- size of auxiliary part of insert
                                            -- document should be subtracted from
                                            -- the overall size
                       (maxWriteBatchSize sd)
@@ -609,7 +612,7 @@ update' ordered col updateDocs = do
   let chunks = splitAtLimit
                       ordered
                       (maxBsonObjectSize sd - docSize)
-                                           -- ^ size of auxiliary part of insert
+                                           -- size of auxiliary part of update
                                            -- document should be subtracted from
                                            -- the overall size
                       (maxWriteBatchSize sd)
@@ -663,19 +666,122 @@ updateBlock ordered col docs = do
 
 -- ** Delete
 
-delete :: (MonadIO m) => Selection -> Action m ()
+delete :: (MonadIO m, MonadBaseControl IO m)
+       => Selection -> Action m ()
 -- ^ Delete all documents in selection
-delete = delete' []
+delete = deleteHelper []
 
-deleteOne :: (MonadIO m) => Selection -> Action m ()
+deleteOne :: (MonadIO m, MonadBaseControl IO m)
+          => Selection -> Action m ()
 -- ^ Delete first document in selection
-deleteOne = delete' [SingleRemove]
+deleteOne = deleteHelper [SingleRemove]
 
-delete' :: (MonadIO m) => [DeleteOption] -> Selection -> Action m ()
--- ^ Delete all documents in selection unless 'SingleRemove' option is given then only delete first document in selection
-delete' opts (Select sel col) = do
-    db <- thisDatabase
-    write (Delete (db <.> col) opts sel)
+deleteHelper :: (MonadBaseControl IO m, MonadIO m)
+             => [DeleteOption] -> Selection -> Action m ()
+deleteHelper opts (Select sel col) = void $ delete' True col [(sel, opts)]
+
+{-| Bulk delete operation. If one delete fails it will not delete the remaining
+ - documents. Current returned value is only a place holder. With mongodb server
+ - before 2.6 it will send delete requests one by one. After 2.6 it will use
+ - bulk delete feature in mongodb.
+ -}
+deleteMany :: (MonadIO m, MonadBaseControl IO m)
+           => Collection
+           -> [(Selector, [DeleteOption])]
+           -> Action m DeleteResult
+deleteMany = delete' True
+
+{-| Bulk delete operation. If one delete fails it will proceed with the
+ - remaining documents. Current returned value is only a place holder. With
+ - mongodb server before 2.6 it will send delete requests one by one. After 2.6
+ - it will use bulk delete feature in mongodb.
+ -}
+deleteAll :: (MonadIO m, MonadBaseControl IO m)
+          => Collection
+          -> [(Selector, [DeleteOption])]
+          -> Action m DeleteResult
+deleteAll = delete' False
+
+deleteCommandDocument :: Collection -> Bool -> [Document] -> Document -> Document
+deleteCommandDocument col ordered deletes writeConcern =
+  [ "delete"       =: col
+  , "ordered"      =: ordered
+  , "deletes"      =: deletes
+  , "writeConcern" =: writeConcern
+  ]
+
+delete' :: (MonadIO m, MonadBaseControl IO m)
+        => Bool
+        -> Collection
+        -> [(Selector, [DeleteOption])]
+        -> Action m DeleteResult
+delete' ordered col deleteDocs = do
+  p <- asks mongoPipe
+  let sd = P.serverData p
+  let deletes = map (\(s, os) -> [ "q"     =: s
+                                 , "limit" =: if SingleRemove `elem` os
+                                               then (1 :: Int) -- Remove only one matching
+                                               else (0 :: Int) -- Remove all matching
+                                 ])
+                    deleteDocs
+
+  mode <- asks mongoWriteMode
+  let writeConcern = case mode of
+                        NoConfirm -> ["w" =: (0 :: Int)]
+                        Confirm params -> params
+  let docSize = sizeOfDocument $ deleteCommandDocument col ordered [] writeConcern
+  let chunks = splitAtLimit
+                      ordered
+                      (maxBsonObjectSize sd - docSize)
+                                           -- size of auxiliary part of delete
+                                           -- document should be subtracted from
+                                           -- the overall size
+                      (maxWriteBatchSize sd)
+                      deletes
+  forM_ chunks (deleteBlock ordered col)
+  return DeleteResult
+
+deleteBlock :: (MonadIO m, MonadBaseControl IO m)
+            => Bool -> Collection -> [Document] -> Action m ()
+deleteBlock ordered col docs = do
+  p <- asks mongoPipe
+  let sd = P.serverData p
+  if (maxWireVersion sd < 2)
+    then do
+      db <- thisDatabase
+      errors <-
+        forM docs $ \deleteDoc -> do
+          let sel = (at "q" deleteDoc) :: Document
+          let opts = if at "limit" deleteDoc == (1 :: Int) then [SingleRemove] else []
+          write (Delete (db <.> col) opts sel)
+          return Nothing
+          `catch` \(e :: SomeException) -> do
+                     when ordered $ liftIO $ throwIO e
+                     return $ Just e
+      let onlyErrors = catMaybes errors
+      if not $ null onlyErrors
+        then liftIO $ throwIO $ WriteFailure 0 (show onlyErrors)
+        else return ()
+    else do
+      mode <- asks mongoWriteMode
+      let writeConcern = case mode of
+                          NoConfirm -> ["w" =: (0 :: Int)]
+                          Confirm params -> params
+      doc <- runCommand $ deleteCommandDocument col ordered docs writeConcern
+      case (look "writeErrors" doc, look "writeConcernError" doc) of
+        (Nothing, Nothing) -> return ()
+        (Just err, Nothing) -> do
+          liftIO $ throwIO $ WriteFailure
+                                  (maybe 0 id $ lookup "ok" doc)
+                                  (show err)
+        (Nothing, Just err) -> do
+          liftIO $ throwIO $ WriteFailure
+                                  (maybe 0 id $ lookup "ok" doc)
+                                  (show err)
+        (Just err, Just writeConcernErr) -> do
+          liftIO $ throwIO $ WriteFailure
+                                  (maybe 0 id $ lookup "ok" doc)
+                                  (show err ++ show writeConcernErr)
 
 -- * Read
 
