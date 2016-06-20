@@ -21,9 +21,10 @@ module Database.MongoDB.Query (
     -- ** Insert
     insert, insert_, insertMany, insertMany_, insertAll, insertAll_,
     -- ** Update
-    save, replace, repsert, upsert, Modifier, modify,
+    save, replace, repsert, upsert, Modifier, modify, updateMany, updateAll,
+    UpdateResult, UpdateOption(..),
     -- ** Delete
-    delete, deleteOne,
+    delete, deleteOne, deleteMany, deleteAll, DeleteResult, DeleteOption(..),
     -- * Read
     -- ** Query
     Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData, Partial),
@@ -42,9 +43,7 @@ module Database.MongoDB.Query (
     MRResult, mapReduce, runMR, runMR',
     -- * Command
     Command, runCommand, runCommand1,
-    eval, retrieveServerData, updateMany, updateAll, UpdateResult,
-    UpdateOption(..),
-    deleteMany, deleteAll, DeleteResult, DeleteOption(..)
+    eval, retrieveServerData
 ) where
 
 import Prelude hiding (lookup)
