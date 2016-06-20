@@ -288,8 +288,10 @@ authSCRAMSHA1 un pw = do
                   if done
                     then return True
                     else do
-                      let client2 = ["saslContinue" =: (1 :: Int), "conversationId" =: (at "conversationId" server1 :: Int), "payload" =: String ""]
-                      server3 <- runCommand client2
+                      let client2Step2 = [ "saslContinue" =: (1 :: Int)
+                                         , "conversationId" =: (at "conversationId" server1 :: Int)
+                                         , "payload" =: String ""]
+                      server3 <- runCommand client2Step2
                       shortcircuit (true1 "ok" server3) $ do
                         return True
     where
