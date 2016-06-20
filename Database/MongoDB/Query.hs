@@ -565,7 +565,7 @@ updateCommandDocument col ordered updates writeConcern =
   , "writeConcern" =: writeConcern
   ]
 
-{-| Bulk update operation. If one insert fails it will not insert the remaining
+{-| Bulk update operation. If one update fails it will not update the remaining
  - documents. Current returned value is only a place holder. With mongodb server
  - before 2.6 it will send update requests one by one. After 2.6 it will use
  - bulk update feature in mongodb.
@@ -576,7 +576,7 @@ updateMany :: (MonadBaseControl IO m, MonadIO m)
            -> Action m UpdateResult
 updateMany = update' True
 
-{-| Bulk update operation. If one insert fails it will proceed with the
+{-| Bulk update operation. If one update fails it will proceed with the
  - remaining documents. Current returned value is only a place holder. With
  - mongodb server before 2.6 it will send update requests one by one. After 2.6
  - it will use bulk update feature in mongodb.
