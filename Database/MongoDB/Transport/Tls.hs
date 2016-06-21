@@ -10,7 +10,6 @@
 
 {-|
 Module      : MongoDB TLS
-Description : TLS transport for mongodb
 Copyright   : (c)	Yuras Shumovich, 2016
 License     : Apache 2.0
 Maintainer  : Victor Denisov denisovenator@gmail.com

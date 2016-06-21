@@ -1,6 +1,14 @@
+{-|
+Module      : MongoDB TLS
+Copyright   : (c)	Victor Denisov, 2016
+License     : Apache 2.0
+Maintainer  : Victor Denisov denisovenator@gmail.com
+Stability   : alpha
+Portability : POSIX
 
--- | This module defines a connection interface. It could be a regular
--- network connection, TLS connection, a mock or anything else.
+This module defines a connection interface. It could be a regular
+network connection, TLS connection, a mock or anything else.
+-}
 
 module Database.MongoDB.Transport (
     Transport(..),
@@ -22,7 +30,7 @@ data Transport = Transport {
     close :: IO ()}
 
 fromHandle :: Handle -> IO Transport
--- ^ Make connection form handle
+-- ^ Make connection from handle
 fromHandle handle = do
   return Transport
     { read  = ByteString.hGet handle
