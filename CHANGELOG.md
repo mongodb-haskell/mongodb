@@ -2,7 +2,7 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
-## [2.1.0] - unreleased
+## [2.1.0] - 2016-06-21
 
 ### Added
 - TLS implementation. So far it is an experimental feature.
