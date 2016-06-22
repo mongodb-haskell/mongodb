@@ -1,5 +1,5 @@
 Name:           mongoDB
-Version:        2.0.10
+Version:        2.1.0
 Synopsis:       Driver (client) for MongoDB, a free, scalable, fast, document
                 DBMS
 Description:    This package lets you connect to MongoDB servers and
