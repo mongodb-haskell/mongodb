@@ -63,6 +63,9 @@ Source-repository head
 test-suite test
   hs-source-dirs: test
   main-is: Main.hs
+  other-modules:    Spec
+                  , QuerySpec
+                  , TestImport
   ghc-options:       -Wall -with-rtsopts "-K64m"
   type: exitcode-stdio-1.0
   build-depends:   mongoDB
