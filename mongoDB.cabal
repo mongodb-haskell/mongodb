@@ -10,7 +10,7 @@ Category:       Database
 Homepage:       https://github.com/mongodb-haskell/mongodb
 Bug-reports:    https://github.com/mongodb-haskell/mongodb/issues
 Author:         Tony Hannan
-Maintainer:     Fedor Gogolev <knsd@knsd.net>
+Maintainer:     Fedor Gogolev <knsd@knsd.net>, Victor Denisov <denisovenator@gmail.com>
 Copyright:      Copyright (c) 2010-2012 10gen Inc.
 License:        OtherLicense
 License-file:   LICENSE
