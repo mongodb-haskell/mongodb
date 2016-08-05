@@ -191,13 +191,6 @@ send ns = do
     pipe <- asks mongoPipe
     liftIOE ConnectionFailure $ P.send pipe ns
 
-call :: (MonadIO m) => [Notice] -> Request -> Action m (IO Reply)
--- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
-call ns r = do
-    pipe <- asks mongoPipe
-    promise <- liftIOE ConnectionFailure $ P.call pipe ns r
-    return (liftIOE ConnectionFailure promise)
-
 class HasMongoContext env where
     mongoContext :: env -> MongoContext
 instance HasMongoContext MongoContext where
@@ -975,8 +968,10 @@ data Batch = Batch (Maybe Limit) CursorId [Document]
 request :: (MonadIO m) => [Notice] -> (Request, Maybe Limit) -> Action m DelayedBatch
 -- ^ Send notices and request and return promised batch
 request ns (req, remainingLimit) = do
-    promise <- call ns req
-    return $ fromReply remainingLimit =<< promise
+    pipe <- asks mongoPipe
+    promise <- liftIOE ConnectionFailure $ P.call pipe ns req
+    let protectedPromise = liftIOE ConnectionFailure promise
+    return $ fromReply remainingLimit =<< protectedPromise
 
 fromReply :: Maybe Limit -> Reply -> DelayedBatch
 -- ^ Convert Reply to Batch or Failure
