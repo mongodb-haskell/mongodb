@@ -384,7 +384,11 @@ write notice = asks mongoWriteMode >>= \mode -> case mode of
     NoConfirm -> send [notice]
     Confirm params -> do
         let q = query (("getlasterror" =: (1 :: Int)) : params) "$cmd"
-        Batch _ _ [doc] <- fulfill =<< request [notice] =<< queryRequest False q {limit = 1}
+        pipe <- asks mongoPipe
+        Batch _ _ [doc] <- do
+          r <- queryRequest False q {limit = 1}
+          rr <- liftIO $ request pipe [notice] r
+          fulfill rr
         case lookup "err" doc of
             Nothing -> return ()
             Just err -> liftIO $ throwIO $ WriteFailure (maybe 0 id $ lookup "code" doc) err
@@ -823,13 +827,18 @@ find :: (MonadIO m, MonadBaseControl IO m) => Query -> Action m Cursor
 -- ^ Fetch documents satisfying query
 find q@Query{selection, batchSize} = do
     db <- thisDatabase
-    dBatch <- request [] =<< queryRequest False q
+    pipe <- asks mongoPipe
+    qr <- queryRequest False q
+    dBatch <- liftIO $ request pipe [] qr
     newCursor db (coll selection) batchSize dBatch
 
 findOne :: (MonadIO m) => Query -> Action m (Maybe Document)
 -- ^ Fetch first document satisfying query or Nothing if none satisfy it
 findOne q = do
-    Batch _ _ docs <- fulfill =<< request [] =<< queryRequest False q {limit = 1}
+    pipe <- asks mongoPipe
+    qr <- queryRequest False q {limit = 1}
+    rq <- liftIO $ request pipe [] qr
+    Batch _ _ docs <- fulfill rq
     return (listToMaybe docs)
 
 fetch :: (MonadIO m) => Query -> Action m Document
@@ -915,7 +924,10 @@ findAndModifyOpts (Query {
 explain :: (MonadIO m) => Query -> Action m Document
 -- ^ Return performance stats of query execution
 explain q = do  -- same as findOne but with explain set to true
-    Batch _ _ docs <- fulfill =<< request [] =<< queryRequest True q {limit = 1}
+    pipe <- asks mongoPipe
+    qr <- queryRequest True q {limit = 1}
+    r <- liftIO $ request pipe [] qr
+    Batch _ _ docs <- fulfill r
     return $ if null docs then error ("no explain: " ++ show q) else head docs
 
 count :: (MonadIO m) => Query -> Action m Int
@@ -965,10 +977,9 @@ type DelayedBatch = IO Batch
 data Batch = Batch (Maybe Limit) CursorId [Document]
 -- ^ CursorId = 0 means cursor is finished. Documents is remaining documents to serve in current batch. Limit is number of documents to return. Nothing means no limit.
 
-request :: (MonadIO m) => [Notice] -> (Request, Maybe Limit) -> Action m DelayedBatch
+request :: Pipe -> [Notice] -> (Request, Maybe Limit) -> IO DelayedBatch
 -- ^ Send notices and request and return promised batch
-request ns (req, remainingLimit) = do
-    pipe <- asks mongoPipe
+request pipe ns (req, remainingLimit) = do
     promise <- liftIOE ConnectionFailure $ P.call pipe ns req
     let protectedPromise = liftIOE ConnectionFailure promise
     return $ fromReply remainingLimit =<< protectedPromise
@@ -1033,7 +1044,8 @@ fulfill' fcol batchSize dBatch = do
 
 nextBatch' :: (MonadIO m) => FullCollection -> BatchSize -> (Maybe Limit) -> CursorId -> Action m DelayedBatch
 nextBatch' fcol batchSize limit cid = do
-    request [] (GetMore fcol batchSize' cid, remLimit)
+    pipe <- asks mongoPipe
+    liftIO $ request pipe [] (GetMore fcol batchSize' cid, remLimit)
     where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
 
 next :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m (Maybe Document)
