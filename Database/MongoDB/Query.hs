@@ -185,12 +185,6 @@ mongoReadMode = readMode . mongoAccessMode
 mongoWriteMode :: MongoContext -> WriteMode
 mongoWriteMode = writeMode . mongoAccessMode
 
-send :: (MonadIO m) => [Notice] -> Action m ()
--- ^ Send notices as a contiguous batch to server with no reply. Throw 'ConnectionFailure' if pipe fails.
-send ns = do
-    pipe <- asks mongoPipe
-    liftIOE ConnectionFailure $ P.send pipe ns
-
 class HasMongoContext env where
     mongoContext :: env -> MongoContext
 instance HasMongoContext MongoContext where
@@ -381,7 +375,9 @@ data WriteMode =
 write :: (MonadIO m) => Notice -> Action m ()
 -- ^ Send write to server, and if write-mode is 'Safe' then include getLastError request and raise 'WriteFailure' if it reports an error.
 write notice = asks mongoWriteMode >>= \mode -> case mode of
-    NoConfirm -> send [notice]
+    NoConfirm -> do
+      pipe <- asks mongoPipe
+      liftIOE ConnectionFailure $ P.send pipe [notice]
     Confirm params -> do
         let q = query (("getlasterror" =: (1 :: Int)) : params) "$cmd"
         pipe <- asks mongoPipe
@@ -1030,7 +1026,8 @@ nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
     case (cid, newLimit) of
       (0, _)      -> return (emptyBatch, resultDocs)
       (_, Just 0) -> do
-        send [KillCursors [cid]]
+        pipe <- asks mongoPipe
+        liftIOE ConnectionFailure $ P.send pipe [KillCursors [cid]]
         return (emptyBatch, resultDocs)
       (_, _)      -> (, resultDocs) <$> getNextBatch
 
@@ -1066,7 +1063,9 @@ next (Cursor fcol batchSize var) = modifyMVar var nextState where
                     dBatch' <- if null docs' && cid /= 0 && ((newLimit > (Just 0)) || (isNothing newLimit))
                         then nextBatch' fcol batchSize newLimit cid
                         else return $ return (Batch newLimit cid docs')
-                    when (newLimit == (Just 0)) $ unless (cid == 0) $ send [KillCursors [cid]]
+                    when (newLimit == (Just 0)) $ unless (cid == 0) $ do
+                      pipe <- asks mongoPipe
+                      liftIOE ConnectionFailure $ P.send pipe [KillCursors [cid]]
                     return (dBatch', Just doc)
                 [] -> if cid == 0
                     then return (return $ Batch (Just 0) 0 [], Nothing)  -- finished
@@ -1083,7 +1082,9 @@ rest c = loop (next c)
 closeCursor :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m ()
 closeCursor (Cursor _ _ var) = modifyMVar var $ \dBatch -> do
     Batch _ cid _ <- fulfill dBatch
-    unless (cid == 0) $ send [KillCursors [cid]]
+    unless (cid == 0) $ do
+      pipe <- asks mongoPipe
+      liftIOE ConnectionFailure $ P.send pipe [KillCursors [cid]]
     return $ (return $ Batch (Just 0) 0 [], ())
 
 isCursorClosed :: (MonadIO m, MonadBase IO m) => Cursor -> Action m Bool
