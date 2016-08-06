@@ -372,7 +372,7 @@ data WriteMode =
     | Confirm GetLastError  -- ^ Receive an acknowledgment after every write, and raise exception if one says the write failed. This is acomplished by sending the getLastError command, with given 'GetLastError' parameters, after every write.
     deriving (Show, Eq)
 
-write :: (MonadIO m) => Notice -> Action m ()
+write :: Notice -> Action IO ()
 -- ^ Send write to server, and if write-mode is 'Safe' then include getLastError request and raise 'WriteFailure' if it reports an error.
 write notice = asks mongoWriteMode >>= \mode -> case mode of
     NoConfirm -> do
@@ -457,7 +457,7 @@ insertBlock opts col docs = do
     let sd = P.serverData p
     if (maxWireVersion sd < 2)
       then do
-        write (Insert (db <.> col) opts docs')
+        liftDB $ write (Insert (db <.> col) opts docs')
         return $ map (valueAt "_id") docs'
       else do
         mode <- asks mongoWriteMode
@@ -628,7 +628,7 @@ updateBlock ordered col docs = do
           let sel = (at "q" updateDoc) :: Document
           let upsrt = if at "upsert" updateDoc then [Upsert] else []
           let multi = if at "multi" updateDoc then [MultiUpdate] else []
-          write (Update (db <.> col) (upsrt ++ multi) sel doc)
+          liftDB $ write (Update (db <.> col) (upsrt ++ multi) sel doc)
           return Nothing
           `catch` \(e :: SomeException) -> do
                      when ordered $ liftIO $ throwIO e
@@ -747,7 +747,7 @@ deleteBlock ordered col docs = do
         forM docs $ \deleteDoc -> do
           let sel = (at "q" deleteDoc) :: Document
           let opts = if at "limit" deleteDoc == (1 :: Int) then [SingleRemove] else []
-          write (Delete (db <.> col) opts sel)
+          liftDB $ write (Delete (db <.> col) opts sel)
           return Nothing
           `catch` \(e :: SomeException) -> do
                      when ordered $ liftIO $ throwIO e
