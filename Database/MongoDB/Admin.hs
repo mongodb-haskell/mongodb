@@ -196,7 +196,7 @@ allUsers :: (MonadIO m, MonadBaseControl IO m, Functor m) => Action m [Document]
 allUsers = map (exclude ["_id"]) <$> (rest =<< find
     (select [] "system.users") {sort = ["user" =: (1 :: Int)], project = ["user" =: (1 :: Int), "readOnly" =: (1 :: Int)]})
 
-addUser :: (MonadBaseControl IO m, MonadIO m)
+addUser :: (MonadIO m)
         => Bool -> Username -> Password -> Action m ()
 -- ^ Add user with password with read-only access if bool is True or read-write access if bool is False
 addUser readOnly user pass = do
@@ -204,7 +204,7 @@ addUser readOnly user pass = do
     let usr = merge ["readOnly" =: readOnly, "pwd" =: pwHash user pass] (maybe ["user" =: user] id mu)
     save "system.users" usr
 
-removeUser :: (MonadIO m, MonadBaseControl IO m)
+removeUser :: (MonadIO m)
            => Username -> Action m ()
 removeUser user = delete (select ["user" =: user] "system.users")
 

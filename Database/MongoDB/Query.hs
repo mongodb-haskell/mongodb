@@ -48,7 +48,7 @@ module Database.MongoDB.Query (
 
 import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO, throw)
-import Control.Monad (unless, replicateM, liftM, forM, forM_, void)
+import Control.Monad (unless, replicateM, liftM, forM, forM_)
 import Data.Int (Int32, Int64)
 import Data.Maybe (listToMaybe, catMaybes, isNothing)
 import Data.Word (Word32)
@@ -65,8 +65,7 @@ import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
                                          readMVar, modifyMVar)
 #endif
 import Control.Applicative ((<$>))
-import Control.Exception (SomeException)
-import Control.Exception.Lifted (catch)
+import Control.Exception (SomeException, catch)
 import Control.Monad (when)
 import Control.Monad.Base (MonadBase)
 import Control.Monad.Error (Error(..))
@@ -518,25 +517,25 @@ assignId doc = if any (("_id" ==) . label) doc
 
 -- ** Update
 
-save :: (MonadBaseControl IO m, MonadIO m)
+save :: (MonadIO m)
      => Collection -> Document -> Action m ()
 -- ^ Save document to collection, meaning insert it if its new (has no \"_id\" field) or upsert it if its not new (has \"_id\" field)
 save col doc = case look "_id" doc of
     Nothing -> insert_ col doc
     Just i -> upsert (Select ["_id" := i] col) doc
 
-replace :: (MonadBaseControl IO m, MonadIO m)
+replace :: (MonadIO m)
         => Selection -> Document -> Action m ()
 -- ^ Replace first document in selection with given document
 replace = update []
 
-repsert :: (MonadBaseControl IO m, MonadIO m)
+repsert :: (MonadIO m)
         => Selection -> Document -> Action m ()
 -- ^ Replace first document in selection with given document, or insert document if selection is empty
 repsert = update [Upsert]
 {-# DEPRECATED repsert "use upsert instead" #-}
 
-upsert :: (MonadBaseControl IO m, MonadIO m)
+upsert :: (MonadIO m)
        => Selection -> Document -> Action m ()
 -- ^ Update first document in selection with given document, or insert document if selection is empty
 upsert = update [Upsert]
@@ -544,15 +543,17 @@ upsert = update [Upsert]
 type Modifier = Document
 -- ^ Update operations on fields in a document. See <http://www.mongodb.org/display/DOCS/Updating#Updating-ModifierOperations>
 
-modify :: (MonadBaseControl IO m, MonadIO m)
+modify :: (MonadIO m)
        => Selection -> Modifier -> Action m ()
 -- ^ Update all documents in selection using given modifier
 modify = update [MultiUpdate]
 
-update :: (MonadBaseControl IO m, MonadIO m)
+update :: (MonadIO m)
        => [UpdateOption] -> Selection -> Document -> Action m ()
 -- ^ Update first document in selection using updater document, unless 'MultiUpdate' option is supplied then update all documents in selection. If 'Upsert' option is supplied then treat updater as document and insert it if selection is empty.
-update opts (Select sel col) up = void $ update' True col [(sel, up, opts)]
+update opts (Select sel col) up = do
+  _ <- update' True col [(sel, up, opts)]
+  return ()
 
 updateCommandDocument :: Collection -> Bool -> [Document] -> Document -> Document
 updateCommandDocument col ordered updates writeConcern =
@@ -567,7 +568,7 @@ updateCommandDocument col ordered updates writeConcern =
  - before 2.6 it will send update requests one by one. After 2.6 it will use
  - bulk update feature in mongodb.
  -}
-updateMany :: (MonadBaseControl IO m, MonadIO m)
+updateMany :: (MonadIO m)
            => Collection
            -> [(Selector, Document, [UpdateOption])]
            -> Action m UpdateResult
@@ -578,13 +579,13 @@ updateMany = update' True
  - mongodb server before 2.6 it will send update requests one by one. After 2.6
  - it will use bulk update feature in mongodb.
  -}
-updateAll :: (MonadBaseControl IO m, MonadIO m)
+updateAll :: (MonadIO m)
            => Collection
            -> [(Selector, Document, [UpdateOption])]
            -> Action m UpdateResult
 updateAll = update' False
 
-update' :: (MonadBaseControl IO m, MonadIO m)
+update' :: (MonadIO m)
         => Bool
         -> Collection
         -> [(Selector, Document, [UpdateOption])]
@@ -614,7 +615,7 @@ update' ordered col updateDocs = do
   forM_ chunks (updateBlock ordered col)
   return UpdateResult
 
-updateBlock :: (MonadIO m, MonadBaseControl IO m)
+updateBlock :: (MonadIO m)
             => Bool -> Collection -> [Document] -> Action m ()
 updateBlock ordered col docs = do
   p <- asks mongoPipe
@@ -622,13 +623,14 @@ updateBlock ordered col docs = do
   if (maxWireVersion sd < 2)
     then do
       db <- thisDatabase
+      ctx <- ask
       errors <-
-        forM docs $ \updateDoc -> do
+        liftIO $ forM docs $ \updateDoc -> do
           let doc = (at "u" updateDoc) :: Document
           let sel = (at "q" updateDoc) :: Document
           let upsrt = if at "upsert" updateDoc then [Upsert] else []
           let multi = if at "multi" updateDoc then [MultiUpdate] else []
-          liftDB $ write (Update (db <.> col) (upsrt ++ multi) sel doc)
+          runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
           return Nothing
           `catch` \(e :: SomeException) -> do
                      when ordered $ liftIO $ throwIO e
@@ -660,26 +662,28 @@ updateBlock ordered col docs = do
 
 -- ** Delete
 
-delete :: (MonadIO m, MonadBaseControl IO m)
+delete :: (MonadIO m)
        => Selection -> Action m ()
 -- ^ Delete all documents in selection
 delete = deleteHelper []
 
-deleteOne :: (MonadIO m, MonadBaseControl IO m)
+deleteOne :: (MonadIO m)
           => Selection -> Action m ()
 -- ^ Delete first document in selection
 deleteOne = deleteHelper [SingleRemove]
 
-deleteHelper :: (MonadBaseControl IO m, MonadIO m)
+deleteHelper :: (MonadIO m)
              => [DeleteOption] -> Selection -> Action m ()
-deleteHelper opts (Select sel col) = void $ delete' True col [(sel, opts)]
+deleteHelper opts (Select sel col) = do
+  _ <- delete' True col [(sel, opts)]
+  return ()
 
 {-| Bulk delete operation. If one delete fails it will not delete the remaining
  - documents. Current returned value is only a place holder. With mongodb server
  - before 2.6 it will send delete requests one by one. After 2.6 it will use
  - bulk delete feature in mongodb.
  -}
-deleteMany :: (MonadIO m, MonadBaseControl IO m)
+deleteMany :: (MonadIO m)
            => Collection
            -> [(Selector, [DeleteOption])]
            -> Action m DeleteResult
@@ -690,7 +694,7 @@ deleteMany = delete' True
  - mongodb server before 2.6 it will send delete requests one by one. After 2.6
  - it will use bulk delete feature in mongodb.
  -}
-deleteAll :: (MonadIO m, MonadBaseControl IO m)
+deleteAll :: (MonadIO m)
           => Collection
           -> [(Selector, [DeleteOption])]
           -> Action m DeleteResult
@@ -704,7 +708,7 @@ deleteCommandDocument col ordered deletes writeConcern =
   , "writeConcern" =: writeConcern
   ]
 
-delete' :: (MonadIO m, MonadBaseControl IO m)
+delete' :: (MonadIO m)
         => Bool
         -> Collection
         -> [(Selector, [DeleteOption])]
@@ -735,7 +739,7 @@ delete' ordered col deleteDocs = do
   forM_ chunks (deleteBlock ordered col)
   return DeleteResult
 
-deleteBlock :: (MonadIO m, MonadBaseControl IO m)
+deleteBlock :: (MonadIO m)
             => Bool -> Collection -> [Document] -> Action m ()
 deleteBlock ordered col docs = do
   p <- asks mongoPipe
@@ -743,11 +747,12 @@ deleteBlock ordered col docs = do
   if (maxWireVersion sd < 2)
     then do
       db <- thisDatabase
+      ctx <- ask
       errors <-
-        forM docs $ \deleteDoc -> do
+        liftIO $ forM docs $ \deleteDoc -> do
           let sel = (at "q" deleteDoc) :: Document
           let opts = if at "limit" deleteDoc == (1 :: Int) then [SingleRemove] else []
-          liftDB $ write (Delete (db <.> col) opts sel)
+          runReaderT (write (Delete (db <.> col) opts sel)) ctx
           return Nothing
           `catch` \(e :: SomeException) -> do
                      when ordered $ liftIO $ throwIO e
