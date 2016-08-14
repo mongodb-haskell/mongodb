@@ -48,7 +48,7 @@ module Database.MongoDB.Query (
 
 import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO, throw)
-import Control.Monad (unless, replicateM, liftM, forM, forM_, void)
+import Control.Monad (unless, replicateM, liftM, forM, forM_)
 import Data.Int (Int32, Int64)
 import Data.Maybe (listToMaybe, catMaybes, isNothing)
 import Data.Word (Word32)
@@ -65,8 +65,7 @@ import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
                                          readMVar, modifyMVar)
 #endif
 import Control.Applicative ((<$>))
-import Control.Exception (SomeException)
-import Control.Exception.Lifted (catch)
+import Control.Exception (SomeException, catch)
 import Control.Monad (when)
 import Control.Monad.Base (MonadBase)
 import Control.Monad.Error (Error(..))
@@ -184,19 +183,6 @@ mongoReadMode = readMode . mongoAccessMode
 
 mongoWriteMode :: MongoContext -> WriteMode
 mongoWriteMode = writeMode . mongoAccessMode
-
-send :: (MonadIO m) => [Notice] -> Action m ()
--- ^ Send notices as a contiguous batch to server with no reply. Throw 'ConnectionFailure' if pipe fails.
-send ns = do
-    pipe <- asks mongoPipe
-    liftIOE ConnectionFailure $ P.send pipe ns
-
-call :: (MonadIO m) => [Notice] -> Request -> Action m (IO Reply)
--- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call will throw 'ConnectionFailure' if pipe fails on send, and promise will throw 'ConnectionFailure' if pipe fails on receive.
-call ns r = do
-    pipe <- asks mongoPipe
-    promise <- liftIOE ConnectionFailure $ P.call pipe ns r
-    return (liftIOE ConnectionFailure promise)
 
 class HasMongoContext env where
     mongoContext :: env -> MongoContext
@@ -385,13 +371,19 @@ data WriteMode =
     | Confirm GetLastError  -- ^ Receive an acknowledgment after every write, and raise exception if one says the write failed. This is acomplished by sending the getLastError command, with given 'GetLastError' parameters, after every write.
     deriving (Show, Eq)
 
-write :: (MonadIO m) => Notice -> Action m ()
+write :: Notice -> Action IO ()
 -- ^ Send write to server, and if write-mode is 'Safe' then include getLastError request and raise 'WriteFailure' if it reports an error.
 write notice = asks mongoWriteMode >>= \mode -> case mode of
-    NoConfirm -> send [notice]
+    NoConfirm -> do
+      pipe <- asks mongoPipe
+      liftIOE ConnectionFailure $ P.send pipe [notice]
     Confirm params -> do
         let q = query (("getlasterror" =: (1 :: Int)) : params) "$cmd"
-        Batch _ _ [doc] <- fulfill =<< request [notice] =<< queryRequest False q {limit = 1}
+        pipe <- asks mongoPipe
+        Batch _ _ [doc] <- do
+          r <- queryRequest False q {limit = 1}
+          rr <- liftIO $ request pipe [notice] r
+          fulfill rr
         case lookup "err" doc of
             Nothing -> return ()
             Just err -> liftIO $ throwIO $ WriteFailure (maybe 0 id $ lookup "code" doc) err
@@ -464,7 +456,7 @@ insertBlock opts col docs = do
     let sd = P.serverData p
     if (maxWireVersion sd < 2)
       then do
-        write (Insert (db <.> col) opts docs')
+        liftDB $ write (Insert (db <.> col) opts docs')
         return $ map (valueAt "_id") docs'
       else do
         mode <- asks mongoWriteMode
@@ -525,25 +517,25 @@ assignId doc = if any (("_id" ==) . label) doc
 
 -- ** Update
 
-save :: (MonadBaseControl IO m, MonadIO m)
+save :: (MonadIO m)
      => Collection -> Document -> Action m ()
 -- ^ Save document to collection, meaning insert it if its new (has no \"_id\" field) or upsert it if its not new (has \"_id\" field)
 save col doc = case look "_id" doc of
     Nothing -> insert_ col doc
     Just i -> upsert (Select ["_id" := i] col) doc
 
-replace :: (MonadBaseControl IO m, MonadIO m)
+replace :: (MonadIO m)
         => Selection -> Document -> Action m ()
 -- ^ Replace first document in selection with given document
 replace = update []
 
-repsert :: (MonadBaseControl IO m, MonadIO m)
+repsert :: (MonadIO m)
         => Selection -> Document -> Action m ()
 -- ^ Replace first document in selection with given document, or insert document if selection is empty
 repsert = update [Upsert]
 {-# DEPRECATED repsert "use upsert instead" #-}
 
-upsert :: (MonadBaseControl IO m, MonadIO m)
+upsert :: (MonadIO m)
        => Selection -> Document -> Action m ()
 -- ^ Update first document in selection with given document, or insert document if selection is empty
 upsert = update [Upsert]
@@ -551,15 +543,17 @@ upsert = update [Upsert]
 type Modifier = Document
 -- ^ Update operations on fields in a document. See <http://www.mongodb.org/display/DOCS/Updating#Updating-ModifierOperations>
 
-modify :: (MonadBaseControl IO m, MonadIO m)
+modify :: (MonadIO m)
        => Selection -> Modifier -> Action m ()
 -- ^ Update all documents in selection using given modifier
 modify = update [MultiUpdate]
 
-update :: (MonadBaseControl IO m, MonadIO m)
+update :: (MonadIO m)
        => [UpdateOption] -> Selection -> Document -> Action m ()
 -- ^ Update first document in selection using updater document, unless 'MultiUpdate' option is supplied then update all documents in selection. If 'Upsert' option is supplied then treat updater as document and insert it if selection is empty.
-update opts (Select sel col) up = void $ update' True col [(sel, up, opts)]
+update opts (Select sel col) up = do
+  _ <- update' True col [(sel, up, opts)]
+  return ()
 
 updateCommandDocument :: Collection -> Bool -> [Document] -> Document -> Document
 updateCommandDocument col ordered updates writeConcern =
@@ -574,7 +568,7 @@ updateCommandDocument col ordered updates writeConcern =
  - before 2.6 it will send update requests one by one. After 2.6 it will use
  - bulk update feature in mongodb.
  -}
-updateMany :: (MonadBaseControl IO m, MonadIO m)
+updateMany :: (MonadIO m)
            => Collection
            -> [(Selector, Document, [UpdateOption])]
            -> Action m UpdateResult
@@ -585,13 +579,13 @@ updateMany = update' True
  - mongodb server before 2.6 it will send update requests one by one. After 2.6
  - it will use bulk update feature in mongodb.
  -}
-updateAll :: (MonadBaseControl IO m, MonadIO m)
+updateAll :: (MonadIO m)
            => Collection
            -> [(Selector, Document, [UpdateOption])]
            -> Action m UpdateResult
 updateAll = update' False
 
-update' :: (MonadBaseControl IO m, MonadIO m)
+update' :: (MonadIO m)
         => Bool
         -> Collection
         -> [(Selector, Document, [UpdateOption])]
@@ -621,7 +615,7 @@ update' ordered col updateDocs = do
   forM_ chunks (updateBlock ordered col)
   return UpdateResult
 
-updateBlock :: (MonadIO m, MonadBaseControl IO m)
+updateBlock :: (MonadIO m)
             => Bool -> Collection -> [Document] -> Action m ()
 updateBlock ordered col docs = do
   p <- asks mongoPipe
@@ -629,13 +623,14 @@ updateBlock ordered col docs = do
   if (maxWireVersion sd < 2)
     then do
       db <- thisDatabase
+      ctx <- ask
       errors <-
-        forM docs $ \updateDoc -> do
+        liftIO $ forM docs $ \updateDoc -> do
           let doc = (at "u" updateDoc) :: Document
           let sel = (at "q" updateDoc) :: Document
           let upsrt = if at "upsert" updateDoc then [Upsert] else []
           let multi = if at "multi" updateDoc then [MultiUpdate] else []
-          write (Update (db <.> col) (upsrt ++ multi) sel doc)
+          runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
           return Nothing
           `catch` \(e :: SomeException) -> do
                      when ordered $ liftIO $ throwIO e
@@ -667,26 +662,28 @@ updateBlock ordered col docs = do
 
 -- ** Delete
 
-delete :: (MonadIO m, MonadBaseControl IO m)
+delete :: (MonadIO m)
        => Selection -> Action m ()
 -- ^ Delete all documents in selection
 delete = deleteHelper []
 
-deleteOne :: (MonadIO m, MonadBaseControl IO m)
+deleteOne :: (MonadIO m)
           => Selection -> Action m ()
 -- ^ Delete first document in selection
 deleteOne = deleteHelper [SingleRemove]
 
-deleteHelper :: (MonadBaseControl IO m, MonadIO m)
+deleteHelper :: (MonadIO m)
              => [DeleteOption] -> Selection -> Action m ()
-deleteHelper opts (Select sel col) = void $ delete' True col [(sel, opts)]
+deleteHelper opts (Select sel col) = do
+  _ <- delete' True col [(sel, opts)]
+  return ()
 
 {-| Bulk delete operation. If one delete fails it will not delete the remaining
  - documents. Current returned value is only a place holder. With mongodb server
  - before 2.6 it will send delete requests one by one. After 2.6 it will use
  - bulk delete feature in mongodb.
  -}
-deleteMany :: (MonadIO m, MonadBaseControl IO m)
+deleteMany :: (MonadIO m)
            => Collection
            -> [(Selector, [DeleteOption])]
            -> Action m DeleteResult
@@ -697,7 +694,7 @@ deleteMany = delete' True
  - mongodb server before 2.6 it will send delete requests one by one. After 2.6
  - it will use bulk delete feature in mongodb.
  -}
-deleteAll :: (MonadIO m, MonadBaseControl IO m)
+deleteAll :: (MonadIO m)
           => Collection
           -> [(Selector, [DeleteOption])]
           -> Action m DeleteResult
@@ -711,7 +708,7 @@ deleteCommandDocument col ordered deletes writeConcern =
   , "writeConcern" =: writeConcern
   ]
 
-delete' :: (MonadIO m, MonadBaseControl IO m)
+delete' :: (MonadIO m)
         => Bool
         -> Collection
         -> [(Selector, [DeleteOption])]
@@ -742,7 +739,7 @@ delete' ordered col deleteDocs = do
   forM_ chunks (deleteBlock ordered col)
   return DeleteResult
 
-deleteBlock :: (MonadIO m, MonadBaseControl IO m)
+deleteBlock :: (MonadIO m)
             => Bool -> Collection -> [Document] -> Action m ()
 deleteBlock ordered col docs = do
   p <- asks mongoPipe
@@ -750,11 +747,12 @@ deleteBlock ordered col docs = do
   if (maxWireVersion sd < 2)
     then do
       db <- thisDatabase
+      ctx <- ask
       errors <-
-        forM docs $ \deleteDoc -> do
+        liftIO $ forM docs $ \deleteDoc -> do
           let sel = (at "q" deleteDoc) :: Document
           let opts = if at "limit" deleteDoc == (1 :: Int) then [SingleRemove] else []
-          write (Delete (db <.> col) opts sel)
+          runReaderT (write (Delete (db <.> col) opts sel)) ctx
           return Nothing
           `catch` \(e :: SomeException) -> do
                      when ordered $ liftIO $ throwIO e
@@ -830,13 +828,18 @@ find :: (MonadIO m, MonadBaseControl IO m) => Query -> Action m Cursor
 -- ^ Fetch documents satisfying query
 find q@Query{selection, batchSize} = do
     db <- thisDatabase
-    dBatch <- request [] =<< queryRequest False q
+    pipe <- asks mongoPipe
+    qr <- queryRequest False q
+    dBatch <- liftIO $ request pipe [] qr
     newCursor db (coll selection) batchSize dBatch
 
 findOne :: (MonadIO m) => Query -> Action m (Maybe Document)
 -- ^ Fetch first document satisfying query or Nothing if none satisfy it
 findOne q = do
-    Batch _ _ docs <- fulfill =<< request [] =<< queryRequest False q {limit = 1}
+    pipe <- asks mongoPipe
+    qr <- queryRequest False q {limit = 1}
+    rq <- liftIO $ request pipe [] qr
+    Batch _ _ docs <- fulfill rq
     return (listToMaybe docs)
 
 fetch :: (MonadIO m) => Query -> Action m Document
@@ -922,7 +925,10 @@ findAndModifyOpts (Query {
 explain :: (MonadIO m) => Query -> Action m Document
 -- ^ Return performance stats of query execution
 explain q = do  -- same as findOne but with explain set to true
-    Batch _ _ docs <- fulfill =<< request [] =<< queryRequest True q {limit = 1}
+    pipe <- asks mongoPipe
+    qr <- queryRequest True q {limit = 1}
+    r <- liftIO $ request pipe [] qr
+    Batch _ _ docs <- fulfill r
     return $ if null docs then error ("no explain: " ++ show q) else head docs
 
 count :: (MonadIO m) => Query -> Action m Int
@@ -972,11 +978,12 @@ type DelayedBatch = IO Batch
 data Batch = Batch (Maybe Limit) CursorId [Document]
 -- ^ CursorId = 0 means cursor is finished. Documents is remaining documents to serve in current batch. Limit is number of documents to return. Nothing means no limit.
 
-request :: (MonadIO m) => [Notice] -> (Request, Maybe Limit) -> Action m DelayedBatch
+request :: Pipe -> [Notice] -> (Request, Maybe Limit) -> IO DelayedBatch
 -- ^ Send notices and request and return promised batch
-request ns (req, remainingLimit) = do
-    promise <- call ns req
-    return $ fromReply remainingLimit =<< promise
+request pipe ns (req, remainingLimit) = do
+    promise <- liftIOE ConnectionFailure $ P.call pipe ns req
+    let protectedPromise = liftIOE ConnectionFailure promise
+    return $ fromReply remainingLimit =<< protectedPromise
 
 fromReply :: Maybe Limit -> Reply -> DelayedBatch
 -- ^ Convert Reply to Batch or Failure
@@ -1024,7 +1031,8 @@ nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
     case (cid, newLimit) of
       (0, _)      -> return (emptyBatch, resultDocs)
       (_, Just 0) -> do
-        send [KillCursors [cid]]
+        pipe <- asks mongoPipe
+        liftIOE ConnectionFailure $ P.send pipe [KillCursors [cid]]
         return (emptyBatch, resultDocs)
       (_, _)      -> (, resultDocs) <$> getNextBatch
 
@@ -1038,7 +1046,8 @@ fulfill' fcol batchSize dBatch = do
 
 nextBatch' :: (MonadIO m) => FullCollection -> BatchSize -> (Maybe Limit) -> CursorId -> Action m DelayedBatch
 nextBatch' fcol batchSize limit cid = do
-    request [] (GetMore fcol batchSize' cid, remLimit)
+    pipe <- asks mongoPipe
+    liftIO $ request pipe [] (GetMore fcol batchSize' cid, remLimit)
     where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
 
 next :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m (Maybe Document)
@@ -1059,7 +1068,9 @@ next (Cursor fcol batchSize var) = modifyMVar var nextState where
                     dBatch' <- if null docs' && cid /= 0 && ((newLimit > (Just 0)) || (isNothing newLimit))
                         then nextBatch' fcol batchSize newLimit cid
                         else return $ return (Batch newLimit cid docs')
-                    when (newLimit == (Just 0)) $ unless (cid == 0) $ send [KillCursors [cid]]
+                    when (newLimit == (Just 0)) $ unless (cid == 0) $ do
+                      pipe <- asks mongoPipe
+                      liftIOE ConnectionFailure $ P.send pipe [KillCursors [cid]]
                     return (dBatch', Just doc)
                 [] -> if cid == 0
                     then return (return $ Batch (Just 0) 0 [], Nothing)  -- finished
@@ -1076,7 +1087,9 @@ rest c = loop (next c)
 closeCursor :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m ()
 closeCursor (Cursor _ _ var) = modifyMVar var $ \dBatch -> do
     Batch _ cid _ <- fulfill dBatch
-    unless (cid == 0) $ send [KillCursors [cid]]
+    unless (cid == 0) $ do
+      pipe <- asks mongoPipe
+      liftIOE ConnectionFailure $ P.send pipe [KillCursors [cid]]
     return $ (return $ Batch (Just 0) 0 [], ())
 
 isCursorClosed :: (MonadIO m, MonadBase IO m) => Cursor -> Action m Bool
