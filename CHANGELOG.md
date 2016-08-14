@@ -2,7 +2,7 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
-## [2.1.1] - unreleased
+## [2.1.1] - 2016-08-13
 
 ### Changed
 - Interfaces of update and delete functions. They don't require MonadBaseControl
