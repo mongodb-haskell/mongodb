@@ -599,9 +599,8 @@ updateMany :: (MonadIO m)
 updateMany = update' True
 
 {-| Bulk update operation. If one update fails it will proceed with the
- - remaining documents. Current returned value is only a place holder. With
- - mongodb server before 2.6 it will send update requests one by one. After 2.6
- - it will use bulk update feature in mongodb.
+ - remaining documents. With mongodb server before 2.6 it will send update
+ - requests one by one. After 2.6 it will use bulk update feature in mongodb.
  -}
 updateAll :: (MonadIO m)
            => Collection
@@ -691,29 +690,33 @@ updateBlock ordered col (prevCount, docs) = do
                           NoConfirm -> ["w" =: (0 :: Int)]
                           Confirm params -> params
       doc <- runCommand $ updateCommandDocument col ordered docs writeConcern
-      case (look "writeErrors" doc, look "writeConcernError" doc) of
-        (Nothing, Nothing) -> return ()
-        (Just err, Nothing) -> do
+      case look "writeConcernError" doc of
+        Nothing  -> return ()
+        Just err -> do
           liftIO $ throwIO $ WriteFailure
                                   (maybe 0 id $ lookup "ok" doc)
                                   (show err)
-        (Nothing, Just err) -> do
-          liftIO $ throwIO $ WriteFailure
-                                  (maybe 0 id $ lookup "ok" doc)
-                                  (show err)
-        (Just err, Just writeConcernErr) -> do
-          liftIO $ throwIO $ WriteFailure
-                                  (maybe 0 id $ lookup "ok" doc)
-                                  (show err ++ show writeConcernErr)
 
+      let writeErrors = map docToWriteError $ fromMaybe [] (doc !? "writeErrors")
       let upsertedDocs = fromMaybe [] (doc !? "upserted")
-      return $ UpdateResult (at "n" doc) (at "nModified" doc) (map docToUpserted upsertedDocs) []
+      return $ UpdateResult
+                    (at "n" doc)
+                    (at "nModified" doc)
+                    (map docToUpserted upsertedDocs)
+                    writeErrors
 
 docToUpserted :: Document -> Upserted
 docToUpserted doc = Upserted ind uid
   where
     ind = at "index" doc
     uid = at "_id"   doc
+
+docToWriteError :: Document -> WriteError
+docToWriteError doc = WriteError ind code msg
+  where
+    ind  = at "index"  doc
+    code = at "code"   doc
+    msg  = at "errmsg" doc
 
 -- ** Delete
 
