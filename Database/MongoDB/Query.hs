@@ -22,7 +22,7 @@ module Database.MongoDB.Query (
     insert, insert_, insertMany, insertMany_, insertAll, insertAll_,
     -- ** Update
     save, replace, repsert, upsert, Modifier, modify, updateMany, updateAll,
-    UpdateResult, UpdateOption(..),
+    UpdateResult(..), UpdateOption(..), Upserted(..),
     -- ** Delete
     delete, deleteOne, deleteMany, deleteAll, DeleteResult, DeleteOption(..),
     -- * Read
@@ -151,7 +151,8 @@ type GetLastError = Document
 
 data UpdateResult = UpdateResult
                   { nMatched    :: Int
-                  , nModified   :: Maybe Int -- Mongodb server before 2.6 doesn't allow to calculate this value. It's Nothing if we fail to do so
+                  , nModified   :: Maybe Int
+                  -- ^ Mongodb server before 2.6 doesn't allow to calculate this value. This field is nothing if we can't calculate the number of modified documents.
                   , upserted    :: [Upserted]
                   , writeErrors :: [WriteError]
                   } deriving Show
