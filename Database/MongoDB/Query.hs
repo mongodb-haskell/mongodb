@@ -155,12 +155,18 @@ data UpdateResult = UpdateResult
                   -- ^ Mongodb server before 2.6 doesn't allow to calculate this value. This field is nothing if we can't calculate the number of modified documents.
                   , upserted    :: [Upserted]
                   , writeErrors :: [WriteError]
+                  , writeConcernError :: Maybe WriteConcernError
                   } deriving Show
 
 data Upserted = Upserted
               { upsertedIndex :: Int
               , upsertedId    :: ObjectId
               } deriving Show
+
+data WriteConcernError = WriteConcernError
+                       { wceCode   :: Int
+                       , wceErrMsg :: Int
+                       } deriving Show
 
 data WriteError = WriteError
             { errIndex :: Int
@@ -645,7 +651,7 @@ update' ordered col updateDocs = do
           else Just $ sum $ catMaybes $ map nModified blocks
 
   let upsertedTotal = concat $ map upserted blocks
-  return $ UpdateResult updatedTotal modifiedTotal upsertedTotal []
+  return $ UpdateResult updatedTotal modifiedTotal upsertedTotal [] Nothing -- TODO change Nothing to Something
 
 updateBlock :: (MonadIO m)
             => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
@@ -664,7 +670,7 @@ updateBlock ordered col (prevCount, docs) = do
           let multi = if at "multi" updateDoc then [MultiUpdate] else []
           mRes <- runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
           case mRes of
-            Nothing -> return $ Right $ UpdateResult 0 Nothing [] []
+            Nothing -> return $ Right $ UpdateResult 0 Nothing [] [] Nothing
             Just resDoc -> do
               let em = lookup "err" resDoc
               case em of
@@ -673,7 +679,7 @@ updateBlock ordered col (prevCount, docs) = do
                   let ups = do
                         upsValue <- lookup "upserted" resDoc
                         return $ Upserted i upsValue
-                  return $ Right $ UpdateResult n Nothing (maybeToList ups) []
+                  return $ Right $ UpdateResult n Nothing (maybeToList ups) [] Nothing
                 Just errV -> do
                   return $ Left $ WriteError i (at "code" resDoc) errV
           `catch` \(e :: SomeException) -> do
@@ -683,19 +689,17 @@ updateBlock ordered col (prevCount, docs) = do
       let onlyUpdates = rights results
       let totalnMatched = sum $ map nMatched onlyUpdates
       let totalUpserted = concat $ map upserted onlyUpdates
-      return $ UpdateResult totalnMatched Nothing totalUpserted onlyErrors
+      return $ UpdateResult totalnMatched Nothing totalUpserted onlyErrors Nothing
     else do
       mode <- asks mongoWriteMode
       let writeConcern = case mode of
                           NoConfirm -> ["w" =: (0 :: Int)]
                           Confirm params -> params
       doc <- runCommand $ updateCommandDocument col ordered docs writeConcern
-      case look "writeConcernError" doc of
-        Nothing  -> return ()
-        Just err -> do
-          liftIO $ throwIO $ WriteFailure
-                                  (maybe 0 id $ lookup "ok" doc)
-                                  (show err)
+
+      let writeConcernError = do
+            wceDoc <- doc !? "writeConcernError"
+            return $ docToWriteConcernError wceDoc
 
       let writeErrors = map docToWriteError $ fromMaybe [] (doc !? "writeErrors")
       let upsertedDocs = fromMaybe [] (doc !? "upserted")
@@ -704,6 +708,7 @@ updateBlock ordered col (prevCount, docs) = do
                     (at "nModified" doc)
                     (map docToUpserted upsertedDocs)
                     writeErrors
+                    writeConcernError
 
 docToUpserted :: Document -> Upserted
 docToUpserted doc = Upserted ind uid
@@ -717,6 +722,12 @@ docToWriteError doc = WriteError ind code msg
     ind  = at "index"  doc
     code = at "code"   doc
     msg  = at "errmsg" doc
+
+docToWriteConcernError :: Document -> WriteConcernError
+docToWriteConcernError doc = WriteConcernError code msg
+  where
+    code = at "code" doc
+    msg = at "errmsg" doc
 
 -- ** Delete
 
