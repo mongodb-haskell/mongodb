@@ -150,7 +150,8 @@ type GetLastError = Document
 -- ^ Parameters for getLastError command. For example @[\"w\" =: 2]@ tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See <http://www.mongodb.org/display/DOCS/Last+Error+Commands> for more options.
 
 data UpdateResult = UpdateResult
-                  { nMatched    :: Int
+                  { failed      :: Bool
+                  , nMatched    :: Int
                   , nModified   :: Maybe Int
                   -- ^ Mongodb server before 2.6 doesn't allow to calculate this value. This field is nothing if we can't calculate the number of modified documents.
                   , upserted    :: [Upserted]
@@ -653,7 +654,7 @@ update' ordered col updateDocs = do
   let totalWriteConcernErrors = concat $ map writeConcernErrors blocks
 
   let upsertedTotal = concat $ map upserted blocks
-  return $ UpdateResult updatedTotal modifiedTotal upsertedTotal totalWriteErrors totalWriteConcernErrors
+  return $ UpdateResult False updatedTotal modifiedTotal upsertedTotal totalWriteErrors totalWriteConcernErrors -- TODO first False should be calculated intelligently
 
 updateBlock :: (MonadIO m)
             => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
@@ -661,37 +662,7 @@ updateBlock ordered col (prevCount, docs) = do
   p <- asks mongoPipe
   let sd = P.serverData p
   if (maxWireVersion sd < 2)
-    then do
-      db <- thisDatabase
-      ctx <- ask
-      results <-
-        liftIO $ forM (zip [prevCount, (prevCount + 1) ..] docs) $ \(i, updateDoc) -> do
-          let doc = (at "u" updateDoc) :: Document
-          let sel = (at "q" updateDoc) :: Document
-          let upsrt = if at "upsert" updateDoc then [Upsert] else []
-          let multi = if at "multi" updateDoc then [MultiUpdate] else []
-          mRes <- runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
-          case mRes of
-            Nothing -> return $ Right $ UpdateResult 0 Nothing [] [] []
-            Just resDoc -> do
-              let em = lookup "err" resDoc
-              case em of
-                Nothing -> do
-                  let n = at "n" resDoc
-                  let ups = do
-                        upsValue <- lookup "upserted" resDoc
-                        return $ Upserted i upsValue
-                  return $ Right $ UpdateResult n Nothing (maybeToList ups) [] [] -- TODO add wtimeout checking. if there is timeout field then we need to add a WRITE_CONCERN_ERROR.
-                Just errV -> do
-                  return $ Left $ WriteError i (at "code" resDoc) errV
-          `catch` \(e :: SomeException) -> do
-                     when ordered $ liftIO $ throwIO e
-                     return $ Left $ WriteError i 0 (show e)
-      let onlyErrors = lefts results
-      let onlyUpdates = rights results
-      let totalnMatched = sum $ map nMatched onlyUpdates
-      let totalUpserted = concat $ map upserted onlyUpdates
-      return $ UpdateResult totalnMatched Nothing totalUpserted onlyErrors []
+    then updateBlockLegacy ordered col (prevCount, docs)
     else do
       mode <- asks mongoWriteMode
       let writeConcern = case mode of
@@ -706,11 +677,52 @@ updateBlock ordered col (prevCount, docs) = do
       let writeErrors = map docToWriteError $ fromMaybe [] (doc !? "writeErrors")
       let upsertedDocs = fromMaybe [] (doc !? "upserted")
       return $ UpdateResult
+                    False -- TODO it should be changed accordingly
                     (at "n" doc)
                     (at "nModified" doc)
                     (map docToUpserted upsertedDocs)
                     writeErrors
                     writeConcernError
+
+updateBlockLegacy :: (MonadIO m)
+                  => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
+updateBlockLegacy ordered col (prevCount, docs) = do
+  p <- asks mongoPipe
+  db <- thisDatabase
+  ctx <- ask
+  results <-
+    liftIO $ forM (zip [prevCount, (prevCount + 1) ..] docs) $ \(i, updateDoc) -> do
+      let doc = (at "u" updateDoc) :: Document
+      let sel = (at "q" updateDoc) :: Document
+      let upsrt = if at "upsert" updateDoc then [Upsert] else []
+      let multi = if at "multi" updateDoc then [MultiUpdate] else []
+      mRes <- runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
+      case mRes of
+        Nothing -> return $ Right $ UpdateResult False 0 Nothing [] [] []
+        Just resDoc -> do
+          let em = lookup "err" resDoc
+          let eCode = lookup "code" resDoc
+          case (em, eCode) of
+            (Nothing, Nothing) -> do
+              let n = at "n" resDoc
+              let ups = do
+                    upsValue <- lookup "upserted" resDoc
+                    return $ Upserted i upsValue
+              return $ Right $ UpdateResult False n Nothing (maybeToList ups) [] [] -- TODO add wtimeout checking. if there is timeout field then we need to add a WRITE_CONCERN_ERROR.
+            (Just errV, Nothing) -> do
+              return $ Left $ WriteError i 24 errV -- 24 - MONGOC_ERROR_COLLECTION_UPDATE_FAILED default error code
+            (Nothing, Just ec) -> do
+              return $ Left $ WriteError i ec "unknown error"
+            (Just errV, Just ec) -> do
+              return $ Left $ WriteError i ec errV
+      `catch` \(e :: SomeException) -> do
+                 when ordered $ liftIO $ throwIO e
+                 return $ Left $ WriteError i 0 (show e)
+  let onlyErrors = lefts results
+  let onlyUpdates = rights results
+  let totalnMatched = sum $ map nMatched onlyUpdates
+  let totalUpserted = concat $ map upserted onlyUpdates
+  return $ UpdateResult (length onlyErrors > 0) totalnMatched Nothing totalUpserted onlyErrors []
 
 docToUpserted :: Document -> Upserted
 docToUpserted doc = Upserted ind uid
