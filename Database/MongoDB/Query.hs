@@ -48,8 +48,9 @@ module Database.MongoDB.Query (
 
 import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO, throw)
-import Control.Monad (unless, replicateM, liftM, forM, forM_)
+import Control.Monad (unless, replicateM, liftM, forM, forM_, liftM2)
 import Data.Int (Int32, Int64)
+import Data.List (foldl1')
 import Data.Maybe (listToMaybe, catMaybes, isNothing, maybeToList)
 import Data.Word (Word32)
 #if !MIN_VERSION_base(4,8,0)
@@ -166,7 +167,7 @@ data Upserted = Upserted
 
 data WriteConcernError = WriteConcernError
                        { wceCode   :: Int
-                       , wceErrMsg :: Int
+                       , wceErrMsg :: String
                        } deriving Show
 
 data WriteError = WriteError
@@ -698,31 +699,45 @@ updateBlockLegacy ordered col (prevCount, docs) = do
       let multi = if at "multi" updateDoc then [MultiUpdate] else []
       mRes <- runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
       case mRes of
-        Nothing -> return $ Right $ UpdateResult False 0 Nothing [] [] []
+        Nothing -> return $ UpdateResult False 0 Nothing [] [] []
         Just resDoc -> do
           let em = lookup "err" resDoc
           let eCode = lookup "code" resDoc
-          case (em, eCode) of
-            (Nothing, Nothing) -> do
+          let wtimeout = fromMaybe False $ lookup "wtimeout" resDoc
+          if isNothing em && isNothing eCode
+            then do
               let n = at "n" resDoc
               let ups = do
                     upsValue <- lookup "upserted" resDoc
                     return $ Upserted i upsValue
-              return $ Right $ UpdateResult False n Nothing (maybeToList ups) [] [] -- TODO add wtimeout checking. if there is timeout field then we need to add a WRITE_CONCERN_ERROR.
-            (Just errV, Nothing) -> do
-              return $ Left $ WriteError i 24 errV -- 24 - MONGOC_ERROR_COLLECTION_UPDATE_FAILED default error code
-            (Nothing, Just ec) -> do
-              return $ Left $ WriteError i ec "unknown error"
-            (Just errV, Just ec) -> do
-              return $ Left $ WriteError i ec errV
+              return $ UpdateResult False n Nothing (maybeToList ups) [] []
+            else do
+              let defaultCode = if wtimeout then 64 else 24
+              let errV = fromMaybe "unknown error" em
+              let c = fromMaybe defaultCode eCode
+              if wtimeout
+                then do
+                  return $ UpdateResult True 0 Nothing [] [] [WriteConcernError c errV]
+                else do
+                  return $ UpdateResult True 0 Nothing [] [WriteError i c errV] []
       `catch` \(e :: SomeException) -> do
                  when ordered $ liftIO $ throwIO e
-                 return $ Left $ WriteError i 0 (show e)
-  let onlyErrors = lefts results
-  let onlyUpdates = rights results
-  let totalnMatched = sum $ map nMatched onlyUpdates
-  let totalUpserted = concat $ map upserted onlyUpdates
-  return $ UpdateResult (length onlyErrors > 0) totalnMatched Nothing totalUpserted onlyErrors []
+                 return $ UpdateResult True 0 Nothing [] [WriteError i 0 (show e)] []
+  return $ foldl1' mergeUpdateResults results
+
+mergeUpdateResults :: UpdateResult -> UpdateResult -> UpdateResult
+mergeUpdateResults
+  (UpdateResult failed1 nMatched1 nModified1 upserted1 writeErrors1 writeConcernErrors1)
+  (UpdateResult failed2 nMatched2 nModified2 upserted2 writeErrors2 writeConcernErrors2) =
+    (UpdateResult
+        (failed1 || failed2)
+        (nMatched1 + nMatched2)
+        ((liftM2 (+)) nModified1 nModified2)
+        (upserted1 ++ upserted2)
+        (writeErrors1 ++ writeErrors2)
+        (writeConcernErrors1 ++ writeConcernErrors2)
+        )
+
 
 docToUpserted :: Document -> Upserted
 docToUpserted doc = Upserted ind uid
