@@ -78,7 +78,6 @@ import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
                   (=?), (!?), Val(..), ObjectId)
 import Data.Bson.Binary (putDocument)
-import Data.Either (lefts, rights)
 import Data.Maybe (fromJust, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -504,7 +503,7 @@ insertBlock opts col docs = do
             liftIO $ throwIO $ WriteFailure
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
-          (Just err, Just writeConcernErr) -> do
+          (Just err, Just writeConcernErr) -> do -- TODO writeConcernError is not a failure
             liftIO $ throwIO $ WriteFailure
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err ++ show writeConcernErr)
@@ -646,6 +645,7 @@ update' ordered col updateDocs = do
   let lens = map length chunks
   let lSums = 0 : (zipWith (+) lSums lens)
   blocks <- forM (zip lSums chunks) (updateBlock ordered col) -- TODO update block can throw exception which will cause other blocks to fail. It's important when ordered is false
+  let failedTotal = or $ map failed blocks
   let updatedTotal = sum $ map nMatched blocks
   let modifiedTotal =
         if all isNothing $ map nModified blocks
@@ -655,7 +655,7 @@ update' ordered col updateDocs = do
   let totalWriteConcernErrors = concat $ map writeConcernErrors blocks
 
   let upsertedTotal = concat $ map upserted blocks
-  return $ UpdateResult False updatedTotal modifiedTotal upsertedTotal totalWriteErrors totalWriteConcernErrors -- TODO first False should be calculated intelligently
+  return $ UpdateResult failedTotal updatedTotal modifiedTotal upsertedTotal totalWriteErrors totalWriteConcernErrors
 
 updateBlock :: (MonadIO m)
             => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
@@ -688,7 +688,6 @@ updateBlock ordered col (prevCount, docs) = do
 updateBlockLegacy :: (MonadIO m)
                   => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
 updateBlockLegacy ordered col (prevCount, docs) = do
-  p <- asks mongoPipe
   db <- thisDatabase
   ctx <- ask
   results <-
