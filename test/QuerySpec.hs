@@ -250,15 +250,16 @@ spec = around withCleanDatabase $ do
     it "can process different updates" $ do
       _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American", "score" =: (Nothing :: Maybe Int)]
       _ <- db $ insert "team" ["name" =: "Giants" , "league" =: "MiLB", "score" =: (1 :: Int)]
-      (db $ updateMany "team" [ ( ["name" =: "Yankees"]
-                                , ["$inc" =: ["score" =: (1 :: Int)]]
-                                , []
-                                )
-                              , ( ["name" =: "Giants"]
-                                , ["$inc" =: ["score" =: (2 :: Int)]]
-                                , []
-                                )
-                              ]) `shouldThrow` anyException
+      updateResult <- (db $ updateMany "team" [ ( ["name" =: "Yankees"]
+                                              , ["$inc" =: ["score" =: (1 :: Int)]]
+                                              , []
+                                              )
+                                            , ( ["name" =: "Giants"]
+                                              , ["$inc" =: ["score" =: (2 :: Int)]]
+                                              , []
+                                              )
+                                            ])
+      failed updateResult `shouldBe` True
       updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
       (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "American", "name" =: "Yankees", "score" =: (Nothing :: Maybe Int)]
                                                      , ["league" =: "MiLB"    , "name" =: "Giants" , "score" =: (1 :: Int)]
@@ -280,15 +281,16 @@ spec = around withCleanDatabase $ do
     it "can process different updates" $ do
       _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American", "score" =: (Nothing :: Maybe Int)]
       _ <- db $ insert "team" ["name" =: "Giants" , "league" =: "MiLB", "score" =: (1 :: Int)]
-      (db $ updateAll "team" [ ( ["name" =: "Yankees"]
-                                , ["$inc" =: ["score" =: (1 :: Int)]]
-                                , []
-                                )
-                              , ( ["name" =: "Giants"]
-                                , ["$inc" =: ["score" =: (2 :: Int)]]
-                                , []
-                                )
-                              ]) `shouldThrow` anyException
+      updateResult <- (db $ updateAll "team" [ ( ["name" =: "Yankees"]
+                                             , ["$inc" =: ["score" =: (1 :: Int)]]
+                                             , []
+                                             )
+                                           , ( ["name" =: "Giants"]
+                                             , ["$inc" =: ["score" =: (2 :: Int)]]
+                                             , []
+                                             )
+                                           ])
+      failed updateResult `shouldBe` True
       updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
       (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "American", "name" =: "Yankees", "score" =: (Nothing :: Maybe Int)]
                                                      , ["league" =: "MiLB"    , "name" =: "Giants" , "score" =: (3 :: Int)]

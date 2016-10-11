@@ -670,7 +670,6 @@ updateBlock ordered col (prevCount, docs) = do
                           NoConfirm -> ["w" =: (0 :: Int)]
                           Confirm params -> params
       doc <- runCommand $ updateCommandDocument col ordered docs writeConcern
-
       let writeConcernError = maybeToList $ do
             wceDoc <- doc !? "writeConcernError"
             return $ docToWriteConcernError wceDoc
@@ -678,7 +677,7 @@ updateBlock ordered col (prevCount, docs) = do
       let writeErrors = map docToWriteError $ fromMaybe [] (doc !? "writeErrors")
       let upsertedDocs = fromMaybe [] (doc !? "upserted")
       return $ UpdateResult
-                    False -- TODO it should be changed accordingly
+                    ((not $ true1 "ok" doc) || (length writeErrors > 0))
                     (at "n" doc)
                     (at "nModified" doc)
                     (map docToUpserted upsertedDocs)
