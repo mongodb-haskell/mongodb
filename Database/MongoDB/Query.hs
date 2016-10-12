@@ -677,7 +677,7 @@ updateBlock ordered col (prevCount, docs) = do
       let writeErrors = map docToWriteError $ fromMaybe [] (doc !? "writeErrors")
       let upsertedDocs = fromMaybe [] (doc !? "upserted")
       return $ UpdateResult
-                    ((not $ true1 "ok" doc) || (length writeErrors > 0))
+                    ((not $ true1 "ok" doc) || (not $ null writeErrors) || (not $ null writeConcernErrors))
                     (at "n" doc)
                     (at "nModified" doc)
                     (map docToUpserted upsertedDocs)
