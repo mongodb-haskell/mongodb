@@ -78,6 +78,7 @@ import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
                   (=?), (!?), Val(..), ObjectId)
 import Data.Bson.Binary (putDocument)
+import Data.IORef (newIORef, writeIORef, readIORef)
 import Data.Maybe (fromJust, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -644,7 +645,17 @@ update' ordered col updateDocs = do
                       updates
   let lens = map length chunks
   let lSums = 0 : (zipWith (+) lSums lens)
-  blocks <- forM (zip lSums chunks) (updateBlock ordered col) -- TODO update block can throw exception which will cause other blocks to fail. It's important when ordered is false
+  exceptionThrown <- liftIO $ newIORef False
+  blocks <- forM (zip lSums chunks) $ \b -> do
+    ctx <- ask
+    liftIO $ do
+      et <- readIORef exceptionThrown
+      if et && ordered
+        then return $ UpdateResult True 0 Nothing [] [] [] -- TODO probably should be revised
+        else runReaderT (updateBlock ordered col b) ctx
+      `catch` \(e :: SomeException) -> do
+        writeIORef exceptionThrown True
+        return $ UpdateResult True 0 Nothing [] [] [] -- TODO  probably should be revised
   let failedTotal = or $ map failed blocks
   let updatedTotal = sum $ map nMatched blocks
   let modifiedTotal =
@@ -670,7 +681,7 @@ updateBlock ordered col (prevCount, docs) = do
                           NoConfirm -> ["w" =: (0 :: Int)]
                           Confirm params -> params
       doc <- runCommand $ updateCommandDocument col ordered docs writeConcern
-      let writeConcernError = maybeToList $ do
+      let writeConcernErrors = maybeToList $ do
             wceDoc <- doc !? "writeConcernError"
             return $ docToWriteConcernError wceDoc
 
@@ -682,7 +693,7 @@ updateBlock ordered col (prevCount, docs) = do
                     (at "nModified" doc)
                     (map docToUpserted upsertedDocs)
                     writeErrors
-                    writeConcernError
+                    writeConcernErrors
 
 updateBlockLegacy :: (MonadIO m)
                   => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
