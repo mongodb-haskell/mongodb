@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [Unreleased] - unreleased
+
+### Fixed
+- Write functions hang when the connection is lost.
+
 ## [2.1.1] - 2016-08-13
 
 ### Changed
