@@ -1,6 +1,6 @@
 -- | Query and update documents
 
-{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP, DeriveDataTypeable, ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP, DeriveDataTypeable, ScopedTypeVariables, BangPatterns #-}
 
 module Database.MongoDB.Query (
     -- * Monad
@@ -150,6 +150,9 @@ data AccessMode =
 type GetLastError = Document
 -- ^ Parameters for getLastError command. For example @[\"w\" =: 2]@ tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See <http://www.mongodb.org/display/DOCS/Last+Error+Commands> for more options.
 
+class Result a where
+  isFailed :: a -> Bool
+
 data UpdateResult = UpdateResult
                   { failed      :: Bool
                   , nMatched    :: Int
@@ -159,6 +162,9 @@ data UpdateResult = UpdateResult
                   , writeErrors :: [WriteError]
                   , writeConcernErrors :: [WriteConcernError]
                   } deriving Show
+
+instance Result UpdateResult where
+  isFailed = failed
 
 data Upserted = Upserted
               { upsertedIndex :: Int
@@ -697,6 +703,17 @@ updateBlock ordered col (prevCount, docs) = do
                     (map docToUpserted upsertedDocs)
                     writeErrors
                     writeConcernErrors
+
+
+interruptibleFor :: Result b => Bool -> [a] -> (a -> IO b) -> IO [b]
+interruptibleFor ordered = go []
+  where
+    go !res [] _ = return $ reverse res
+    go !res (x:xs) f = do
+      y <- f x
+      if isFailed y && ordered
+        then return $ reverse (y:res)
+        else go (y:res) xs f
 
 updateBlockLegacy :: (MonadIO m)
                   => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
