@@ -651,19 +651,11 @@ update' ordered col updateDocs = do
                       updates
   let lens = map length chunks
   let lSums = 0 : (zipWith (+) lSums lens)
-  errorDetected <- liftIO $ newIORef False
   ctx <- ask
-  blocks <- forM (zip lSums chunks) $ \b -> liftIO $ do
-    ed <- readIORef errorDetected
-    if ed && ordered
-      then return $ UpdateResult True 0 Nothing [] [] []
-      else do
-        ur <- runReaderT (updateBlock ordered col b) ctx
-        when (failed ur) $ do
-          writeIORef errorDetected True
-        return ur
+  blocks <- liftIO $ interruptibleFor ordered (zip lSums chunks) $ \b -> liftIO $ do
+    ur <- runReaderT (updateBlock ordered col b) ctx
+    return ur
     `catch` \(e :: SomeException) -> do
-      writeIORef errorDetected True
       return $ UpdateResult True 0 Nothing [] [] [] -- TODO  probably should be revised
   let failedTotal = or $ map failed blocks
   let updatedTotal = sum $ map nMatched blocks
@@ -720,46 +712,37 @@ updateBlockLegacy :: (MonadIO m)
 updateBlockLegacy ordered col (prevCount, docs) = do
   db <- thisDatabase
   ctx <- ask
-  errorDetected <- liftIO $ newIORef False
-  results <-
-    liftIO $ forM (zip [prevCount, (prevCount + 1) ..] docs) $ \(i, updateDoc) -> do
-      ed <- readIORef errorDetected
-      if ed && ordered
-        then do
-          return $ UpdateResult True 0 Nothing [] [] []
-        else do
-          let doc = (at "u" updateDoc) :: Document
-          let sel = (at "q" updateDoc) :: Document
-          let upsrt = if at "upsert" updateDoc then [Upsert] else []
-          let multi = if at "multi" updateDoc then [MultiUpdate] else []
-          mRes <- runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
-          case mRes of
-            Nothing -> return $ UpdateResult False 0 Nothing [] [] []
-            Just resDoc -> do
-              let em = lookup "err" resDoc
-              let eCode = lookup "code" resDoc
-              let wtimeout = fromMaybe False $ lookup "wtimeout" resDoc
-              if isNothing em && isNothing eCode
+  results <- liftIO $
+    interruptibleFor ordered (zip [prevCount, (prevCount + 1) ..] docs) $ \(i, updateDoc) -> do
+      let doc = (at "u" updateDoc) :: Document
+      let sel = (at "q" updateDoc) :: Document
+      let upsrt = if at "upsert" updateDoc then [Upsert] else []
+      let multi = if at "multi" updateDoc then [MultiUpdate] else []
+      mRes <- runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
+      case mRes of
+        Nothing -> return $ UpdateResult False 0 Nothing [] [] []
+        Just resDoc -> do
+          let em = lookup "err" resDoc
+          let eCode = lookup "code" resDoc
+          let wtimeout = fromMaybe False $ lookup "wtimeout" resDoc
+          if isNothing em && isNothing eCode
+            then do
+              let n = at "n" resDoc
+              let ups = do
+                    upsValue <- lookup "upserted" resDoc
+                    return $ Upserted i upsValue
+              return $ UpdateResult False n Nothing (maybeToList ups) [] []
+            else do
+              let defaultCode = if wtimeout then 64 else 24
+              let errV = fromMaybe "unknown error" em
+              let c = fromMaybe defaultCode eCode
+              if wtimeout
                 then do
-                  let n = at "n" resDoc
-                  let ups = do
-                        upsValue <- lookup "upserted" resDoc
-                        return $ Upserted i upsValue
-                  return $ UpdateResult False n Nothing (maybeToList ups) [] []
+                  return $ UpdateResult True 0 Nothing [] [] [WriteConcernError c errV]
                 else do
-                  let defaultCode = if wtimeout then 64 else 24
-                  let errV = fromMaybe "unknown error" em
-                  let c = fromMaybe defaultCode eCode
-                  if wtimeout
-                    then do
-                      writeIORef errorDetected True
-                      return $ UpdateResult True 0 Nothing [] [] [WriteConcernError c errV]
-                    else do
-                      writeIORef errorDetected True
-                      return $ UpdateResult True 0 Nothing [] [WriteError i c errV] []
-          `catch` \(e :: SomeException) -> do
-                     writeIORef errorDetected True
-                     return $ UpdateResult True 0 Nothing [] [WriteError i 0 (show e)] []
+                  return $ UpdateResult True 0 Nothing [] [WriteError i c errV] []
+      `catch` \(e :: SomeException) -> do
+                 return $ UpdateResult True 0 Nothing [] [WriteError i 0 (show e)] []
   return $ foldl1' mergeUpdateResults results
 
 mergeUpdateResults :: UpdateResult -> UpdateResult -> UpdateResult
