@@ -78,7 +78,6 @@ import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
                   (=?), (!?), Val(..), ObjectId)
 import Data.Bson.Binary (putDocument)
-import Data.IORef (newIORef, writeIORef, readIORef)
 import Data.Maybe (fromJust, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -128,7 +127,7 @@ data Failure =
      ConnectionFailure IOError  -- ^ TCP connection ('Pipeline') failed. May work if you try again on the same Mongo 'Connection' which will create a new Pipe.
     | CursorNotFoundFailure CursorId  -- ^ Cursor expired because it wasn't accessed for over 10 minutes, or this cursor came from a different server that the one you are currently connected to (perhaps a fail over happen between servers in a replica set)
     | QueryFailure ErrorCode String  -- ^ Query failed for some reason as described in the string
-    | WriteFailure ErrorCode String  -- ^ Error observed by getLastError after a write, error description is in string
+    | WriteFailure Int ErrorCode String -- ^ Error observed by getLastError after a write, error description is in string, index of failed document is the first argument
     | DocNotFound Selection  -- ^ 'fetch' found no document matching selection
     | AggregateFailure String -- ^ 'aggregate' returned an error
     deriving (Show, Eq, Typeable)
@@ -159,7 +158,7 @@ data UpdateResult = UpdateResult
                   , nModified   :: Maybe Int
                   -- ^ Mongodb server before 2.6 doesn't allow to calculate this value. This field is nothing if we can't calculate the number of modified documents.
                   , upserted    :: [Upserted]
-                  , writeErrors :: [WriteError]
+                  , writeErrors :: [Failure]
                   , writeConcernErrors :: [WriteConcernError]
                   } deriving Show
 
@@ -175,12 +174,6 @@ data WriteConcernError = WriteConcernError
                        { wceCode   :: Int
                        , wceErrMsg :: String
                        } deriving Show
-
-data WriteError = WriteError
-            { errIndex :: Int
-            , errCode  :: Int
-            , errMsg   :: String
-            } deriving Show
 
 data DeleteResult = DeleteResult
 
@@ -492,7 +485,7 @@ insertBlock opts col docs = do
         when (isJust res) $ do
           let jRes = fromJust res
           let e = lookup "err" jRes
-          when (isJust e) $ liftIO $ throwIO $ WriteFailure (maybe 0 id $ lookup "code" jRes) (fromJust e)
+          when (isJust e) $ liftIO $ throwIO $ WriteFailure 0 (maybe 0 id $ lookup "code" jRes) (fromJust e) -- Add proper index in the first argument
         return $ map (valueAt "_id") docs'
       else do
         mode <- asks mongoWriteMode
@@ -503,15 +496,15 @@ insertBlock opts col docs = do
         case (look "writeErrors" doc, look "writeConcernError" doc) of
           (Nothing, Nothing) -> return $ map (valueAt "_id") docs'
           (Just err, Nothing) -> do
-            liftIO $ throwIO $ WriteFailure
+            liftIO $ throwIO $ WriteFailure 0 -- Add proper index
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
           (Nothing, Just err) -> do
-            liftIO $ throwIO $ WriteFailure
+            liftIO $ throwIO $ WriteFailure 0 -- Add proper index
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
           (Just err, Just writeConcernErr) -> do -- TODO writeConcernError is not a failure
-            liftIO $ throwIO $ WriteFailure
+            liftIO $ throwIO $ WriteFailure 0 -- Add proper index
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err ++ show writeConcernErr)
 
@@ -526,7 +519,7 @@ splitAtLimit ordered maxSize maxCount list = chop (go 0 0 []) list
           then
             go curSize curCount [] xs -- Skip this document and insert the other documents.
           else
-            throw $ WriteFailure 0 "One document is too big for the message"
+            throw $ WriteFailure 0 0 "One document is too big for the message" -- TODO add proper index in the first argument
     go curSize curCount res (x:xs) =
       if (   ((curSize + (sizeOfDocument x) + 2 + curCount) > maxSize)
                                  -- we have ^ 2 brackets and curCount commas in
@@ -590,7 +583,7 @@ update :: (MonadIO m)
 update opts (Select sel col) up = do
   res <- update' True col [(sel, up, opts)]
   if not $ null $ writeErrors res
-    then liftIO $ throwIO $ WriteFailure 0 (show $ head $ writeErrors res)
+    then liftIO $ throwIO $ WriteFailure 0 0 (show $ head $ writeErrors res)
     else return ()
 
 updateCommandDocument :: Collection -> Bool -> [Document] -> Document -> Document
@@ -655,8 +648,8 @@ update' ordered col updateDocs = do
   blocks <- liftIO $ interruptibleFor ordered (zip lSums chunks) $ \b -> liftIO $ do
     ur <- runReaderT (updateBlock ordered col b) ctx
     return ur
-    `catch` \(e :: SomeException) -> do
-      return $ UpdateResult True 0 Nothing [] [] [] -- TODO  probably should be revised
+    `catch` \(e :: Failure) -> do
+      return $ UpdateResult True 0 Nothing [] [e] [] -- TODO  probably should be revised
   let failedTotal = or $ map failed blocks
   let updatedTotal = sum $ map nMatched blocks
   let modifiedTotal =
@@ -740,9 +733,9 @@ updateBlockLegacy ordered col (prevCount, docs) = do
                 then do
                   return $ UpdateResult True 0 Nothing [] [] [WriteConcernError c errV]
                 else do
-                  return $ UpdateResult True 0 Nothing [] [WriteError i c errV] []
-      `catch` \(e :: SomeException) -> do
-                 return $ UpdateResult True 0 Nothing [] [WriteError i 0 (show e)] []
+                  return $ UpdateResult True 0 Nothing [] [WriteFailure i c errV] []
+      `catch` \(e :: Failure) -> do
+                 return $ UpdateResult True 0 Nothing [] [e] []
   return $ foldl1' mergeUpdateResults results
 
 mergeUpdateResults :: UpdateResult -> UpdateResult -> UpdateResult
@@ -765,8 +758,8 @@ docToUpserted doc = Upserted ind uid
     ind = at "index" doc
     uid = at "_id"   doc
 
-docToWriteError :: Document -> WriteError
-docToWriteError doc = WriteError ind code msg
+docToWriteError :: Document -> Failure
+docToWriteError doc = WriteFailure ind code msg
   where
     ind  = at "index"  doc
     code = at "code"   doc
@@ -877,7 +870,7 @@ deleteBlock ordered col docs = do
                      return $ Just e
       let onlyErrors = catMaybes errors
       if not $ null onlyErrors
-        then liftIO $ throwIO $ WriteFailure 0 (show onlyErrors)
+        then liftIO $ throwIO $ WriteFailure 0 0 (show onlyErrors) -- TODO add normal index (first argument)
         else return ()
     else do
       mode <- asks mongoWriteMode
@@ -888,15 +881,15 @@ deleteBlock ordered col docs = do
       case (look "writeErrors" doc, look "writeConcernError" doc) of
         (Nothing, Nothing) -> return ()
         (Just err, Nothing) -> do
-          liftIO $ throwIO $ WriteFailure
+          liftIO $ throwIO $ WriteFailure 0 -- TODO add normal index
                                   (maybe 0 id $ lookup "ok" doc)
                                   (show err)
         (Nothing, Just err) -> do
-          liftIO $ throwIO $ WriteFailure
+          liftIO $ throwIO $ WriteFailure 0 -- TODO add normal index
                                   (maybe 0 id $ lookup "ok" doc)
                                   (show err)
         (Just err, Just writeConcernErr) -> do
-          liftIO $ throwIO $ WriteFailure
+          liftIO $ throwIO $ WriteFailure 0 -- TODO add normal index
                                   (maybe 0 id $ lookup "ok" doc)
                                   (show err ++ show writeConcernErr)
 
