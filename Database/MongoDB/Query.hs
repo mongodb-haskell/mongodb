@@ -520,6 +520,8 @@ splitAtLimit ordered maxSize maxCount list = chop (go 0 0 []) list
             go curSize curCount [] xs -- Skip this document and insert the other documents.
           else
             throw $ WriteFailure 0 0 "One document is too big for the message" -- TODO add proper index in the first argument
+            -- TODO it shouldn't throw exceptions. otherwise no documents will be added to the list.
+            -- It should return UpdateResult with this document as failed.
     go curSize curCount res (x:xs) =
       if (   ((curSize + (sizeOfDocument x) + 2 + curCount) > maxSize)
                                  -- we have ^ 2 brackets and curCount commas in
@@ -596,8 +598,11 @@ updateCommandDocument col ordered updates writeConcern =
 
 {-| Bulk update operation. If one update fails it will not update the remaining
  - documents. Current returned value is only a place holder. With mongodb server
- - before 2.6 it will send update requests one by one. After 2.6 it will use
- - bulk update feature in mongodb.
+ - before 2.6 it will send update requests one by one. In order to receive
+ - error messages in versions under 2.6 you need to user confirmed writes.
+ - Otherwise even if the errors had place the list of errors will be empty and
+ - the result will be success.  After 2.6 it will use bulk update feature in
+ - mongodb.
  -}
 updateMany :: (MonadIO m)
            => Collection
@@ -607,7 +612,10 @@ updateMany = update' True
 
 {-| Bulk update operation. If one update fails it will proceed with the
  - remaining documents. With mongodb server before 2.6 it will send update
- - requests one by one. After 2.6 it will use bulk update feature in mongodb.
+ - requests one by one. In order to receive error messages in versions under
+ - 2.6 you need to user confirmed writes.  Otherwise even if the errors had
+ - place the list of errors will be empty and the result will be success.
+ - After 2.6 it will use bulk update feature in mongodb.
  -}
 updateAll :: (MonadIO m)
            => Collection
@@ -630,37 +638,40 @@ update' ordered col updateDocs = do
                 updateDocs
 
   mode <- asks mongoWriteMode
-  let writeConcern = case mode of
-                        NoConfirm -> ["w" =: (0 :: Int)]
-                        Confirm params -> params
-  let docSize = sizeOfDocument $ updateCommandDocument col ordered [] writeConcern
-  let chunks = splitAtLimit
-                      ordered
-                      (maxBsonObjectSize sd - docSize)
-                                           -- size of auxiliary part of update
-                                           -- document should be subtracted from
-                                           -- the overall size
-                      (maxWriteBatchSize sd)
-                      updates
-  let lens = map length chunks
-  let lSums = 0 : (zipWith (+) lSums lens)
   ctx <- ask
-  blocks <- liftIO $ interruptibleFor ordered (zip lSums chunks) $ \b -> liftIO $ do
-    ur <- runReaderT (updateBlock ordered col b) ctx
-    return ur
-    `catch` \(e :: Failure) -> do
-      return $ UpdateResult True 0 Nothing [] [e] [] -- TODO  probably should be revised
-  let failedTotal = or $ map failed blocks
-  let updatedTotal = sum $ map nMatched blocks
-  let modifiedTotal =
-        if all isNothing $ map nModified blocks
-          then Nothing
-          else Just $ sum $ catMaybes $ map nModified blocks
-  let totalWriteErrors = concat $ map writeErrors blocks
-  let totalWriteConcernErrors = concat $ map writeConcernErrors blocks
+  liftIO $ do
+    let writeConcern = case mode of
+                          NoConfirm -> ["w" =: (0 :: Int)]
+                          Confirm params -> params
+    let docSize = sizeOfDocument $ updateCommandDocument col ordered [] writeConcern
+    let chunks = splitAtLimit
+                        ordered
+                        (maxBsonObjectSize sd - docSize)
+                                             -- size of auxiliary part of update
+                                             -- document should be subtracted from
+                                             -- the overall size
+                        (maxWriteBatchSize sd)
+                        updates
+    let lens = map length chunks
+    let lSums = 0 : (zipWith (+) lSums lens)
+    blocks <- interruptibleFor ordered (zip lSums chunks) $ \b -> do
+      ur <- runReaderT (updateBlock ordered col b) ctx
+      return ur
+      `catch` \(e :: Failure) -> do
+        return $ UpdateResult True 0 Nothing [] [e] []
+    let failedTotal = or $ map failed blocks
+    let updatedTotal = sum $ map nMatched blocks
+    let modifiedTotal =
+          if all isNothing $ map nModified blocks
+            then Nothing
+            else Just $ sum $ catMaybes $ map nModified blocks
+    let totalWriteErrors = concat $ map writeErrors blocks
+    let totalWriteConcernErrors = concat $ map writeConcernErrors blocks
 
-  let upsertedTotal = concat $ map upserted blocks
-  return $ UpdateResult failedTotal updatedTotal modifiedTotal upsertedTotal totalWriteErrors totalWriteConcernErrors
+    let upsertedTotal = concat $ map upserted blocks
+    return $ UpdateResult failedTotal updatedTotal modifiedTotal upsertedTotal totalWriteErrors totalWriteConcernErrors
+
+    `catch` \(e :: Failure) -> return $ UpdateResult True 0 Nothing [] [e] []
 
 updateBlock :: (MonadIO m)
             => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
@@ -747,7 +758,7 @@ mergeUpdateResults
         (nMatched1 + nMatched2)
         ((liftM2 (+)) nModified1 nModified2)
         (upserted1 ++ upserted2)
-        (writeErrors1 ++ writeErrors2)
+        (writeErrors1 ++ writeErrors2) -- TODO this should be rewritten with IO containers. Otherwise its N^2 complexity.
         (writeConcernErrors1 ++ writeConcernErrors2)
         )
 
