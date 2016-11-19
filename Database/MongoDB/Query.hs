@@ -619,7 +619,7 @@ updateMany = update' True
 {-| Bulk update operation. If one update fails it will proceed with the
  - remaining documents. With mongodb server before 2.6 it will send update
  - requests one by one. In order to receive error messages in versions under
- - 2.6 you need to user confirmed writes.  Otherwise even if the errors had
+ - 2.6 you need to use confirmed writes.  Otherwise even if the errors had
  - place the list of errors will be empty and the result will be success.
  - After 2.6 it will use bulk update feature in mongodb.
  -}
@@ -649,7 +649,11 @@ update' ordered col updateDocs = do
     let writeConcern = case mode of
                           NoConfirm -> ["w" =: (0 :: Int)]
                           Confirm params -> params
-    let docSize = sizeOfDocument $ updateCommandDocument col ordered [] writeConcern
+    let docSize = sizeOfDocument $ updateCommandDocument
+                                                      col
+                                                      ordered
+                                                      []
+                                                      writeConcern
     let preChunks = splitAtLimit
                         (maxBsonObjectSize sd - docSize)
                                              -- size of auxiliary part of update
@@ -678,7 +682,13 @@ update' ordered col updateDocs = do
     let totalWriteConcernErrors = concat $ map writeConcernErrors blocks
 
     let upsertedTotal = concat $ map upserted blocks
-    return $ UpdateResult failedTotal updatedTotal modifiedTotal upsertedTotal totalWriteErrors totalWriteConcernErrors
+    return $ UpdateResult
+                  failedTotal
+                  updatedTotal
+                  modifiedTotal
+                  upsertedTotal
+                  totalWriteErrors
+                  totalWriteConcernErrors
 
     `catch` \(e :: Failure) -> return $ UpdateResult True 0 Nothing [] [e] []
 
