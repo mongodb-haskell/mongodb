@@ -449,10 +449,11 @@ insertCommandDocument opts col docs writeConcern =
           ]
 
 takeRightsUpToLeft :: [Either a b] -> [b]
-takeRightsUpToLeft l = go l []
+takeRightsUpToLeft l = reverse $ go l []
   where
+    go [] !res = res
     go ((Right x):xs) !res = go xs (x:res)
-    go ((Left x):xs) !res = res
+    go ((Left _):_) !res = res
 
 insert' :: (MonadIO m)
         => [InsertOption] -> Collection -> [Document] -> Action m [Value]
@@ -479,6 +480,10 @@ insert' opts col docs = do
             else rights preChunks
 
   chunkResults <- forM chunks (insertBlock opts col)
+
+  let lchunks = lefts preChunks
+  when ((not $ null lchunks) && ordered) $ do
+    liftIO $ throwIO $ head lchunks
   return $ concat chunkResults
 
 insertBlock :: (MonadIO m)

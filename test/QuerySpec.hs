@@ -110,8 +110,8 @@ spec = around withCleanDatabase $ do
   describe "insertAll" $ do
     it "inserts documents to the collection and returns their _ids" $ do
       (_id1:_id2:_) <- db $ insertAll "team" [ ["name" =: "Yankees", "league" =: "American"]
-                                                 , ["name" =: "Dodgers", "league" =: "American"]
-                                                 ]
+                                             , ["name" =: "Dodgers", "league" =: "American"]
+                                             ]
       result <- db $ rest =<< find (select [] "team")
       result `shouldBe` [["_id" =: _id1, "name" =: "Yankees", "league" =: "American"]
                         ,["_id" =: _id2, "name" =: "Dodgers", "league" =: "American"]
