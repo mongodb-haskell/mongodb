@@ -166,6 +166,10 @@ data UpdateResult = UpdateResult
 instance Result UpdateResult where
   isFailed = failed
 
+instance Result (Either a b) where
+  isFailed (Left _) = True
+  isFailed _ = False
+
 data Upserted = Upserted
               { upsertedIndex :: Int
               , upsertedId    :: ObjectId
@@ -418,7 +422,11 @@ write notice = asks mongoWriteMode >>= \mode -> case mode of
 
 insert :: (MonadIO m) => Collection -> Document -> Action m Value
 -- ^ Insert document into collection and return its \"_id\" value, which is created automatically if not supplied
-insert col doc = head `liftM` insertBlock [] col [doc]
+insert col doc = do
+  res <- insertBlock [] col [doc]
+  case res of
+    Left failure -> liftIO $ throwIO failure
+    Right r -> return $ head r
 
 insert_ :: (MonadIO m) => Collection -> Document -> Action m ()
 -- ^ Same as 'insert' except don't return _id
@@ -479,17 +487,20 @@ insert' opts col docs = do
             then takeRightsUpToLeft preChunks
             else rights preChunks
 
-  chunkResults <- forM chunks (insertBlock opts col)
+  chunkResults <- interruptibleFor ordered chunks $ insertBlock opts col
 
   let lchunks = lefts preChunks
   when ((not $ null lchunks) && ordered) $ do
     liftIO $ throwIO $ head lchunks
-  return $ concat chunkResults
+
+  let lresults = lefts chunkResults
+  when (not $ null lresults) $ liftIO $ throwIO $ head lresults
+  return $ concat $ rights chunkResults
 
 insertBlock :: (MonadIO m)
-            => [InsertOption] -> Collection -> [Document] -> Action m [Value]
+            => [InsertOption] -> Collection -> [Document] -> Action m (Either Failure [Value])
 -- ^ This will fail if the list of documents is bigger than restrictions
-insertBlock _ _ [] = return []
+insertBlock _ _ [] = return $ Right []
 insertBlock opts col docs = do
     db <- thisDatabase
     docs' <- liftIO $ mapM assignId docs
@@ -499,11 +510,14 @@ insertBlock opts col docs = do
     if (maxWireVersion sd < 2)
       then do
         res <- liftDB $ write (Insert (db <.> col) opts docs')
-        when (isJust res) $ do
-          let jRes = fromJust res
-          let e = lookup "err" jRes
-          when (isJust e) $ liftIO $ throwIO $ WriteFailure 0 (maybe 0 id $ lookup "code" jRes) (fromJust e) -- Add proper index in the first argument
-        return $ map (valueAt "_id") docs'
+        let errorMessage = do
+              jRes <- res
+              em <- lookup "err" jRes
+              return $ WriteFailure 0 (maybe 0 id $ lookup "code" jRes)  em -- Add proper index in the first argument
+
+        case errorMessage of
+          Just failure -> return $ Left failure
+          Nothing -> return $ Right $ map (valueAt "_id") docs'
       else do
         mode <- asks mongoWriteMode
         let writeConcern = case mode of
@@ -511,17 +525,17 @@ insertBlock opts col docs = do
                               Confirm params -> params
         doc <- runCommand $ insertCommandDocument opts col docs' writeConcern
         case (look "writeErrors" doc, look "writeConcernError" doc) of
-          (Nothing, Nothing) -> return $ map (valueAt "_id") docs'
+          (Nothing, Nothing) -> return $ Right $ map (valueAt "_id") docs'
           (Just err, Nothing) -> do
-            liftIO $ throwIO $ WriteFailure 0 -- Add proper index
+            return $ Left $ WriteFailure 0 -- Add proper index
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
           (Nothing, Just err) -> do
-            liftIO $ throwIO $ WriteFailure 0 -- Add proper index
+            return $ Left $ WriteFailure 0 -- Add proper index
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
           (Just err, Just writeConcernErr) -> do -- TODO writeConcernError is not a failure
-            liftIO $ throwIO $ WriteFailure 0 -- Add proper index
+            return $ Left $ WriteFailure 0 -- Add proper index
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err ++ show writeConcernErr)
 
@@ -725,7 +739,7 @@ updateBlock ordered col (prevCount, docs) = do
                     writeConcernErrors
 
 
-interruptibleFor :: Result b => Bool -> [a] -> (a -> IO b) -> IO [b]
+interruptibleFor :: (Monad m, Result b) => Bool -> [a] -> (a -> m b) -> m [b]
 interruptibleFor ordered = go []
   where
     go !res [] _ = return $ reverse res
