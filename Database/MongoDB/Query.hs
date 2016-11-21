@@ -423,7 +423,7 @@ write notice = asks mongoWriteMode >>= \mode -> case mode of
 insert :: (MonadIO m) => Collection -> Document -> Action m Value
 -- ^ Insert document into collection and return its \"_id\" value, which is created automatically if not supplied
 insert col doc = do
-  res <- insertBlock [] col [doc]
+  res <- insertBlock [] col (0, [doc])
   case res of
     Left failure -> liftIO $ throwIO failure
     Right r -> return $ head r
@@ -487,7 +487,10 @@ insert' opts col docs = do
             then takeRightsUpToLeft preChunks
             else rights preChunks
 
-  chunkResults <- interruptibleFor ordered chunks $ insertBlock opts col
+  let lens = map length chunks
+  let lSums = 0 : (zipWith (+) lSums lens)
+
+  chunkResults <- interruptibleFor ordered (zip lSums chunks) $ insertBlock opts col
 
   let lchunks = lefts preChunks
   when ((not $ null lchunks) && ordered) $ do
@@ -498,10 +501,10 @@ insert' opts col docs = do
   return $ concat $ rights chunkResults
 
 insertBlock :: (MonadIO m)
-            => [InsertOption] -> Collection -> [Document] -> Action m (Either Failure [Value])
+            => [InsertOption] -> Collection -> (Int, [Document]) -> Action m (Either Failure [Value])
 -- ^ This will fail if the list of documents is bigger than restrictions
-insertBlock _ _ [] = return $ Right []
-insertBlock opts col docs = do
+insertBlock _ _ (_, []) = return $ Right []
+insertBlock opts col (prevCount, docs) = do
     db <- thisDatabase
     docs' <- liftIO $ mapM assignId docs
 
@@ -513,7 +516,9 @@ insertBlock opts col docs = do
         let errorMessage = do
               jRes <- res
               em <- lookup "err" jRes
-              return $ WriteFailure 0 (maybe 0 id $ lookup "code" jRes)  em -- Add proper index in the first argument
+              return $ WriteFailure prevCount (maybe 0 id $ lookup "code" jRes)  em
+              -- In older versions of ^^ the protocol we can't really say which document failed.
+              -- So we just report the accumulated number of documents in the previous blocks.
 
         case errorMessage of
           Just failure -> return $ Left failure
@@ -527,15 +532,15 @@ insertBlock opts col docs = do
         case (look "writeErrors" doc, look "writeConcernError" doc) of
           (Nothing, Nothing) -> return $ Right $ map (valueAt "_id") docs'
           (Just err, Nothing) -> do
-            return $ Left $ WriteFailure 0 -- Add proper index
+            return $ Left $ WriteFailure prevCount -- TODO: insert error reporting should be rewritten
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
           (Nothing, Just err) -> do
-            return $ Left $ WriteFailure 0 -- Add proper index
+            return $ Left $ WriteFailure prevCount -- TODO: insert error reporting should be rewritten
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
-          (Just err, Just writeConcernErr) -> do -- TODO writeConcernError is not a failure
-            return $ Left $ WriteFailure 0 -- Add proper index
+          (Just err, Just writeConcernErr) -> do
+            return $ Left $ WriteFailure prevCount -- TODO: insert error reporting should be rewritten
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err ++ show writeConcernErr)
 
