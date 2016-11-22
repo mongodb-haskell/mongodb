@@ -4,8 +4,6 @@
 {-# LANGUAGE OverloadedStrings, RecordWildCards, NamedFieldPuns, TupleSections, FlexibleContexts, FlexibleInstances, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, StandaloneDeriving, TypeSynonymInstances, TypeFamilies, CPP, RankNTypes #-}
 
 module Database.MongoDB.GridFS 
-  -- * GridFS
-  -- ** Data types
   ( Bucket
   , files, chunks
   , File
