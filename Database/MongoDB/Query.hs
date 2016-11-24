@@ -433,7 +433,11 @@ insert_ :: (MonadIO m) => Collection -> Document -> Action m ()
 insert_ col doc = insert col doc >> return ()
 
 insertMany :: (MonadIO m) => Collection -> [Document] -> Action m [Value]
--- ^ Insert documents into collection and return their \"_id\" values, which are created automatically if not supplied. If a document fails to be inserted (eg. due to duplicate key) then remaining docs are aborted, and LastError is set.
+-- ^ Insert documents into collection and return their \"_id\" values,
+-- which are created automatically if not supplied.
+-- If a document fails to be inserted (eg. due to duplicate key)
+-- then remaining docs are aborted, and LastError is set.
+-- An exception will be throw if any error occurs.
 insertMany = insert' []
 
 insertMany_ :: (MonadIO m) => Collection -> [Document] -> Action m ()
@@ -441,7 +445,10 @@ insertMany_ :: (MonadIO m) => Collection -> [Document] -> Action m ()
 insertMany_ col docs = insertMany col docs >> return ()
 
 insertAll :: (MonadIO m) => Collection -> [Document] -> Action m [Value]
--- ^ Insert documents into collection and return their \"_id\" values, which are created automatically if not supplied. If a document fails to be inserted (eg. due to duplicate key) then remaining docs are still inserted. LastError is set if any doc fails, not just last one.
+-- ^ Insert documents into collection and return their \"_id\" values,
+-- which are created automatically if not supplied. If a document fails
+-- to be inserted (eg. due to duplicate key) then remaining docs
+-- are still inserted.
 insertAll = insert' [KeepGoing]
 
 insertAll_ :: (MonadIO m) => Collection -> [Document] -> Action m ()
@@ -493,7 +500,7 @@ insert' opts col docs = do
   chunkResults <- interruptibleFor ordered (zip lSums chunks) $ insertBlock opts col
 
   let lchunks = lefts preChunks
-  when ((not $ null lchunks) && ordered) $ do
+  when (not $ null lchunks) $ do
     liftIO $ throwIO $ head lchunks
 
   let lresults = lefts chunkResults

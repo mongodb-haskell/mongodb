@@ -171,7 +171,7 @@ spec = around withCleanDatabase $ do
 
         liftIO $ (length returnedDocs) `shouldBe` 1000
     it "skips one too big document" $ do
-      db $ insertAll_ "hugeDocCollection" [hugeDocument]
+      (db $ insertAll_ "hugeDocCollection" [hugeDocument]) `shouldThrow` anyException
       db $ do
         cur <- find $ (select [] "hugeDocCollection") {limit = 100000, batchSize = 100000}
         returnedDocs <- rest cur
