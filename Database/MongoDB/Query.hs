@@ -539,15 +539,15 @@ insertBlock opts col (prevCount, docs) = do
         case (look "writeErrors" doc, look "writeConcernError" doc) of
           (Nothing, Nothing) -> return $ Right $ map (valueAt "_id") docs'
           (Just err, Nothing) -> do
-            return $ Left $ WriteFailure prevCount -- TODO: insert error reporting should be rewritten
+            return $ Left $ WriteFailure prevCount -- TODO: insert error reporting should be rewritten since we can not really report meaningful result for every document
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
           (Nothing, Just err) -> do
-            return $ Left $ WriteFailure prevCount -- TODO: insert error reporting should be rewritten
+            return $ Left $ WriteFailure prevCount -- TODO: insert error reporting should be rewritten -----''------
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
           (Just err, Just writeConcernErr) -> do
-            return $ Left $ WriteFailure prevCount -- TODO: insert error reporting should be rewritten
+            return $ Left $ WriteFailure prevCount -- TODO: insert error reporting should be rewritten -----''------
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err ++ show writeConcernErr)
 
