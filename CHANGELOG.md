@@ -4,6 +4,9 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 
 ## [Unreleased] - unreleased
 
+### Added
+- GridFS implementation
+
 ### Fixed
 - Write functions hang when the connection is lost.
 
