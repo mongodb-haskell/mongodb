@@ -807,9 +807,13 @@ mergeUpdateResults
         (failed1 || failed2)
         (nMatched1 + nMatched2)
         ((liftM2 (+)) nModified1 nModified2)
-        (upserted1 ++ upserted2)
-        (writeErrors1 ++ writeErrors2) -- TODO this should be rewritten with IO containers. Otherwise its N^2 complexity.
-        (writeConcernErrors1 ++ writeConcernErrors2)
+        -- This function is used in foldl1' function. The first argument is the accumulator.
+        -- The list in the accumulator is usually longer than the subsequent value which goes in the second argument.
+        -- So, changing the order of list concatenation allows us to keep linear complexity of the
+        -- whole list accumulation process.
+        (upserted2 ++ upserted1)
+        (writeErrors2 ++ writeErrors1)
+        (writeConcernErrors2 ++ writeConcernErrors1)
         )
 
 
