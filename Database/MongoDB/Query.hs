@@ -22,9 +22,9 @@ module Database.MongoDB.Query (
     insert, insert_, insertMany, insertMany_, insertAll, insertAll_,
     -- ** Update
     save, replace, repsert, upsert, Modifier, modify, updateMany, updateAll,
-    UpdateResult(..), UpdateOption(..), Upserted(..),
+    WriteResult(..), UpdateOption(..), Upserted(..),
     -- ** Delete
-    delete, deleteOne, deleteMany, deleteAll, DeleteResult, DeleteOption(..),
+    delete, deleteOne, deleteMany, deleteAll, DeleteOption(..),
     -- * Read
     -- ** Query
     Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData, Partial),
@@ -47,7 +47,7 @@ module Database.MongoDB.Query (
 ) where
 
 import Prelude hiding (lookup)
-import Control.Exception (Exception, throwIO, throw)
+import Control.Exception (Exception, throwIO)
 import Control.Monad (unless, replicateM, liftM, forM, forM_, liftM2)
 import Data.Int (Int32, Int64)
 import Data.Either (lefts, rights)
@@ -79,7 +79,6 @@ import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
                   (=?), (!?), Val(..), ObjectId)
 import Data.Bson.Binary (putDocument)
-import Data.Maybe (fromJust, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -153,17 +152,18 @@ type GetLastError = Document
 class Result a where
   isFailed :: a -> Bool
 
-data UpdateResult = UpdateResult
+data WriteResult = WriteResult
                   { failed      :: Bool
                   , nMatched    :: Int
                   , nModified   :: Maybe Int
+                  , nRemoved    :: Int
                   -- ^ Mongodb server before 2.6 doesn't allow to calculate this value. This field is nothing if we can't calculate the number of modified documents.
                   , upserted    :: [Upserted]
                   , writeErrors :: [Failure]
                   , writeConcernErrors :: [WriteConcernError]
                   } deriving Show
 
-instance Result UpdateResult where
+instance Result WriteResult where
   isFailed = failed
 
 instance Result (Either a b) where
@@ -179,8 +179,6 @@ data WriteConcernError = WriteConcernError
                        { wceCode   :: Int
                        , wceErrMsg :: String
                        } deriving Show
-
-data DeleteResult = DeleteResult
 
 master :: AccessMode
 -- ^ Same as 'ConfirmWrites' []
@@ -644,7 +642,7 @@ updateCommandDocument col ordered updates writeConcern =
 updateMany :: (MonadIO m)
            => Collection
            -> [(Selector, Document, [UpdateOption])]
-           -> Action m UpdateResult
+           -> Action m WriteResult
 updateMany = update' True
 
 {-| Bulk update operation. If one update fails it will proceed with the
@@ -657,14 +655,14 @@ updateMany = update' True
 updateAll :: (MonadIO m)
            => Collection
            -> [(Selector, Document, [UpdateOption])]
-           -> Action m UpdateResult
+           -> Action m WriteResult
 updateAll = update' False
 
 update' :: (MonadIO m)
         => Bool
         -> Collection
         -> [(Selector, Document, [UpdateOption])]
-        -> Action m UpdateResult
+        -> Action m WriteResult
 update' ordered col updateDocs = do
   p <- asks mongoPipe
   let sd = P.serverData p
@@ -702,7 +700,7 @@ update' ordered col updateDocs = do
       ur <- runReaderT (updateBlock ordered col b) ctx
       return ur
       `catch` \(e :: Failure) -> do
-        return $ UpdateResult True 0 Nothing [] [e] []
+        return $ WriteResult True 0 Nothing 0 [] [e] []
     let failedTotal = or $ map failed blocks
     let updatedTotal = sum $ map nMatched blocks
     let modifiedTotal =
@@ -713,18 +711,19 @@ update' ordered col updateDocs = do
     let totalWriteConcernErrors = concat $ map writeConcernErrors blocks
 
     let upsertedTotal = concat $ map upserted blocks
-    return $ UpdateResult
+    return $ WriteResult
                   failedTotal
                   updatedTotal
                   modifiedTotal
+                  0 -- nRemoved
                   upsertedTotal
                   totalWriteErrors
                   totalWriteConcernErrors
 
-    `catch` \(e :: Failure) -> return $ UpdateResult True 0 Nothing [] [e] []
+    `catch` \(e :: Failure) -> return $ WriteResult True 0 Nothing 0 [] [e] []
 
 updateBlock :: (MonadIO m)
-            => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
+            => Bool -> Collection -> (Int, [Document]) -> Action m WriteResult
 updateBlock ordered col (prevCount, docs) = do
   p <- asks mongoPipe
   let sd = P.serverData p
@@ -742,10 +741,11 @@ updateBlock ordered col (prevCount, docs) = do
 
       let writeErrors = map docToWriteError $ fromMaybe [] (doc !? "writeErrors")
       let upsertedDocs = fromMaybe [] (doc !? "upserted")
-      return $ UpdateResult
+      return $ WriteResult
                     ((not $ true1 "ok" doc) || (not $ null writeErrors) || (not $ null writeConcernErrors))
                     (at "n" doc)
                     (at "nModified" doc)
+                    0
                     (map docToUpserted upsertedDocs)
                     writeErrors
                     writeConcernErrors
@@ -762,7 +762,7 @@ interruptibleFor ordered = go []
         else go (y:res) xs f
 
 updateBlockLegacy :: (MonadIO m)
-                  => Bool -> Collection -> (Int, [Document]) -> Action m UpdateResult
+                  => Bool -> Collection -> (Int, [Document]) -> Action m WriteResult
 updateBlockLegacy ordered col (prevCount, docs) = do
   db <- thisDatabase
   ctx <- ask
@@ -774,7 +774,7 @@ updateBlockLegacy ordered col (prevCount, docs) = do
       let multi = if at "multi" updateDoc then [MultiUpdate] else []
       mRes <- runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
       case mRes of
-        Nothing -> return $ UpdateResult False 0 Nothing [] [] []
+        Nothing -> return $ WriteResult False 0 Nothing 0 [] [] []
         Just resDoc -> do
           let em = lookup "err" resDoc
           let eCode = lookup "code" resDoc
@@ -785,28 +785,29 @@ updateBlockLegacy ordered col (prevCount, docs) = do
               let ups = do
                     upsValue <- lookup "upserted" resDoc
                     return $ Upserted i upsValue
-              return $ UpdateResult False n Nothing (maybeToList ups) [] []
+              return $ WriteResult False n Nothing 0 (maybeToList ups) [] []
             else do
               let defaultCode = if wtimeout then 64 else 24
               let errV = fromMaybe "unknown error" em
               let c = fromMaybe defaultCode eCode
               if wtimeout
                 then do
-                  return $ UpdateResult True 0 Nothing [] [] [WriteConcernError c errV]
+                  return $ WriteResult True 0 Nothing 0 [] [] [WriteConcernError c errV]
                 else do
-                  return $ UpdateResult True 0 Nothing [] [WriteFailure i c errV] []
+                  return $ WriteResult True 0 Nothing 0 [] [WriteFailure i c errV] []
       `catch` \(e :: Failure) -> do
-                 return $ UpdateResult True 0 Nothing [] [e] []
-  return $ foldl1' mergeUpdateResults results
+                 return $ WriteResult True 0 Nothing 0 [] [e] []
+  return $ foldl1' mergeWriteResults results
 
-mergeUpdateResults :: UpdateResult -> UpdateResult -> UpdateResult
-mergeUpdateResults
-  (UpdateResult failed1 nMatched1 nModified1 upserted1 writeErrors1 writeConcernErrors1)
-  (UpdateResult failed2 nMatched2 nModified2 upserted2 writeErrors2 writeConcernErrors2) =
-    (UpdateResult
+mergeWriteResults :: WriteResult -> WriteResult -> WriteResult
+mergeWriteResults
+  (WriteResult failed1 nMatched1 nModified1 nDeleted1 upserted1 writeErrors1 writeConcernErrors1)
+  (WriteResult failed2 nMatched2 nModified2 nDeleted2 upserted2 writeErrors2 writeConcernErrors2) =
+    (WriteResult
         (failed1 || failed2)
         (nMatched1 + nMatched2)
         ((liftM2 (+)) nModified1 nModified2)
+        (nDeleted1 + nDeleted2)
         -- This function is used in foldl1' function. The first argument is the accumulator.
         -- The list in the accumulator is usually longer than the subsequent value which goes in the second argument.
         -- So, changing the order of list concatenation allows us to keep linear complexity of the
@@ -862,7 +863,7 @@ deleteHelper opts (Select sel col) = do
 deleteMany :: (MonadIO m)
            => Collection
            -> [(Selector, [DeleteOption])]
-           -> Action m DeleteResult
+           -> Action m WriteResult
 deleteMany = delete' True
 
 {-| Bulk delete operation. If one delete fails it will proceed with the
@@ -873,7 +874,7 @@ deleteMany = delete' True
 deleteAll :: (MonadIO m)
           => Collection
           -> [(Selector, [DeleteOption])]
-          -> Action m DeleteResult
+          -> Action m WriteResult
 deleteAll = delete' False
 
 deleteCommandDocument :: Collection -> Bool -> [Document] -> Document -> Document
@@ -888,7 +889,7 @@ delete' :: (MonadIO m)
         => Bool
         -> Collection
         -> [(Selector, [DeleteOption])]
-        -> Action m DeleteResult
+        -> Action m WriteResult
 delete' ordered col deleteDocs = do
   p <- asks mongoPipe
   let sd = P.serverData p
@@ -915,11 +916,11 @@ delete' ordered col deleteDocs = do
         if ordered
             then takeRightsUpToLeft preChunks
             else rights preChunks
-  forM_ chunks (deleteBlock ordered col)
-  return DeleteResult
+  blockResult <- forM chunks (deleteBlock ordered col)
+  return $ foldl1' mergeWriteResults blockResult
 
 deleteBlock :: (MonadIO m)
-            => Bool -> Collection -> [Document] -> Action m ()
+            => Bool -> Collection -> [Document] -> Action m WriteResult
 deleteBlock ordered col docs = do
   p <- asks mongoPipe
   let sd = P.serverData p
@@ -931,7 +932,7 @@ deleteBlock ordered col docs = do
         liftIO $ forM docs $ \deleteDoc -> do
           let sel = (at "q" deleteDoc) :: Document
           let opts = if at "limit" deleteDoc == (1 :: Int) then [SingleRemove] else []
-          _ <- runReaderT (write (Delete (db <.> col) opts sel)) ctx
+          res <- runReaderT (write (Delete (db <.> col) opts sel)) ctx
           return Nothing
           `catch` \(e :: SomeException) -> do
                      when ordered $ liftIO $ throwIO e
@@ -939,7 +940,7 @@ deleteBlock ordered col docs = do
       let onlyErrors = catMaybes errors
       if not $ null onlyErrors
         then liftIO $ throwIO $ WriteFailure 0 0 (show onlyErrors) -- TODO add normal index (first argument)
-        else return ()
+        else return $ WriteResult False 0 Nothing 0 [] [] [] -- TODO to be fixed
     else do
       mode <- asks mongoWriteMode
       let writeConcern = case mode of
@@ -947,7 +948,7 @@ deleteBlock ordered col docs = do
                           Confirm params -> params
       doc <- runCommand $ deleteCommandDocument col ordered docs writeConcern
       case (look "writeErrors" doc, look "writeConcernError" doc) of
-        (Nothing, Nothing) -> return ()
+        (Nothing, Nothing) -> return $ WriteResult False 0 Nothing 0 [] [] []-- TODO to be fixed
         (Just err, Nothing) -> do
           liftIO $ throwIO $ WriteFailure 0 -- TODO add normal index
                                   (maybe 0 id $ lookup "ok" doc)
