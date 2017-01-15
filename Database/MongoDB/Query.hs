@@ -928,39 +928,47 @@ deleteBlock ordered col docs = do
     then do
       db <- thisDatabase
       ctx <- ask
-      errors <-
-        liftIO $ forM docs $ \deleteDoc -> do
+      results <-
+        liftIO $ interruptibleFor ordered docs $ \deleteDoc -> do
           let sel = (at "q" deleteDoc) :: Document
           let opts = if at "limit" deleteDoc == (1 :: Int) then [SingleRemove] else []
           res <- runReaderT (write (Delete (db <.> col) opts sel)) ctx
-          return Nothing
-          `catch` \(e :: SomeException) -> do
-                     when ordered $ liftIO $ throwIO e
-                     return $ Just e
-      let onlyErrors = catMaybes errors
-      if not $ null onlyErrors
-        then liftIO $ throwIO $ WriteFailure 0 0 (show onlyErrors) -- TODO add normal index (first argument)
-        else return $ WriteResult False 0 Nothing 0 [] [] [] -- TODO to be fixed
+          let n = fromMaybe 0 $ do
+                    resDoc <- res
+                    resDoc !? "n"
+          return $ WriteResult False 0 Nothing n [] [] []
+          `catch` \(e :: Failure) -> do
+                     return $ WriteResult True 0 Nothing 0 [] [e] []
+      return $ foldl1' mergeWriteResults results
     else do
       mode <- asks mongoWriteMode
       let writeConcern = case mode of
                           NoConfirm -> ["w" =: (0 :: Int)]
                           Confirm params -> params
       doc <- runCommand $ deleteCommandDocument col ordered docs writeConcern
+      let n = fromMaybe 0 $ doc !? "n"
       case (look "writeErrors" doc, look "writeConcernError" doc) of
-        (Nothing, Nothing) -> return $ WriteResult False 0 Nothing 0 [] [] []-- TODO to be fixed
+        (Nothing, Nothing) -> return $ WriteResult False 0 Nothing n [] [] []
         (Just err, Nothing) -> do
-          liftIO $ throwIO $ WriteFailure 0 -- TODO add normal index
+          return $ WriteResult True 0 Nothing n [] [
+                     WriteFailure 0 -- TODO add normal index
                                   (maybe 0 id $ lookup "ok" doc)
-                                  (show err)
-        (Nothing, Just err) -> do
-          liftIO $ throwIO $ WriteFailure 0 -- TODO add normal index
+                                  (show err)] []
+        (Nothing, Just (Doc err)) -> do
+          return $ WriteResult True 0 Nothing n [] [] [
+                              WriteConcernError
+                                (fromMaybe (-1) $ err !? "code")
+                                (fromMaybe "" $ err !? "errmsg")
+                                ]
+        (Just err, Just (Doc writeConcernErr)) -> do
+          return $ WriteResult True 0 Nothing n [] [
+                     WriteFailure 0 -- TODO add normal index
                                   (maybe 0 id $ lookup "ok" doc)
-                                  (show err)
-        (Just err, Just writeConcernErr) -> do
-          liftIO $ throwIO $ WriteFailure 0 -- TODO add normal index
-                                  (maybe 0 id $ lookup "ok" doc)
-                                  (show err ++ show writeConcernErr)
+                                  (show err)] [
+                     WriteConcernError
+                                (fromMaybe (-1) $ writeConcernErr !? "code")
+                                (fromMaybe "" $ writeConcernErr !? "errmsg")
+                                  ]
 
 -- * Read
 
