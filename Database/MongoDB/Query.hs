@@ -48,7 +48,7 @@ module Database.MongoDB.Query (
 
 import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO)
-import Control.Monad (unless, replicateM, liftM, forM, forM_, liftM2)
+import Control.Monad (unless, replicateM, liftM, forM, liftM2)
 import Data.Int (Int32, Int64)
 import Data.Either (lefts, rights)
 import Data.List (foldl1')
@@ -67,7 +67,7 @@ import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
                                          readMVar, modifyMVar)
 #endif
 import Control.Applicative ((<$>))
-import Control.Exception (SomeException, catch)
+import Control.Exception (catch)
 import Control.Monad (when)
 import Control.Monad.Base (MonadBase)
 import Control.Monad.Error (Error(..))
@@ -916,12 +916,19 @@ delete' ordered col deleteDocs = do
         if ordered
             then takeRightsUpToLeft preChunks
             else rights preChunks
-  blockResult <- forM chunks (deleteBlock ordered col)
+  ctx <- ask
+  let lens = map length chunks
+  let lSums = 0 : (zipWith (+) lSums lens)
+  blockResult <- liftIO $ interruptibleFor ordered (zip lSums chunks) $ \b -> do
+    dr <- runReaderT (deleteBlock ordered col b) ctx
+    return dr
+    `catch` \(e :: Failure) -> do
+      return $ WriteResult True 0 Nothing 0 [] [e] []
   return $ foldl1' mergeWriteResults blockResult
 
 deleteBlock :: (MonadIO m)
-            => Bool -> Collection -> [Document] -> Action m WriteResult
-deleteBlock ordered col docs = do
+            => Bool -> Collection -> (Int, [Document]) -> Action m WriteResult
+deleteBlock ordered col (prevCount, docs) = do
   p <- asks mongoPipe
   let sd = P.serverData p
   if (maxWireVersion sd < 2)
