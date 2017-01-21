@@ -926,6 +926,11 @@ delete' ordered col deleteDocs = do
       return $ WriteResult True 0 Nothing 0 [] [e] []
   return $ foldl1' mergeWriteResults blockResult
 
+
+addFailureIndex :: Int -> Failure -> Failure
+addFailureIndex i (WriteFailure ind code s) = WriteFailure i code s
+addFailureIndex i f = f
+
 deleteBlock :: (MonadIO m)
             => Bool -> Collection -> (Int, [Document]) -> Action m WriteResult
 deleteBlock ordered col (prevCount, docs) = do
@@ -936,16 +941,16 @@ deleteBlock ordered col (prevCount, docs) = do
       db <- thisDatabase
       ctx <- ask
       results <-
-        liftIO $ interruptibleFor ordered docs $ \deleteDoc -> do
+        liftIO $ interruptibleFor ordered (zip [prevCount, prevCount + 1 ..] docs) $ \(i, deleteDoc) -> do
           let sel = (at "q" deleteDoc) :: Document
           let opts = if at "limit" deleteDoc == (1 :: Int) then [SingleRemove] else []
           res <- runReaderT (write (Delete (db <.> col) opts sel)) ctx
           let n = fromMaybe 0 $ do
                     resDoc <- res
                     resDoc !? "n"
-          return $ WriteResult False 0 Nothing n [] [] []
+          return $ WriteResult False 0 Nothing n [] [] [] -- TODO it's only ok when res ok is 1. Should be fixed
           `catch` \(e :: Failure) -> do
-                     return $ WriteResult True 0 Nothing 0 [] [e] []
+                     return $ WriteResult True 0 Nothing 0 [] [addFailureIndex i e] []
       return $ foldl1' mergeWriteResults results
     else do
       mode <- asks mongoWriteMode
