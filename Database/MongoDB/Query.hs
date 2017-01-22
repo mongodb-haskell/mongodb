@@ -48,7 +48,7 @@ module Database.MongoDB.Query (
 
 import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO)
-import Control.Monad (unless, replicateM, liftM, forM, liftM2)
+import Control.Monad (unless, replicateM, liftM, liftM2)
 import Data.Int (Int32, Int64)
 import Data.Either (lefts, rights)
 import Data.List (foldl1')
@@ -175,10 +175,8 @@ data Upserted = Upserted
               , upsertedId    :: ObjectId
               } deriving Show
 
-data WriteConcernError = WriteConcernError
-                       { wceCode   :: Int
-                       , wceErrMsg :: String
-                       } deriving Show
+data WriteConcernError = WriteConcernError Int String
+                         deriving Show
 
 master :: AccessMode
 -- ^ Same as 'ConfirmWrites' []
@@ -746,7 +744,7 @@ updateBlock ordered col (prevCount, docs) = do
                     (at "nModified" doc)
                     0
                     (map docToUpserted upsertedDocs)
-                    writeErrors
+                    (map (addFailureIndex prevCount) writeErrors)
                     writeConcernErrors
 
 
@@ -890,8 +888,8 @@ delete' ordered col deleteDocs = do
 
 
 addFailureIndex :: Int -> Failure -> Failure
-addFailureIndex i (WriteFailure ind code s) = WriteFailure i code s
-addFailureIndex i f = f
+addFailureIndex i (WriteFailure ind code s) = WriteFailure (ind + i) code s
+addFailureIndex _ f = f
 
 deleteBlock :: (MonadIO m)
             => Bool -> Collection -> (Int, [Document]) -> Action m WriteResult
