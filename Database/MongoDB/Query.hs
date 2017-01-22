@@ -727,7 +727,7 @@ updateBlock ordered col (prevCount, docs) = do
   p <- asks mongoPipe
   let sd = P.serverData p
   if (maxWireVersion sd < 2)
-    then updateBlockLegacy ordered col (prevCount, docs)
+    then liftIO $ ioError $ userError "updateMany doesn't support mongodb older than 2.6"
     else do
       mode <- asks mongoWriteMode
       let writeConcern = case mode of
@@ -759,44 +759,6 @@ interruptibleFor ordered = go []
       if isFailed y && ordered
         then return $ reverse (y:res)
         else go (y:res) xs f
-
-updateBlockLegacy :: (MonadIO m)
-                  => Bool -> Collection -> (Int, [Document]) -> Action m WriteResult
-updateBlockLegacy ordered col (prevCount, docs) = do
-  db <- thisDatabase
-  ctx <- ask
-  results <- liftIO $
-    interruptibleFor ordered (zip [prevCount, (prevCount + 1) ..] docs) $ \(i, updateDoc) -> do
-      let doc = (at "u" updateDoc) :: Document
-      let sel = (at "q" updateDoc) :: Document
-      let upsrt = if at "upsert" updateDoc then [Upsert] else []
-      let multi = if at "multi" updateDoc then [MultiUpdate] else []
-      mRes <- runReaderT (write (Update (db <.> col) (upsrt ++ multi) sel doc)) ctx
-      case mRes of
-        Nothing -> return $ WriteResult False 0 Nothing 0 [] [] []
-        Just resDoc -> do
-          let em = lookup "err" resDoc
-          let eCode = lookup "code" resDoc
-          let wtimeout = fromMaybe False $ lookup "wtimeout" resDoc
-          if isNothing em && isNothing eCode
-            then do
-              let n = at "n" resDoc
-              let ups = do
-                    upsValue <- lookup "upserted" resDoc
-                    return $ Upserted i upsValue
-              return $ WriteResult False n Nothing 0 (maybeToList ups) [] []
-            else do
-              let defaultCode = if wtimeout then 64 else 24
-              let errV = fromMaybe "unknown error" em
-              let c = fromMaybe defaultCode eCode
-              if wtimeout
-                then do
-                  return $ WriteResult True 0 Nothing 0 [] [] [WriteConcernError c errV]
-                else do
-                  return $ WriteResult True 0 Nothing 0 [] [WriteFailure i c errV] []
-      `catch` \(e :: Failure) -> do
-                 return $ WriteResult True 0 Nothing 0 [] [e] []
-  return $ foldl1' mergeWriteResults results
 
 mergeWriteResults :: WriteResult -> WriteResult -> WriteResult
 mergeWriteResults
@@ -937,21 +899,7 @@ deleteBlock ordered col (prevCount, docs) = do
   p <- asks mongoPipe
   let sd = P.serverData p
   if (maxWireVersion sd < 2)
-    then do
-      db <- thisDatabase
-      ctx <- ask
-      results <-
-        liftIO $ interruptibleFor ordered (zip [prevCount, prevCount + 1 ..] docs) $ \(i, deleteDoc) -> do
-          let sel = (at "q" deleteDoc) :: Document
-          let opts = if at "limit" deleteDoc == (1 :: Int) then [SingleRemove] else []
-          res <- runReaderT (write (Delete (db <.> col) opts sel)) ctx
-          let n = fromMaybe 0 $ do
-                    resDoc <- res
-                    resDoc !? "n"
-          return $ WriteResult False 0 Nothing n [] [] [] -- TODO it's only ok when res ok is 1. Should be fixed
-          `catch` \(e :: Failure) -> do
-                     return $ WriteResult True 0 Nothing 0 [] [addFailureIndex i e] []
-      return $ foldl1' mergeWriteResults results
+    then liftIO $ ioError $ userError "deleteMany doesn't support mongodb older than 2.6"
     else do
       mode <- asks mongoWriteMode
       let writeConcern = case mode of
