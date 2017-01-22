@@ -851,8 +851,9 @@ deleteOne = deleteHelper [SingleRemove]
 deleteHelper :: (MonadIO m)
              => [DeleteOption] -> Selection -> Action m ()
 deleteHelper opts (Select sel col) = do
-  _ <- delete' True col [(sel, opts)]
-  return ()
+    db <- thisDatabase
+    ctx <- ask
+    liftIO $ runReaderT (void $ write (Delete (db <.> col) opts sel)) ctx
 
 {-| Bulk delete operation. If one delete fails it will not delete the remaining
  - documents. Current returned value is only a place holder. With mongodb server
