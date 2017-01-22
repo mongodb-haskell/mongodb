@@ -68,7 +68,7 @@ import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
 #endif
 import Control.Applicative ((<$>))
 import Control.Exception (catch)
-import Control.Monad (when)
+import Control.Monad (when, void)
 import Control.Monad.Base (MonadBase)
 import Control.Monad.Error (Error(..))
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask, asks, local)
@@ -618,10 +618,9 @@ update :: (MonadIO m)
        => [UpdateOption] -> Selection -> Document -> Action m ()
 -- ^ Update first document in selection using updater document, unless 'MultiUpdate' option is supplied then update all documents in selection. If 'Upsert' option is supplied then treat updater as document and insert it if selection is empty.
 update opts (Select sel col) up = do
-  res <- update' True col [(sel, up, opts)]
-  if not $ null $ writeErrors res
-    then liftIO $ throwIO $ WriteFailure 0 0 (show $ head $ writeErrors res)
-    else return ()
+    db <- thisDatabase
+    ctx <- ask
+    liftIO $ runReaderT (void $ write (Update (db <.> col) opts sel up)) ctx
 
 updateCommandDocument :: Collection -> Bool -> [Document] -> Document -> Document
 updateCommandDocument col ordered updates writeConcern =
