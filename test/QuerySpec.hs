@@ -5,7 +5,7 @@ module QuerySpec (spec) where
 import Data.String (IsString(..))
 import TestImport
 import Control.Exception
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import System.Environment (getEnv)
 import System.IO.Error (catchIOError)
 import qualified Data.List as L
@@ -22,6 +22,11 @@ db action = do
     result <- access pipe master testDBName action
     close pipe
     return result
+
+getWireVersion :: IO Int
+getWireVersion = db $ do
+    sd <- retrieveServerData
+    return $ maxWireVersion sd
 
 withCleanDatabase :: ActionWith () -> IO ()
 withCleanDatabase action = dropDB >> action () >> dropDB >> return ()
@@ -192,109 +197,125 @@ spec = around withCleanDatabase $ do
 
   describe "updateMany" $ do
     it "updates value" $ do
-      _id <- db $ insert "team" ["name" =: "Yankees", "league" =: "American"]
-      result <- db $ rest =<< find (select [] "team")
-      result `shouldBe` [["_id" =: _id, "name" =: "Yankees", "league" =: "American"]]
-      _ <- db $ updateMany "team" [([ "_id" =: _id]
-                                    , ["$set" =: ["league" =: "European"]]
-                                    , [])]
-      updatedResult <- db $ rest =<< find (select [] "team")
-      updatedResult `shouldBe` [["_id" =: _id, "name" =: "Yankees", "league" =: "European"]]
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _id <- db $ insert "team" ["name" =: "Yankees", "league" =: "American"]
+        result <- db $ rest =<< find (select [] "team")
+        result `shouldBe` [["_id" =: _id, "name" =: "Yankees", "league" =: "American"]]
+        _ <- db $ updateMany "team" [([ "_id" =: _id]
+                                      , ["$set" =: ["league" =: "European"]]
+                                      , [])]
+        updatedResult <- db $ rest =<< find (select [] "team")
+        updatedResult `shouldBe` [["_id" =: _id, "name" =: "Yankees", "league" =: "European"]]
     it "upserts value" $ do
-      c <- db $ count (select [] "team")
-      c `shouldBe` 0
-      _ <- db $ updateMany "team" [( []
-                                   , ["name" =: "Giants", "league" =: "MLB"]
-                                   , [Upsert]
-                                   )]
-      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
-      map L.sort updatedResult `shouldBe` [["league" =: "MLB", "name" =: "Giants"]]
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        c <- db $ count (select [] "team")
+        c `shouldBe` 0
+        _ <- db $ updateMany "team" [( []
+                                     , ["name" =: "Giants", "league" =: "MLB"]
+                                     , [Upsert]
+                                     )]
+        updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+        map L.sort updatedResult `shouldBe` [["league" =: "MLB", "name" =: "Giants"]]
     it "updates all documents with Multi enabled" $ do
-      _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American"]
-      _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "MiLB"]
-      _ <- db $ updateMany "team" [( ["name" =: "Yankees"]
-                                   , ["$set" =: ["league" =: "MLB"]]
-                                   , [MultiUpdate]
-                                   )]
-      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
-      (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "MLB", "name" =: "Yankees"]
-                                                     , ["league" =: "MLB", "name" =: "Yankees"]
-                                                     ]
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American"]
+        _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "MiLB"]
+        _ <- db $ updateMany "team" [( ["name" =: "Yankees"]
+                                     , ["$set" =: ["league" =: "MLB"]]
+                                     , [MultiUpdate]
+                                     )]
+        updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+        (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "MLB", "name" =: "Yankees"]
+                                                       , ["league" =: "MLB", "name" =: "Yankees"]
+                                                       ]
     it "updates one document when there is no Multi option" $ do
-      _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American"]
-      _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "MiLB"]
-      _ <- db $ updateMany "team" [( ["name" =: "Yankees"]
-                                   , ["$set" =: ["league" =: "MLB"]]
-                                   , []
-                                   )]
-      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
-      (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "MLB", "name" =: "Yankees"]
-                                                     , ["league" =: "MiLB", "name" =: "Yankees"]
-                                                     ]
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American"]
+        _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "MiLB"]
+        _ <- db $ updateMany "team" [( ["name" =: "Yankees"]
+                                     , ["$set" =: ["league" =: "MLB"]]
+                                     , []
+                                     )]
+        updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+        (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "MLB", "name" =: "Yankees"]
+                                                       , ["league" =: "MiLB", "name" =: "Yankees"]
+                                                       ]
     it "can process different updates" $ do
-      _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American"]
-      _ <- db $ insert "team" ["name" =: "Giants" , "league" =: "MiLB"]
-      _ <- db $ updateMany "team" [ ( ["name" =: "Yankees"]
-                                    , ["$set" =: ["league" =: "MiLB"]]
-                                    , []
-                                    )
-                                  , ( ["name" =: "Giants"]
-                                    , ["$set" =: ["league" =: "MLB"]]
-                                    , []
-                                    )
-                                  ]
-      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
-      (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "MLB" , "name" =: "Giants"]
-                                                     , ["league" =: "MiLB", "name" =: "Yankees"]
-                                                     ]
-    it "can process different updates" $ do
-      _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American", "score" =: (Nothing :: Maybe Int)]
-      _ <- db $ insert "team" ["name" =: "Giants" , "league" =: "MiLB", "score" =: (1 :: Int)]
-      updateResult <- (db $ updateMany "team" [ ( ["name" =: "Yankees"]
-                                              , ["$inc" =: ["score" =: (1 :: Int)]]
-                                              , []
-                                              )
-                                            , ( ["name" =: "Giants"]
-                                              , ["$inc" =: ["score" =: (2 :: Int)]]
-                                              , []
-                                              )
-                                            ])
-      failed updateResult `shouldBe` True
-      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
-      (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "American", "name" =: "Yankees", "score" =: (Nothing :: Maybe Int)]
-                                                     , ["league" =: "MiLB"    , "name" =: "Giants" , "score" =: (1 :: Int)]
-                                                     ]
-    it "can handle big updates" $ do
-      let docs = (flip map) [0..20000] $ \i ->
-              ["name" =: (T.pack $ "name " ++ (show i))]
-      ids <- db $ insertAll "bigCollection" docs
-      let updateDocs = (flip map) ids (\i -> ( [ "_id" =: i]
-                                      , ["$set" =: ["name" =: ("name " ++ (show i))]]
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American"]
+        _ <- db $ insert "team" ["name" =: "Giants" , "league" =: "MiLB"]
+        _ <- db $ updateMany "team" [ ( ["name" =: "Yankees"]
+                                      , ["$set" =: ["league" =: "MiLB"]]
                                       , []
-                                      ))
-      _ <- db $ updateMany "team" updateDocs
-      updatedResult <- db $ rest =<< find (select [] "team")
-      forM_ updatedResult $ \r -> let (i :: ObjectId) = "_id" `at` r
-                                   in (("name" `at` r) :: String) `shouldBe` ("name" ++ (show i))
+                                      )
+                                    , ( ["name" =: "Giants"]
+                                      , ["$set" =: ["league" =: "MLB"]]
+                                      , []
+                                      )
+                                    ]
+        updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+        (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "MLB" , "name" =: "Giants"]
+                                                       , ["league" =: "MiLB", "name" =: "Yankees"]
+                                                       ]
+    it "can process different updates" $ do
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American", "score" =: (Nothing :: Maybe Int)]
+        _ <- db $ insert "team" ["name" =: "Giants" , "league" =: "MiLB", "score" =: (1 :: Int)]
+        updateResult <- (db $ updateMany "team" [ ( ["name" =: "Yankees"]
+                                                , ["$inc" =: ["score" =: (1 :: Int)]]
+                                                , []
+                                                )
+                                              , ( ["name" =: "Giants"]
+                                                , ["$inc" =: ["score" =: (2 :: Int)]]
+                                                , []
+                                                )
+                                              ])
+        failed updateResult `shouldBe` True
+        updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+        (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "American", "name" =: "Yankees", "score" =: (Nothing :: Maybe Int)]
+                                                       , ["league" =: "MiLB"    , "name" =: "Giants" , "score" =: (1 :: Int)]
+                                                       ]
+    it "can handle big updates" $ do
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        let docs = (flip map) [0..20000] $ \i ->
+                ["name" =: (T.pack $ "name " ++ (show i))]
+        ids <- db $ insertAll "bigCollection" docs
+        let updateDocs = (flip map) ids (\i -> ( [ "_id" =: i]
+                                        , ["$set" =: ["name" =: ("name " ++ (show i))]]
+                                        , []
+                                        ))
+        _ <- db $ updateMany "team" updateDocs
+        updatedResult <- db $ rest =<< find (select [] "team")
+        forM_ updatedResult $ \r -> let (i :: ObjectId) = "_id" `at` r
+                                     in (("name" `at` r) :: String) `shouldBe` ("name" ++ (show i))
 
   describe "updateAll" $ do
     it "can process different updates" $ do
-      _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American", "score" =: (Nothing :: Maybe Int)]
-      _ <- db $ insert "team" ["name" =: "Giants" , "league" =: "MiLB", "score" =: (1 :: Int)]
-      updateResult <- (db $ updateAll "team" [ ( ["name" =: "Yankees"]
-                                             , ["$inc" =: ["score" =: (1 :: Int)]]
-                                             , []
-                                             )
-                                           , ( ["name" =: "Giants"]
-                                             , ["$inc" =: ["score" =: (2 :: Int)]]
-                                             , []
-                                             )
-                                           ])
-      failed updateResult `shouldBe` True
-      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
-      (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "American", "name" =: "Yankees", "score" =: (Nothing :: Maybe Int)]
-                                                     , ["league" =: "MiLB"    , "name" =: "Giants" , "score" =: (3 :: Int)]
-                                                     ]
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insert "team" ["name" =: "Yankees", "league" =: "American", "score" =: (Nothing :: Maybe Int)]
+        _ <- db $ insert "team" ["name" =: "Giants" , "league" =: "MiLB", "score" =: (1 :: Int)]
+        updateResult <- (db $ updateAll "team" [ ( ["name" =: "Yankees"]
+                                               , ["$inc" =: ["score" =: (1 :: Int)]]
+                                               , []
+                                               )
+                                             , ( ["name" =: "Giants"]
+                                               , ["$inc" =: ["score" =: (2 :: Int)]]
+                                               , []
+                                               )
+                                             ])
+        failed updateResult `shouldBe` True
+        updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+        (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "American", "name" =: "Yankees", "score" =: (Nothing :: Maybe Int)]
+                                                       , ["league" =: "MiLB"    , "name" =: "Giants" , "score" =: (3 :: Int)]
+                                                       ]
 
   describe "delete" $ do
     it "actually deletes something" $ do
@@ -336,34 +357,40 @@ spec = around withCleanDatabase $ do
 
   describe "deleteMany" $ do
     it "actually deletes something" $ do
-      _ <- db $ insert "team" ["name" =: ("Giants" :: String)]
-      _ <- db $ insert "team" ["name" =: ("Yankees" :: String)]
-      _ <- db $ deleteMany "team" [ (["name" =: ("Giants" :: String)], [])
-                                  , (["name" =: ("Yankees" :: String)], [])
-                                  ]
-      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
-      length updatedResult `shouldBe` 0
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insert "team" ["name" =: ("Giants" :: String)]
+        _ <- db $ insert "team" ["name" =: ("Yankees" :: String)]
+        _ <- db $ deleteMany "team" [ (["name" =: ("Giants" :: String)], [])
+                                    , (["name" =: ("Yankees" :: String)], [])
+                                    ]
+        updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+        length updatedResult `shouldBe` 0
 
   describe "deleteAll" $ do
     it "actually deletes something" $ do
-      _ <- db $ insert "team" [ "name"  =: ("Giants" :: String)
-                              , "score" =: (Nothing :: Maybe Int)
-                              ]
-      _ <- db $ insert "team" [ "name" =: ("Yankees" :: String)
-                              , "score" =: (1 :: Int)
-                              ]
-      _ <- db $ deleteAll "team" [ (["name" =: ("Giants" :: String)], [])
-                                 , (["name" =: ("Yankees" :: String)], [])
-                                 ]
-      updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
-      length updatedResult `shouldBe` 0
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insert "team" [ "name"  =: ("Giants" :: String)
+                                , "score" =: (Nothing :: Maybe Int)
+                                ]
+        _ <- db $ insert "team" [ "name" =: ("Yankees" :: String)
+                                , "score" =: (1 :: Int)
+                                ]
+        _ <- db $ deleteAll "team" [ (["name" =: ("Giants" :: String)], [])
+                                   , (["name" =: ("Yankees" :: String)], [])
+                                   ]
+        updatedResult <- db $ rest =<< find ((select [] "team") {project = ["_id" =: (0 :: Int)]})
+        length updatedResult `shouldBe` 0
     it "can handle big deletes" $ do
-      let docs = (flip map) [0..20000] $ \i ->
-              ["name" =: (T.pack $ "name " ++ (show i))]
-      _ <- db $ insertAll "bigCollection" docs
-      _ <- db $ deleteAll "bigCollection" $ map (\d -> (d, [])) docs
-      updatedResult <- db $ rest =<< find ((select [] "bigCollection") {project = ["_id" =: (0 :: Int)]})
-      length updatedResult `shouldBe` 0
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        let docs = (flip map) [0..20000] $ \i ->
+                ["name" =: (T.pack $ "name " ++ (show i))]
+        _ <- db $ insertAll "bigCollection" docs
+        _ <- db $ deleteAll "bigCollection" $ map (\d -> (d, [])) docs
+        updatedResult <- db $ rest =<< find ((select [] "bigCollection") {project = ["_id" =: (0 :: Int)]})
+        length updatedResult `shouldBe` 0
 
   describe "allCollections" $ do
     it "returns all collections in a database" $ do

@@ -43,7 +43,7 @@ module Database.MongoDB.Query (
     MRResult, mapReduce, runMR, runMR',
     -- * Command
     Command, runCommand, runCommand1,
-    eval, retrieveServerData
+    eval, retrieveServerData, ServerData(..)
 ) where
 
 import Prelude hiding (lookup)
@@ -77,7 +77,7 @@ import Control.Monad.Trans.Control (MonadBaseControl(..))
 import Data.Binary.Put (runPut)
 import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
-                  (=?), (!?), Val(..), ObjectId)
+                  (=?), (!?), Val(..), ObjectId, Value(..))
 import Data.Bson.Binary (putDocument)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -907,26 +907,24 @@ deleteBlock ordered col (prevCount, docs) = do
       let n = fromMaybe 0 $ doc !? "n"
       case (look "writeErrors" doc, look "writeConcernError" doc) of
         (Nothing, Nothing) -> return $ WriteResult False 0 Nothing n [] [] []
-        (Just err, Nothing) -> do
-          return $ WriteResult True 0 Nothing n [] [
-                     WriteFailure 0 -- TODO add normal index
-                                  (maybe 0 id $ lookup "ok" doc)
-                                  (show err)] []
+        (Just (Array err), Nothing) -> do
+          return $ WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) []
         (Nothing, Just (Doc err)) -> do
           return $ WriteResult True 0 Nothing n [] [] [
                               WriteConcernError
                                 (fromMaybe (-1) $ err !? "code")
                                 (fromMaybe "" $ err !? "errmsg")
                                 ]
-        (Just err, Just (Doc writeConcernErr)) -> do
-          return $ WriteResult True 0 Nothing n [] [
-                     WriteFailure 0 -- TODO add normal index
-                                  (maybe 0 id $ lookup "ok" doc)
-                                  (show err)] [
+        (Just (Array err), Just (Doc writeConcernErr)) -> do
+          return $ WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) [
                      WriteConcernError
                                 (fromMaybe (-1) $ writeConcernErr !? "code")
                                 (fromMaybe "" $ writeConcernErr !? "errmsg")
                                   ]
+
+anyToWriteError :: Int -> Value -> Failure
+anyToWriteError ind (Doc d) = docToWriteError d
+anyToWriteError ind _ = WriteFailure ind (-1) "Unknown bson value"
 
 -- * Read
 
