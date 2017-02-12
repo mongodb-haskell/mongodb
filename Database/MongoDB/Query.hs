@@ -419,7 +419,8 @@ write notice = asks mongoWriteMode >>= \mode -> case mode of
 insert :: (MonadIO m) => Collection -> Document -> Action m Value
 -- ^ Insert document into collection and return its \"_id\" value, which is created automatically if not supplied
 insert col doc = do
-  res <- insertBlock [] col (0, [doc])
+  doc' <- liftIO $ assignId doc
+  res <- insertBlock [] col (0, [doc'])
   case res of
     Left failure -> liftIO $ throwIO failure
     Right r -> return $ head r
@@ -472,6 +473,7 @@ insert' :: (MonadIO m)
 insert' opts col docs = do
   p <- asks mongoPipe
   let sd = P.serverData p
+  docs' <- liftIO $ mapM assignId docs
   mode <- asks mongoWriteMode
   let writeConcern = case mode of
                         NoConfirm -> ["w" =: (0 :: Int)]
@@ -484,7 +486,7 @@ insert' opts col docs = do
                                            -- document should be subtracted from
                                            -- the overall size
                       (maxWriteBatchSize sd)
-                      docs
+                      docs'
   let chunks =
         if ordered
             then takeRightsUpToLeft preChunks
@@ -509,13 +511,12 @@ insertBlock :: (MonadIO m)
 insertBlock _ _ (_, []) = return $ Right []
 insertBlock opts col (prevCount, docs) = do
     db <- thisDatabase
-    docs' <- liftIO $ mapM assignId docs
 
     p <- asks mongoPipe
     let sd = P.serverData p
     if (maxWireVersion sd < 2)
       then do
-        res <- liftDB $ write (Insert (db <.> col) opts docs')
+        res <- liftDB $ write (Insert (db <.> col) opts docs)
         let errorMessage = do
               jRes <- res
               em <- lookup "err" jRes
@@ -525,15 +526,15 @@ insertBlock opts col (prevCount, docs) = do
 
         case errorMessage of
           Just failure -> return $ Left failure
-          Nothing -> return $ Right $ map (valueAt "_id") docs'
+          Nothing -> return $ Right $ map (valueAt "_id") docs
       else do
         mode <- asks mongoWriteMode
         let writeConcern = case mode of
                               NoConfirm -> ["w" =: (0 :: Int)]
                               Confirm params -> params
-        doc <- runCommand $ insertCommandDocument opts col docs' writeConcern
+        doc <- runCommand $ insertCommandDocument opts col docs writeConcern
         case (look "writeErrors" doc, look "writeConcernError" doc) of
-          (Nothing, Nothing) -> return $ Right $ map (valueAt "_id") docs'
+          (Nothing, Nothing) -> return $ Right $ map (valueAt "_id") docs
           (Just err, Nothing) -> do
             return $ Left $ WriteFailure
                                     prevCount -- TODO: insert error reporting should be rewritten since we can not really report meaningful result for every document
