@@ -130,6 +130,7 @@ data Failure =
     | WriteFailure Int ErrorCode String -- ^ Error observed by getLastError after a write, error description is in string, index of failed document is the first argument
     | DocNotFound Selection  -- ^ 'fetch' found no document matching selection
     | AggregateFailure String -- ^ 'aggregate' returned an error
+    | CompoundFailure [Failure] -- ^ When we need to aggregate several failures and report them.
     deriving (Show, Eq, Typeable)
 instance Exception Failure
 
@@ -535,21 +536,22 @@ insertBlock opts col (prevCount, docs) = do
         doc <- runCommand $ insertCommandDocument opts col docs writeConcern
         case (look "writeErrors" doc, look "writeConcernError" doc) of
           (Nothing, Nothing) -> return $ Right $ map (valueAt "_id") docs
-          (Just err, Nothing) -> do
-            return $ Left $ WriteFailure
-                                    prevCount -- TODO: insert error reporting should be rewritten since we can not really report meaningful result for every document
-                                    (maybe 0 id $ lookup "ok" doc)
-                                    (show err)
+          (Just (Array errs), Nothing) -> do
+            let writeErrors = map (anyToWriteError prevCount) $ errs
+            let errorsWithFailureIndex = map (addFailureIndex prevCount) writeErrors
+            return $ Left $ CompoundFailure errorsWithFailureIndex
           (Nothing, Just err) -> do
             return $ Left $ WriteFailure
-                                    prevCount -- TODO: insert error reporting should be rewritten -----''------
+                                    prevCount
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show err)
-          (Just err, Just writeConcernErr) -> do
-            return $ Left $ WriteFailure
-                                    prevCount -- TODO: insert error reporting should be rewritten -----''------
+          (Just (Array errs), Just writeConcernErr) -> do
+            let writeErrors = map (anyToWriteError prevCount) $ errs
+            let errorsWithFailureIndex = map (addFailureIndex prevCount) writeErrors
+            return $ Left $ CompoundFailure $ (WriteFailure
+                                    prevCount
                                     (maybe 0 id $ lookup "ok" doc)
-                                    (show err ++ show writeConcernErr)
+                                    (show writeConcernErr)) : errorsWithFailureIndex
 
 splitAtLimit :: Int -> Int -> [Document] -> [Either Failure [Document]]
 splitAtLimit maxSize maxCount list = chop (go 0 0 []) list
