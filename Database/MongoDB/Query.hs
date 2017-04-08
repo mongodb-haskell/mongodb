@@ -128,9 +128,11 @@ data Failure =
     | CursorNotFoundFailure CursorId  -- ^ Cursor expired because it wasn't accessed for over 10 minutes, or this cursor came from a different server that the one you are currently connected to (perhaps a fail over happen between servers in a replica set)
     | QueryFailure ErrorCode String  -- ^ Query failed for some reason as described in the string
     | WriteFailure Int ErrorCode String -- ^ Error observed by getLastError after a write, error description is in string, index of failed document is the first argument
+    -- | WriteConcernFailure Int String  -- ^ Write concern error. It's reported only by insert, update, delete commands. Not by wire protocol.
     | DocNotFound Selection  -- ^ 'fetch' found no document matching selection
     | AggregateFailure String -- ^ 'aggregate' returned an error
     | CompoundFailure [Failure] -- ^ When we need to aggregate several failures and report them.
+    | ProtocolFailure Int String -- ^ The structure of the returned documents doesn't match what we expected
     deriving (Show, Eq, Typeable)
 instance Exception Failure
 
@@ -552,6 +554,11 @@ insertBlock opts col (prevCount, docs) = do
                                     prevCount
                                     (maybe 0 id $ lookup "ok" doc)
                                     (show writeConcernErr)) : errorsWithFailureIndex
+          (Just unknownValue, Nothing) -> do
+            return $ Left $ ProtocolFailure prevCount $ "Expected array of errors. Received: " ++ show unknownValue
+          (Just unknownValue, Just writeConcernErr) -> do
+            return $ Left $ CompoundFailure $ [ ProtocolFailure prevCount $ "Expected array of errors. Received: " ++ show unknownValue
+                                              , WriteFailure prevCount (maybe 0 id $ lookup "ok" doc) $ show writeConcernErr]
 
 splitAtLimit :: Int -> Int -> [Document] -> [Either Failure [Document]]
 splitAtLimit maxSize maxCount list = chop (go 0 0 []) list
