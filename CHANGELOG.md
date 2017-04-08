@@ -2,7 +2,7 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
-## [Unreleased] - unreleased
+## [2.2.0] - 2017-04-08
 
 ### Added
 - GridFS implementation
