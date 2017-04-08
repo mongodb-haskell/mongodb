@@ -128,7 +128,7 @@ data Failure =
     | CursorNotFoundFailure CursorId  -- ^ Cursor expired because it wasn't accessed for over 10 minutes, or this cursor came from a different server that the one you are currently connected to (perhaps a fail over happen between servers in a replica set)
     | QueryFailure ErrorCode String  -- ^ Query failed for some reason as described in the string
     | WriteFailure Int ErrorCode String -- ^ Error observed by getLastError after a write, error description is in string, index of failed document is the first argument
-    -- | WriteConcernFailure Int String  -- ^ Write concern error. It's reported only by insert, update, delete commands. Not by wire protocol.
+    | WriteConcernFailure Int String  -- ^ Write concern error. It's reported only by insert, update, delete commands. Not by wire protocol.
     | DocNotFound Selection  -- ^ 'fetch' found no document matching selection
     | AggregateFailure String -- ^ 'aggregate' returned an error
     | CompoundFailure [Failure] -- ^ When we need to aggregate several failures and report them.
@@ -163,7 +163,7 @@ data WriteResult = WriteResult
                   -- ^ Mongodb server before 2.6 doesn't allow to calculate this value. This field is nothing if we can't calculate the number of modified documents.
                   , upserted    :: [Upserted]
                   , writeErrors :: [Failure]
-                  , writeConcernErrors :: [WriteConcernError]
+                  , writeConcernErrors :: [Failure]
                   } deriving Show
 
 instance Result WriteResult where
@@ -177,9 +177,6 @@ data Upserted = Upserted
               { upsertedIndex :: Int
               , upsertedId    :: ObjectId
               } deriving Show
-
-data WriteConcernError = WriteConcernError Int String
-                         deriving Show
 
 master :: AccessMode
 -- ^ Same as 'ConfirmWrites' []
@@ -803,8 +800,8 @@ docToWriteError doc = WriteFailure ind code msg
     code = at "code"   doc
     msg  = at "errmsg" doc
 
-docToWriteConcernError :: Document -> WriteConcernError
-docToWriteConcernError doc = WriteConcernError code msg
+docToWriteConcernError :: Document -> Failure
+docToWriteConcernError doc = WriteConcernFailure code msg
   where
     code = at "code" doc
     msg = at "errmsg" doc
@@ -924,13 +921,13 @@ deleteBlock ordered col (prevCount, docs) = do
           return $ WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) []
         (Nothing, Just (Doc err)) -> do
           return $ WriteResult True 0 Nothing n [] [] [
-                              WriteConcernError
+                              WriteConcernFailure
                                 (fromMaybe (-1) $ err !? "code")
                                 (fromMaybe "" $ err !? "errmsg")
                                 ]
         (Just (Array err), Just (Doc writeConcernErr)) -> do
           return $ WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) [
-                     WriteConcernError
+                     WriteConcernFailure
                                 (fromMaybe (-1) $ writeConcernErr !? "code")
                                 (fromMaybe "" $ writeConcernErr !? "errmsg")
                                   ]
