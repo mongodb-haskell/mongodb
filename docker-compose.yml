@@ -1,0 +1,14 @@
+version: '3'
+services:
+  mongodb:
+    image: mongo:3.4.3
+  mongodb-haskell:
+    image: phadej/ghc:8.0.2
+    environment:
+      - HASKELL_MONGODB_TEST_HOST=mongodb
+    entrypoint:
+      - /bin/bash
+    volumes:
+      - ./:/opt/mongodb-haskell
+
+# vim: ts=2 et sw=2 ai
