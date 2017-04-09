@@ -6,6 +6,8 @@ import Data.String (IsString(..))
 import TestImport
 import Control.Exception
 import Control.Monad (forM_)
+import System.Environment (getEnv)
+import System.IO.Error (catchIOError)
 import qualified Data.List as L
 
 import qualified Data.Text as T
@@ -15,7 +17,8 @@ testDBName = "mongodb-haskell-test"
 
 db :: Action IO a -> IO a
 db action = do
-    pipe <- connect (host "127.0.0.1")
+    mongodbHost <- getEnv mongodbHostEnvVariable `catchIOError` (\_ -> return "localhost")
+    pipe <- connect (host mongodbHost)
     result <- access pipe master testDBName action
     close pipe
     return result

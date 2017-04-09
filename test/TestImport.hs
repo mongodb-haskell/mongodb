@@ -8,7 +8,6 @@ module TestImport (
 import Test.Hspec as Export hiding (Selector)
 import Database.MongoDB as Export
 import Control.Monad.Trans as Export (MonadIO, liftIO) 
-import Data.Maybe (fromJust)
 import Data.Time (ParseTime, UTCTime)
 import qualified Data.Time as Time
 
@@ -32,3 +31,6 @@ parseDate = parseTime (iso8601DateFormat Nothing)
 
 parseDateTime :: String -> UTCTime
 parseDateTime = parseTime (iso8601DateFormat (Just "%H:%M:%S"))
+
+mongodbHostEnvVariable :: String
+mongodbHostEnvVariable = "HASKELL_MONGODB_TEST_HOST"
