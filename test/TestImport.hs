@@ -17,6 +17,7 @@ import qualified Data.Time as Time
 import Data.Time.Format (defaultTimeLocale, iso8601DateFormat)
 #else
 import System.Locale (defaultTimeLocale, iso8601DateFormat)
+import Data.Maybe (fromJust)
 #endif
 
 parseTime :: ParseTime t => String -> String -> t
