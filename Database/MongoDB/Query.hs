@@ -915,22 +915,47 @@ deleteBlock ordered col (prevCount, docs) = do
                           Confirm params -> params
       doc <- runCommand $ deleteCommandDocument col ordered docs writeConcern
       let n = fromMaybe 0 $ doc !? "n"
-      case (look "writeErrors" doc, look "writeConcernError" doc) of
-        (Nothing, Nothing) -> return $ WriteResult False 0 Nothing n [] [] []
-        (Just (Array err), Nothing) -> do
-          return $ WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) []
-        (Nothing, Just (Doc err)) -> do
-          return $ WriteResult True 0 Nothing n [] [] [
-                              WriteConcernFailure
-                                (fromMaybe (-1) $ err !? "code")
-                                (fromMaybe "" $ err !? "errmsg")
-                                ]
-        (Just (Array err), Just (Doc writeConcernErr)) -> do
-          return $ WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) [
-                     WriteConcernFailure
-                                (fromMaybe (-1) $ writeConcernErr !? "code")
-                                (fromMaybe "" $ writeConcernErr !? "errmsg")
-                                  ]
+      let writeErrorsResults =
+            case look "writeErrors" doc of
+              Nothing ->  WriteResult False 0 Nothing n [] [] []
+              Just (Array err) -> WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) []
+              Just unknownErr -> WriteResult
+                                      True
+                                      0
+                                      Nothing
+                                      n
+                                      []
+                                      [ ProtocolFailure
+                                            prevCount
+                                          $ "Expected array of error docs, but received: "
+                                              ++ (show unknownErr)]
+                                      []
+      let writeConcernResults =
+            case look "writeConcernError" doc of
+              Nothing ->  WriteResult False 0 Nothing n [] [] []
+              Just (Doc err) -> WriteResult
+                                    True
+                                    0
+                                    Nothing
+                                    n
+                                    []
+                                    []
+                                    [ WriteConcernFailure
+                                        (fromMaybe (-1) $ err !? "code")
+                                        (fromMaybe "" $ err !? "errmsg")
+                                    ]
+              Just unknownErr -> WriteResult
+                                      True
+                                      0
+                                      Nothing
+                                      n
+                                      []
+                                      []
+                                      [ ProtocolFailure
+                                            prevCount
+                                          $ "Expected doc in writeConcernError, but received: "
+                                              ++ (show unknownErr)]
+      return $ mergeWriteResults writeErrorsResults writeConcernResults
 
 anyToWriteError :: Int -> Value -> Failure
 anyToWriteError ind (Doc d) = docToWriteError d
