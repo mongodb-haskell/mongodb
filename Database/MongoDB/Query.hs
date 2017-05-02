@@ -52,7 +52,7 @@ import Control.Monad (unless, replicateM, liftM, liftM2)
 import Data.Int (Int32, Int64)
 import Data.Either (lefts, rights)
 import Data.List (foldl1')
-import Data.Maybe (listToMaybe, catMaybes, isNothing, maybeToList)
+import Data.Maybe (listToMaybe, catMaybes, isNothing)
 import Data.Word (Word32)
 #if !MIN_VERSION_base(4,8,0)
 import Data.Monoid (mappend)
@@ -742,20 +742,52 @@ updateBlock ordered col (prevCount, docs) = do
                           NoConfirm -> ["w" =: (0 :: Int)]
                           Confirm params -> params
       doc <- runCommand $ updateCommandDocument col ordered docs writeConcern
-      let writeConcernErrors = maybeToList $ do
-            wceDoc <- doc !? "writeConcernError"
-            return $ docToWriteConcernError wceDoc
 
-      let writeErrors = map docToWriteError $ fromMaybe [] (doc !? "writeErrors")
-      let upsertedDocs = fromMaybe [] (doc !? "upserted")
-      return $ WriteResult
-                    ((not $ true1 "ok" doc) || (not $ null writeErrors) || (not $ null writeConcernErrors))
-                    (at "n" doc)
-                    (at "nModified" doc)
-                    0
-                    (map docToUpserted upsertedDocs)
-                    (map (addFailureIndex prevCount) writeErrors)
-                    writeConcernErrors
+      let n = fromMaybe 0 $ doc !? "n"
+      let writeErrorsResults =
+            case look "writeErrors" doc of
+              Nothing -> WriteResult False 0 Nothing n [] [] []
+              Just (Array err) -> WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) []
+              Just unknownErr -> WriteResult
+                                      True
+                                      0
+                                      Nothing
+                                      n
+                                      []
+                                      [ ProtocolFailure
+                                            prevCount
+                                          $ "Expected array of error docs, but received: "
+                                              ++ (show unknownErr)]
+                                      []
+
+      let writeConcernResults =
+            case look "writeConcernError" doc of
+              Nothing ->  WriteResult False 0 Nothing n [] [] []
+              Just (Doc err) -> WriteResult
+                                    True
+                                    0
+                                    Nothing
+                                    n
+                                    []
+                                    []
+                                    [ WriteConcernFailure
+                                        (fromMaybe (-1) $ err !? "code")
+                                        (fromMaybe "" $ err !? "errmsg")
+                                    ]
+              Just unknownErr -> WriteResult
+                                      True
+                                      0
+                                      Nothing
+                                      n
+                                      []
+                                      []
+                                      [ ProtocolFailure
+                                            prevCount
+                                          $ "Expected doc in writeConcernError, but received: "
+                                              ++ (show unknownErr)]
+
+      let upsertedList = map docToUpserted $ fromMaybe [] (doc !? "upserted")
+      return $ mergeWriteResults writeErrorsResults writeConcernResults {upserted = upsertedList, nModified = at "nModified" doc}
 
 
 interruptibleFor :: (Monad m, Result b) => Bool -> [a] -> (a -> m b) -> m [b]
@@ -799,12 +831,6 @@ docToWriteError doc = WriteFailure ind code msg
     ind  = at "index"  doc
     code = at "code"   doc
     msg  = at "errmsg" doc
-
-docToWriteConcernError :: Document -> Failure
-docToWriteConcernError doc = WriteConcernFailure code msg
-  where
-    code = at "code" doc
-    msg = at "errmsg" doc
 
 -- ** Delete
 
@@ -958,8 +984,8 @@ deleteBlock ordered col (prevCount, docs) = do
       return $ mergeWriteResults writeErrorsResults writeConcernResults
 
 anyToWriteError :: Int -> Value -> Failure
-anyToWriteError ind (Doc d) = docToWriteError d
-anyToWriteError ind _ = WriteFailure ind (-1) "Unknown bson value"
+anyToWriteError _ (Doc d) = docToWriteError d
+anyToWriteError ind _ = ProtocolFailure ind "Unknown bson value"
 
 -- * Read
 
