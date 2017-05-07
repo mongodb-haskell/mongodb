@@ -116,7 +116,8 @@ type Action = ReaderT MongoContext
 -- ^ A monad on top of m (which must be a MonadIO) that may access the database and may fail with a DB 'Failure'
 
 access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m a
--- ^ Run action against database on server at other end of pipe. Use access mode for any reads and writes. Return Left on connection failure or read/write failure.
+-- ^ Run action against database on server at other end of pipe. Use access mode for any reads and writes.
+-- Throw 'Failure' in case of any error.
 access mongoPipe mongoAccessMode mongoDatabase action = runReaderT action MongoContext{..}
 
 -- | A connection failure, or a read or write exception like cursor expired or inserting a duplicate key.
