@@ -35,7 +35,7 @@ A DB read or write operation is called a DB `Action`. A DB Action is a monad so 
 
 	> access pipe master "test" allCollections
 
-`access` return either Left `Failure` or Right result. Failure means there was a connection failure, or a read/write failure like cursor expired or duplicate key insert.
+`access` throw `Failure` if there is any issue. Failure means there was a connection failure, or a read/write failure like cursor expired or duplicate key insert.
 
 `master` is an `AccessMode`. Access mode indicates how reads and writes will be performed. Its three modes are: `ReadStaleOk`, `UnconfirmedWrites`, and `ConfirmWrites GetLastErrorParams`. `master` is just short hand for `ConfirmWrites []`. The first mode may be used against a slave or a master server, the last two must be used against a master server.
 
