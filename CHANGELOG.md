@@ -2,6 +2,13 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [2.3.0] - unreleased
+
+### Changed
+- Update and delete results are squashed into one WriteResult type
+- Functions insertMany, updateMany, deleteMany are rewritten to properly report
+  various errors
+
 ## [2.2.0] - 2017-04-08
 
 ### Added
