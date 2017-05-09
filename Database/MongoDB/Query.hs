@@ -56,13 +56,14 @@ import Data.Word (Word32)
 import Data.Monoid (mappend)
 #endif
 import Data.Typeable (Typeable)
+import System.Mem.Weak (Weak)
 
 import qualified Control.Concurrent.MVar as MV
 #if MIN_VERSION_base(4,6,0)
-import Control.Concurrent.MVar.Lifted (MVar, newMVar, mkWeakMVar,
+import Control.Concurrent.MVar.Lifted (MVar,
                                        readMVar)
 #else
-import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
+import Control.Concurrent.MVar.Lifted (MVar, addMVarFinalizer,
                                          readMVar)
 #endif
 import Control.Applicative ((<$>))
@@ -71,7 +72,6 @@ import Control.Monad (when)
 import Control.Monad.Error (Error(..))
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask, asks, local)
 import Control.Monad.Trans (MonadIO, liftIO)
-import Control.Monad.Trans.Control (MonadBaseControl(..))
 import Data.Binary.Put (runPut)
 import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
@@ -105,10 +105,6 @@ import Data.Bits (xor)
 import qualified Data.Map as Map
 import Text.Read (readMaybe)
 import Data.Maybe (fromMaybe)
-
-#if !MIN_VERSION_base(4,6,0)
---mkWeakMVar = addMVarFinalizer
-#endif
 
 -- * Monad
 
@@ -314,7 +310,7 @@ retrieveServerData = do
 type Collection = Text
 -- ^ Collection name (not prefixed with database)
 
-allCollections :: (MonadIO m, MonadBaseControl IO m) => Action m [Collection]
+allCollections :: MonadIO m => Action m [Collection]
 -- ^ List all collections in this database
 allCollections = do
     p <- asks mongoPipe
@@ -825,7 +821,7 @@ query :: Selector -> Collection -> Query
 -- ^ Selects documents in collection that match selector. It uses no query options, projects all fields, does not skip any documents, does not limit result size, uses default batch size, does not sort, does not hint, and does not snapshot.
 query sel col = Query [] (Select sel col) [] 0 0 [] False 0 []
 
-find :: (MonadIO m, MonadBaseControl IO m) => Query -> Action m Cursor
+find :: MonadIO m => Query -> Action m Cursor
 -- ^ Fetch documents satisfying query
 find q@Query{selection, batchSize} = do
     db <- thisDatabase
@@ -1007,16 +1003,13 @@ fulfill = liftIO
 data Cursor = Cursor FullCollection BatchSize (MVar DelayedBatch)
 -- ^ Iterator over results of a query. Use 'next' to iterate or 'rest' to get all results. A cursor is closed when it is explicitly closed, all results have been read from it, garbage collected, or not used for over 10 minutes (unless 'NoCursorTimeout' option was specified in 'Query'). Reading from a closed cursor raises a 'CursorNotFoundFailure'. Note, a cursor is not closed when the pipe is closed, so you can open another pipe to the same server and continue using the cursor.
 
-newCursor :: (MonadIO m, MonadBaseControl IO m) => Database -> Collection -> BatchSize -> DelayedBatch -> Action m Cursor
+newCursor :: MonadIO m => Database -> Collection -> BatchSize -> DelayedBatch -> Action m Cursor
 -- ^ Create new cursor. If you don't read all results then close it. Cursor will be closed automatically when all results are read from it or when eventually garbage collected.
 newCursor db col batchSize dBatch = do
-    var <- newMVar dBatch
+    var <- liftIO $ MV.newMVar dBatch
     let cursor = Cursor (db <.> col) batchSize var
-    _ <- mkWeakMVar var (closeCursor cursor)
+    _ <- liftDB $ mkWeakMVar var (closeCursor cursor)
     return cursor
-#if !MIN_VERSION_base(4,6,0)
-  where mkWeakMVar = addMVarFinalizer
-#endif
 
 nextBatch :: MonadIO m => Cursor -> Action m [Document]
 -- ^ Return next batch of documents in query result, which will be empty if finished.
@@ -1210,7 +1203,7 @@ mapReduce :: Collection -> MapFun -> ReduceFun -> MapReduce
 -- ^ MapReduce on collection with given map and reduce functions. Remaining attributes are set to their defaults, which are stated in their comments.
 mapReduce col map' red = MapReduce col map' red [] [] 0 Inline Nothing [] False
 
-runMR :: (MonadIO m, MonadBaseControl IO m) => MapReduce -> Action m Cursor
+runMR :: MonadIO m => MapReduce -> Action m Cursor
 -- ^ Run MapReduce and return cursor of results. Error if map/reduce fails (because of bad Javascript)
 runMR mr = do
     res <- runMR' mr
@@ -1248,6 +1241,15 @@ modifyMVar :: MVar a -> (a -> Action IO (a, b)) -> Action IO b
 modifyMVar v f = do
   ctx <- ask
   liftIO $ MV.modifyMVar v (\x -> runReaderT (f x) ctx)
+
+mkWeakMVar :: MVar a -> Action IO () -> Action IO (Weak (MVar a))
+mkWeakMVar m closing = do
+  ctx <- ask
+#if MIN_VERSION_base(4,6,0)
+  liftIO $ MV.mkWeakMVar m $ runReaderT closing ctx
+#else
+  liftIO $ MV.addMVarFinalizer m $ runReaderT closing ctx
+#endif
 
 
 {- Authors: Tony Hannan <tony@10gen.com>
