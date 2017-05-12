@@ -28,7 +28,6 @@ import Control.Concurrent(forkIO)
 import Control.Monad(when)
 import Control.Monad.IO.Class
 import Control.Monad.Trans(MonadTrans, lift)
-import Control.Monad.Trans.Control(MonadBaseControl)
 import Control.Monad.Trans.Resource(MonadResource(..))
 import Data.Conduit
 import Data.Digest.Pure.MD5
@@ -76,7 +75,7 @@ getChunk (File bucket doc) i = do
     Just (Binary b) -> return (Just b)
     _ -> return Nothing
 
-findFile :: (MonadIO m, MonadBaseControl IO m) => Bucket -> Selector -> Action m [File]
+findFile :: MonadIO m => Bucket -> Selector -> Action m [File]
 -- ^ Find files in the bucket
 findFile bucket sel = do
   cursor <- find $ select sel $ files bucket

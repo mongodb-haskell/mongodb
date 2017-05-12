@@ -42,7 +42,6 @@ import qualified Data.HashTable.IO as H
 import qualified Data.Set as Set
 
 import Control.Monad.Trans (MonadIO, liftIO)
-import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Bson (Document, Field(..), at, (=:), (=?), exclude, merge)
 import Data.Text (Text)
 
@@ -138,7 +137,7 @@ dropIndex coll idxName = do
     resetIndexCache
     runCommand ["deleteIndexes" =: coll, "index" =: idxName]
 
-getIndexes :: (MonadIO m, MonadBaseControl IO m, Functor m) => Collection -> Action m [Document]
+getIndexes :: MonadIO m => Collection -> Action m [Document]
 -- ^ Get all indexes on this collection
 getIndexes coll = do
     db <- thisDatabase
@@ -191,9 +190,9 @@ resetIndexCache = do
 
 -- ** User
 
-allUsers :: (MonadIO m, MonadBaseControl IO m, Functor m) => Action m [Document]
+allUsers :: MonadIO m => Action m [Document]
 -- ^ Fetch all users of this database
-allUsers = map (exclude ["_id"]) <$> (rest =<< find
+allUsers = map (exclude ["_id"]) `liftM` (rest =<< find
     (select [] "system.users") {sort = ["user" =: (1 :: Int)], project = ["user" =: (1 :: Int), "readOnly" =: (1 :: Int)]})
 
 addUser :: (MonadIO m)
@@ -260,7 +259,7 @@ storageSize c = at "storageSize" `liftM` collectionStats c
 totalIndexSize :: (MonadIO m) => Collection -> Action m Int
 totalIndexSize c = at "totalIndexSize" `liftM` collectionStats c
 
-totalSize :: (MonadIO m, MonadBaseControl IO m) => Collection -> Action m Int
+totalSize :: MonadIO m => Collection -> Action m Int
 totalSize coll = do
     x <- storageSize coll
     xs <- mapM isize =<< getIndexes coll
