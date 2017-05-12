@@ -6,6 +6,7 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 
 ### Changed
 - Description of access function
+- Lift MonadBaseControl restriction
 
 ## [2.2.0] - 2017-04-08
 
