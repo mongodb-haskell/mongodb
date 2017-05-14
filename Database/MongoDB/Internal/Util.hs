@@ -65,9 +65,9 @@ shuffle :: [a] -> IO [a]
 -- ^ Randomly shuffle items in list
 shuffle list = shuffle' list (length list) <$> newStdGen
 
-loop :: (Functor m, Monad m) => m (Maybe a) -> m [a]
+loop :: Monad m => m (Maybe a) -> m [a]
 -- ^ Repeatedy execute action, collecting results, until it returns Nothing
-loop act = act >>= maybe (return []) (\a -> (a :) <$> loop act)
+loop act = act >>= maybe (return []) (\a -> (a :) `liftM` loop act)
 
 untilSuccess :: (MonadError e m, Error e) => (a -> m b) -> [a] -> m b
 -- ^ Apply action to elements one at a time until one succeeds. Throw last error if all fail. Throw 'strMsg' error if list is empty.

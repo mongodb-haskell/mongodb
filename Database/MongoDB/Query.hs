@@ -56,22 +56,22 @@ import Data.Word (Word32)
 import Data.Monoid (mappend)
 #endif
 import Data.Typeable (Typeable)
+import System.Mem.Weak (Weak)
 
+import qualified Control.Concurrent.MVar as MV
 #if MIN_VERSION_base(4,6,0)
-import Control.Concurrent.MVar.Lifted (MVar, newMVar, mkWeakMVar,
-                                       readMVar, modifyMVar)
+import Control.Concurrent.MVar.Lifted (MVar,
+                                       readMVar)
 #else
-import Control.Concurrent.MVar.Lifted (MVar, newMVar, addMVarFinalizer,
-                                         readMVar, modifyMVar)
+import Control.Concurrent.MVar.Lifted (MVar, addMVarFinalizer,
+                                         readMVar)
 #endif
 import Control.Applicative ((<$>))
 import Control.Exception (SomeException, catch)
 import Control.Monad (when)
-import Control.Monad.Base (MonadBase)
 import Control.Monad.Error (Error(..))
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask, asks, local)
 import Control.Monad.Trans (MonadIO, liftIO)
-import Control.Monad.Trans.Control (MonadBaseControl(..))
 import Data.Binary.Put (runPut)
 import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
                   Javascript, at, valueAt, lookup, look, genObjectId, (=:),
@@ -105,10 +105,6 @@ import Data.Bits (xor)
 import qualified Data.Map as Map
 import Text.Read (readMaybe)
 import Data.Maybe (fromMaybe)
-
-#if !MIN_VERSION_base(4,6,0)
---mkWeakMVar = addMVarFinalizer
-#endif
 
 -- * Monad
 
@@ -314,7 +310,7 @@ retrieveServerData = do
 type Collection = Text
 -- ^ Collection name (not prefixed with database)
 
-allCollections :: (MonadIO m, MonadBaseControl IO m) => Action m [Collection]
+allCollections :: MonadIO m => Action m [Collection]
 -- ^ List all collections in this database
 allCollections = do
     p <- asks mongoPipe
@@ -825,7 +821,7 @@ query :: Selector -> Collection -> Query
 -- ^ Selects documents in collection that match selector. It uses no query options, projects all fields, does not skip any documents, does not limit result size, uses default batch size, does not sort, does not hint, and does not snapshot.
 query sel col = Query [] (Select sel col) [] 0 0 [] False 0 []
 
-find :: (MonadIO m, MonadBaseControl IO m) => Query -> Action m Cursor
+find :: MonadIO m => Query -> Action m Cursor
 -- ^ Fetch documents satisfying query
 find q@Query{selection, batchSize} = do
     db <- thisDatabase
@@ -840,7 +836,7 @@ findOne q = do
     pipe <- asks mongoPipe
     qr <- queryRequest False q {limit = 1}
     rq <- liftIO $ request pipe [] qr
-    Batch _ _ docs <- fulfill rq
+    Batch _ _ docs <- liftDB $ fulfill rq
     return (listToMaybe docs)
 
 fetch :: (MonadIO m) => Query -> Action m Document
@@ -929,7 +925,7 @@ explain q = do  -- same as findOne but with explain set to true
     pipe <- asks mongoPipe
     qr <- queryRequest True q {limit = 1}
     r <- liftIO $ request pipe [] qr
-    Batch _ _ docs <- fulfill r
+    Batch _ _ docs <- liftDB $ fulfill r
     return $ if null docs then error ("no explain: " ++ show q) else head docs
 
 count :: (MonadIO m) => Query -> Action m Int
@@ -998,7 +994,7 @@ fromReply limit Reply{..} = do
         CursorNotFound -> throwIO $ CursorNotFoundFailure rCursorId
         QueryError -> throwIO $ QueryFailure (at "code" $ head rDocuments) (at "$err" $ head rDocuments)
 
-fulfill :: (MonadIO m) => DelayedBatch -> Action m Batch
+fulfill :: DelayedBatch -> Action IO Batch
 -- ^ Demand and wait for result, raise failure if exception
 fulfill = liftIO
 
@@ -1007,22 +1003,19 @@ fulfill = liftIO
 data Cursor = Cursor FullCollection BatchSize (MVar DelayedBatch)
 -- ^ Iterator over results of a query. Use 'next' to iterate or 'rest' to get all results. A cursor is closed when it is explicitly closed, all results have been read from it, garbage collected, or not used for over 10 minutes (unless 'NoCursorTimeout' option was specified in 'Query'). Reading from a closed cursor raises a 'CursorNotFoundFailure'. Note, a cursor is not closed when the pipe is closed, so you can open another pipe to the same server and continue using the cursor.
 
-newCursor :: (MonadIO m, MonadBaseControl IO m) => Database -> Collection -> BatchSize -> DelayedBatch -> Action m Cursor
+newCursor :: MonadIO m => Database -> Collection -> BatchSize -> DelayedBatch -> Action m Cursor
 -- ^ Create new cursor. If you don't read all results then close it. Cursor will be closed automatically when all results are read from it or when eventually garbage collected.
 newCursor db col batchSize dBatch = do
-    var <- newMVar dBatch
+    var <- liftIO $ MV.newMVar dBatch
     let cursor = Cursor (db <.> col) batchSize var
-    _ <- mkWeakMVar var (closeCursor cursor)
+    _ <- liftDB $ mkWeakMVar var (closeCursor cursor)
     return cursor
-#if !MIN_VERSION_base(4,6,0)
-  where mkWeakMVar = addMVarFinalizer
-#endif
 
-nextBatch :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m [Document]
+nextBatch :: MonadIO m => Cursor -> Action m [Document]
 -- ^ Return next batch of documents in query result, which will be empty if finished.
-nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
+nextBatch (Cursor fcol batchSize var) = liftDB $ modifyMVar var $ \dBatch -> do
     -- Pre-fetch next batch promise from server and return current batch.
-    Batch mLimit cid docs <- fulfill' fcol batchSize dBatch
+    Batch mLimit cid docs <- liftDB $ fulfill' fcol batchSize dBatch
     let newLimit = do
               limit <- mLimit
               return $ limit - (min limit $ fromIntegral $ length docs)
@@ -1037,7 +1030,7 @@ nextBatch (Cursor fcol batchSize var) = modifyMVar var $ \dBatch -> do
         return (emptyBatch, resultDocs)
       (_, _)      -> (, resultDocs) <$> getNextBatch
 
-fulfill' :: (MonadIO m) => FullCollection -> BatchSize -> DelayedBatch -> Action m Batch
+fulfill' :: FullCollection -> BatchSize -> DelayedBatch -> Action IO Batch
 -- Discard pre-fetched batch if empty with nonzero cid.
 fulfill' fcol batchSize dBatch = do
     b@(Batch limit cid docs) <- fulfill dBatch
@@ -1051,13 +1044,13 @@ nextBatch' fcol batchSize limit cid = do
     liftIO $ request pipe [] (GetMore fcol batchSize' cid, remLimit)
     where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
 
-next :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m (Maybe Document)
+next :: MonadIO m => Cursor -> Action m (Maybe Document)
 -- ^ Return next document in query result, or Nothing if finished.
-next (Cursor fcol batchSize var) = modifyMVar var nextState where
+next (Cursor fcol batchSize var) = liftDB $ modifyMVar var nextState where
     -- Pre-fetch next batch promise from server when last one in current batch is returned.
     -- nextState:: DelayedBatch -> Action m (DelayedBatch, Maybe Document)
     nextState dBatch = do
-        Batch mLimit cid docs <- fulfill' fcol batchSize dBatch
+        Batch mLimit cid docs <- liftDB $ fulfill' fcol batchSize dBatch
         if mLimit == (Just 0)
           then return (return $ Batch (Just 0) 0 [], Nothing)
           else
@@ -1075,27 +1068,29 @@ next (Cursor fcol batchSize var) = modifyMVar var nextState where
                     return (dBatch', Just doc)
                 [] -> if cid == 0
                     then return (return $ Batch (Just 0) 0 [], Nothing)  -- finished
-                    else fmap (,Nothing) $ nextBatch' fcol batchSize mLimit cid
+                    else do
+                      nb <- nextBatch' fcol batchSize mLimit cid
+                      return (nb, Nothing)
 
-nextN :: (MonadIO m, MonadBaseControl IO m) => Int -> Cursor -> Action m [Document]
+nextN :: MonadIO m => Int -> Cursor -> Action m [Document]
 -- ^ Return next N documents or less if end is reached
 nextN n c = catMaybes `liftM` replicateM n (next c)
 
-rest :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m [Document]
+rest :: MonadIO m => Cursor -> Action m [Document]
 -- ^ Return remaining documents in query result
 rest c = loop (next c)
 
-closeCursor :: (MonadIO m, MonadBaseControl IO m) => Cursor -> Action m ()
-closeCursor (Cursor _ _ var) = modifyMVar var $ \dBatch -> do
+closeCursor :: MonadIO m => Cursor -> Action m ()
+closeCursor (Cursor _ _ var) = liftDB $ modifyMVar var $ \dBatch -> do
     Batch _ cid _ <- fulfill dBatch
     unless (cid == 0) $ do
       pipe <- asks mongoPipe
       liftIOE ConnectionFailure $ P.send pipe [KillCursors [cid]]
     return $ (return $ Batch (Just 0) 0 [], ())
 
-isCursorClosed :: (MonadIO m, MonadBase IO m) => Cursor -> Action m Bool
+isCursorClosed :: MonadIO m => Cursor -> Action m Bool
 isCursorClosed (Cursor _ _ var) = do
-        Batch _ cid docs <- fulfill =<< readMVar var
+        Batch _ cid docs <- liftDB $ fulfill =<< readMVar var
         return (cid == 0 && null docs)
 
 -- ** Aggregate
@@ -1208,7 +1203,7 @@ mapReduce :: Collection -> MapFun -> ReduceFun -> MapReduce
 -- ^ MapReduce on collection with given map and reduce functions. Remaining attributes are set to their defaults, which are stated in their comments.
 mapReduce col map' red = MapReduce col map' red [] [] 0 Inline Nothing [] False
 
-runMR :: (MonadIO m, MonadBaseControl IO m) => MapReduce -> Action m Cursor
+runMR :: MonadIO m => MapReduce -> Action m Cursor
 -- ^ Run MapReduce and return cursor of results. Error if map/reduce fails (because of bad Javascript)
 runMR mr = do
     res <- runMR' mr
@@ -1241,6 +1236,20 @@ runCommand1 c = runCommand [c =: (1 :: Int)]
 eval :: (MonadIO m, Val v) => Javascript -> Action m v
 -- ^ Run code on server
 eval code = at "retval" `liftM` runCommand ["$eval" =: code]
+
+modifyMVar :: MVar a -> (a -> Action IO (a, b)) -> Action IO b
+modifyMVar v f = do
+  ctx <- ask
+  liftIO $ MV.modifyMVar v (\x -> runReaderT (f x) ctx)
+
+mkWeakMVar :: MVar a -> Action IO () -> Action IO (Weak (MVar a))
+mkWeakMVar m closing = do
+  ctx <- ask
+#if MIN_VERSION_base(4,6,0)
+  liftIO $ MV.mkWeakMVar m $ runReaderT closing ctx
+#else
+  liftIO $ MV.addMVarFinalizer m $ runReaderT closing ctx
+#endif
 
 
 {- Authors: Tony Hannan <tony@10gen.com>
