@@ -160,7 +160,8 @@ data WriteResult = WriteResult
                   , nMatched    :: Int
                   , nModified   :: Maybe Int
                   , nRemoved    :: Int
-                  -- ^ Mongodb server before 2.6 doesn't allow to calculate this value. This field is nothing if we can't calculate the number of modified documents.
+                  -- ^ Mongodb server before 2.6 doesn't allow to calculate this value.
+                  -- This field is meaningless if we can't calculate the number of modified documents.
                   , upserted    :: [Upserted]
                   , writeErrors :: [Failure]
                   , writeConcernErrors :: [Failure]
