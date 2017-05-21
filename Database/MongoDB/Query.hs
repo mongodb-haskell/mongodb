@@ -100,6 +100,7 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Char8 as B
+import qualified Data.Either as E
 import qualified Crypto.Hash.MD5 as MD5
 import qualified Crypto.Hash.SHA1 as SHA1
 import qualified Crypto.MAC.HMAC as HMAC
@@ -462,11 +463,7 @@ insertCommandDocument opts col docs writeConcern =
           ]
 
 takeRightsUpToLeft :: [Either a b] -> [b]
-takeRightsUpToLeft l = reverse $ go l []
-  where
-    go [] !res = res
-    go ((Right x):xs) !res = go xs (x:res)
-    go ((Left _):_) !res = res
+takeRightsUpToLeft l = E.rights $ takeWhile E.isRight l
 
 insert' :: (MonadIO m)
         => [InsertOption] -> Collection -> [Document] -> Action m [Value]
