@@ -392,6 +392,15 @@ spec = around withCleanDatabase $ do
         updatedResult <- db $ rest =<< find ((select [] "bigCollection") {project = ["_id" =: (0 :: Int)]})
         length updatedResult `shouldBe` 0
 
+  describe "deleteAll" $ do
+    it "returns correct result" $ do
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insert "testCollection" [ "myField" =: "myValue" ]
+        _ <- db $ insert "testCollection" [ "myField" =: "myValue" ]
+        res <- db $ deleteAll "testCollection" [ (["myField" =: "myValue"], []) ]
+        nRemoved res `shouldBe` 2
+
   describe "allCollections" $ do
     it "returns all collections in a database" $ do
       _ <- db $ insert "team1" ["name" =: "Yankees", "league" =: "American"]
