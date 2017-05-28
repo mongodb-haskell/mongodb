@@ -939,15 +939,18 @@ deleteBlock ordered col (prevCount, docs) = do
                           Confirm params -> params
       doc <- runCommand $ deleteCommandDocument col ordered docs writeConcern
       let n = fromMaybe 0 $ doc !? "n"
+      liftIO $ putStrLn $ "result of delete block: " ++ (show n)
+
+      let successResults = WriteResult False 0 Nothing n [] [] []
       let writeErrorsResults =
             case look "writeErrors" doc of
-              Nothing ->  WriteResult False 0 Nothing n [] [] []
-              Just (Array err) -> WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) []
+              Nothing ->  WriteResult False 0 Nothing 0 [] [] []
+              Just (Array err) -> WriteResult True 0 Nothing 0 [] (map (anyToWriteError prevCount) err) []
               Just unknownErr -> WriteResult
                                       True
                                       0
                                       Nothing
-                                      n
+                                      0
                                       []
                                       [ ProtocolFailure
                                             prevCount
@@ -956,12 +959,12 @@ deleteBlock ordered col (prevCount, docs) = do
                                       []
       let writeConcernResults =
             case look "writeConcernError" doc of
-              Nothing ->  WriteResult False 0 Nothing n [] [] []
+              Nothing ->  WriteResult False 0 Nothing 0 [] [] []
               Just (Doc err) -> WriteResult
                                     True
                                     0
                                     Nothing
-                                    n
+                                    0
                                     []
                                     []
                                     [ WriteConcernFailure
@@ -972,14 +975,14 @@ deleteBlock ordered col (prevCount, docs) = do
                                       True
                                       0
                                       Nothing
-                                      n
+                                      0
                                       []
                                       []
                                       [ ProtocolFailure
                                             prevCount
                                           $ "Expected doc in writeConcernError, but received: "
                                               ++ (show unknownErr)]
-      return $ mergeWriteResults writeErrorsResults writeConcernResults
+      return $ foldl1' mergeWriteResults [successResults, writeErrorsResults, writeConcernResults]
 
 anyToWriteError :: Int -> Value -> Failure
 anyToWriteError _ (Doc d) = docToWriteError d
