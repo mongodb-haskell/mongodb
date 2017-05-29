@@ -324,6 +324,11 @@ spec = around withCleanDatabase $ do
         res <- db $ updateMany "testCollection" [(["myField" =: "myValue"], ["$set" =: ["myField" =: "newValue"]], [MultiUpdate])]
         nMatched res `shouldBe` 2
         nModified res `shouldBe` (Just 2)
+    it "returns correct number of upserted" $ do
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        res <- db $ updateMany "testCollection" [(["myField" =: "myValue"], ["$set" =: ["myfield" =: "newValue"]], [Upsert])]
+        (length $ upserted res) `shouldBe` 1
 
   describe "delete" $ do
     it "actually deletes something" $ do
