@@ -329,6 +329,14 @@ spec = around withCleanDatabase $ do
       when (wireVersion > 1) $ do
         res <- db $ updateMany "testCollection" [(["myField" =: "myValue"], ["$set" =: ["myfield" =: "newValue"]], [Upsert])]
         (length $ upserted res) `shouldBe` 1
+    it "updates only one doc without multi update" $ do
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insertMany "testCollection" [["myField" =: "myValue"], ["myField2" =: "myValue2"]]
+        _ <- db $ insertMany "testCollection" [["myField" =: "myValue"], ["myField2" =: "myValue2"]]
+        res <- db $ updateMany "testCollection" [(["myField" =: "myValue"], ["$set" =: ["myField" =: "newValue"]], [])]
+        nMatched res `shouldBe` 1
+        nModified res `shouldBe` (Just 1)
 
   describe "delete" $ do
     it "actually deletes something" $ do
