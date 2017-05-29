@@ -744,13 +744,13 @@ updateBlock ordered col (prevCount, docs) = do
       let n = fromMaybe 0 $ doc !? "n"
       let writeErrorsResults =
             case look "writeErrors" doc of
-              Nothing -> WriteResult False 0 Nothing n [] [] []
-              Just (Array err) -> WriteResult True 0 Nothing n [] (map (anyToWriteError prevCount) err) []
+              Nothing -> WriteResult False 0 (Just 0) 0 [] [] []
+              Just (Array err) -> WriteResult True 0 (Just 0) 0 [] (map (anyToWriteError prevCount) err) []
               Just unknownErr -> WriteResult
                                       True
                                       0
-                                      Nothing
-                                      n
+                                      (Just 0)
+                                      0
                                       []
                                       [ ProtocolFailure
                                             prevCount
@@ -760,12 +760,12 @@ updateBlock ordered col (prevCount, docs) = do
 
       let writeConcernResults =
             case look "writeConcernError" doc of
-              Nothing ->  WriteResult False 0 Nothing n [] [] []
+              Nothing ->  WriteResult False 0 (Just 0) 0 [] [] []
               Just (Doc err) -> WriteResult
                                     True
                                     0
-                                    Nothing
-                                    n
+                                    (Just 0)
+                                    0
                                     []
                                     []
                                     [ WriteConcernFailure
@@ -775,8 +775,8 @@ updateBlock ordered col (prevCount, docs) = do
               Just unknownErr -> WriteResult
                                       True
                                       0
-                                      Nothing
-                                      n
+                                      (Just 0)
+                                      0
                                       []
                                       []
                                       [ ProtocolFailure
@@ -785,7 +785,9 @@ updateBlock ordered col (prevCount, docs) = do
                                               ++ (show unknownErr)]
 
       let upsertedList = map docToUpserted $ fromMaybe [] (doc !? "upserted")
-      return $ mergeWriteResults writeErrorsResults writeConcernResults {upserted = upsertedList, nModified = at "nModified" doc}
+      liftIO $ putStrLn $ show doc
+      let successResults = WriteResult False n (doc !? "nModified") 0 upsertedList [] []
+      return $ foldl1' mergeWriteResults [writeErrorsResults, writeConcernResults, successResults]
 
 
 interruptibleFor :: (Monad m, Result b) => Bool -> [a] -> (a -> m b) -> m [b]

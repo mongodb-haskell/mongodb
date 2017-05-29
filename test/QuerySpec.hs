@@ -316,6 +316,14 @@ spec = around withCleanDatabase $ do
         (L.sort $ map L.sort updatedResult) `shouldBe` [ ["league" =: "American", "name" =: "Yankees", "score" =: (Nothing :: Maybe Int)]
                                                        , ["league" =: "MiLB"    , "name" =: "Giants" , "score" =: (3 :: Int)]
                                                        ]
+    it "returns correct number of matched and modified" $ do
+      wireVersion <- getWireVersion
+      when (wireVersion > 1) $ do
+        _ <- db $ insertMany "testCollection" [["myField" =: "myValue"], ["myField2" =: "myValue2"]]
+        _ <- db $ insertMany "testCollection" [["myField" =: "myValue"], ["myField2" =: "myValue2"]]
+        res <- db $ updateMany "testCollection" [(["myField" =: "myValue"], ["$set" =: ["myField" =: "newValue"]], [MultiUpdate])]
+        nMatched res `shouldBe` 2
+        nModified res `shouldBe` (Just 2)
 
   describe "delete" $ do
     it "actually deletes something" $ do
@@ -391,8 +399,6 @@ spec = around withCleanDatabase $ do
         _ <- db $ deleteAll "bigCollection" $ map (\d -> (d, [])) docs
         updatedResult <- db $ rest =<< find ((select [] "bigCollection") {project = ["_id" =: (0 :: Int)]})
         length updatedResult `shouldBe` 0
-
-  describe "deleteAll" $ do
     it "returns correct result" $ do
       wireVersion <- getWireVersion
       when (wireVersion > 1) $ do
