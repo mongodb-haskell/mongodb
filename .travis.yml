@@ -65,3 +65,9 @@ script:
       echo "expected '$SRC_TGZ' not found";
       exit 1;
    fi
+ - git clone https://github.com/yesodweb/persistent
+ - cd persistent
+ - "cabal install ./persistent ./persistent-mongoDB --only-dependencies"
+ - cd persistent-test
+ - cabal install -fmongodb --enable-tests
+ - "cabal configure -fmongodb --enable-tests && cabal test"
