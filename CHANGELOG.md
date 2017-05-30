@@ -7,6 +7,9 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 ### Changed
 - Description of access function
 - Lift MonadBaseControl restriction
+- Update and delete results are squashed into one WriteResult type
+- Functions insertMany, updateMany, deleteMany are rewritten to properly report
+  various errors
 
 ## [2.2.0] - 2017-04-08
 
