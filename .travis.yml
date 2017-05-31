@@ -65,3 +65,25 @@ script:
       echo "expected '$SRC_TGZ' not found";
       exit 1;
    fi
+
+jobs:
+  include:
+    - stage: deploy
+      env: GHCVER=8.0.2 CABALVER=1.24  MONGO=3.4.3
+      before_install:
+        - travis_retry sudo add-apt-repository -y ppa:hvr/ghc
+        - travis_retry sudo apt-get update
+        - travis_retry sudo apt-get install cabal-install-$CABALVER
+        - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
+        - cabal --version
+      install: skip
+      script: skip
+      deploy:
+        provider: hackage
+        username: VictorDenisov
+        password:
+          secure: DPYlqRN09gFp06paLj9bRBzpxTkqkZzfsTrU3j0WiqRzqUMeWEeiZNAkIE/maC9xrEuuYBTk0KlSdz+esF4kjfyRQFTxb9CvXrZ474qHozVLC01vh/av5bGZBDQOwgzJrJNVpfl+g+EADOicz9/nhPXiAd7nCQIv/2s/xM1Yj1U=
+        on:
+          repo: mongodb-haskell/mongodb
+          tags: true
+
