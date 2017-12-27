@@ -782,7 +782,6 @@ updateBlock ordered col (prevCount, docs) = do
                                               ++ (show unknownErr)]
 
       let upsertedList = map docToUpserted $ fromMaybe [] (doc !? "upserted")
-      liftIO $ putStrLn $ show doc
       let successResults = WriteResult False n (doc !? "nModified") 0 upsertedList [] []
       return $ foldl1' mergeWriteResults [writeErrorsResults, writeConcernResults, successResults]
 
@@ -938,7 +937,6 @@ deleteBlock ordered col (prevCount, docs) = do
                           Confirm params -> params
       doc <- runCommand $ deleteCommandDocument col ordered docs writeConcern
       let n = fromMaybe 0 $ doc !? "n"
-      liftIO $ putStrLn $ "result of delete block: " ++ (show n)
 
       let successResults = WriteResult False 0 Nothing n [] [] []
       let writeErrorsResults =
