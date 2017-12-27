@@ -1,20 +1,28 @@
 # See https://github.com/hvr/multi-ghc-travis for more information.
 
+sudo: required
+
+services:
+ - docker
+
 env:
  # We use CABALVER=1.22 everywhere because it uses the flag --enable-coverage
  # instead of --enable-library-coverage used by older versions.
- - GHCVER=7.8.4  CABALVER=1.22  MONGO=2.6.12
- - GHCVER=7.10.3 CABALVER=1.22  MONGO=2.6.12
- - GHCVER=8.0.2 CABALVER=1.24  MONGO=2.6.12
- - GHCVER=7.8.4  CABALVER=1.22  MONGO=3.0.12
- - GHCVER=7.10.3 CABALVER=1.22  MONGO=3.0.12
- - GHCVER=8.0.2 CABALVER=1.24  MONGO=3.0.12
- - GHCVER=7.8.4  CABALVER=1.22  MONGO=3.2.6
- - GHCVER=7.10.3 CABALVER=1.22  MONGO=3.2.6
- - GHCVER=8.0.2 CABALVER=1.24  MONGO=3.2.6
- - GHCVER=7.8.4  CABALVER=1.22  MONGO=3.4.3
- - GHCVER=7.10.3 CABALVER=1.22  MONGO=3.4.3
- - GHCVER=8.0.2 CABALVER=1.24  MONGO=3.4.3
+ #- GHCVER=7.8.4  CABALVER=1.22  MONGO=2.6.12
+ #- GHCVER=7.10.3 CABALVER=1.22  MONGO=2.6.12
+ #- GHCVER=8.0.2 CABALVER=1.24  MONGO=2.6.12
+ - GHCVER=7.8.4  CABALVER=1.22  MONGO=3.0
+ - GHCVER=7.10.3 CABALVER=1.22  MONGO=3.0
+ - GHCVER=8.0.2 CABALVER=1.24  MONGO=3.0
+ - GHCVER=7.8.4  CABALVER=1.22  MONGO=3.2
+ - GHCVER=7.10.3 CABALVER=1.22  MONGO=3.2
+ - GHCVER=8.0.2 CABALVER=1.24  MONGO=3.2
+ - GHCVER=7.8.4  CABALVER=1.22  MONGO=3.4
+ - GHCVER=7.10.3 CABALVER=1.22  MONGO=3.4
+ - GHCVER=8.0.2 CABALVER=1.24  MONGO=3.4
+ - GHCVER=7.8.4  CABALVER=1.22  MONGO=3.6
+ - GHCVER=7.10.3 CABALVER=1.22  MONGO=3.6
+ - GHCVER=8.0.2 CABALVER=1.24  MONGO=3.6
 
 before_install:
 
@@ -23,21 +31,25 @@ before_install:
  - travis_retry sudo apt-get install cabal-install-$CABALVER ghc-$GHCVER
  - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
  - cabal --version
- - sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv EA312927
- - sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 7F0CEB10
- - sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 0C49F3730359A14518585931BC711F9BA15703C6
- - echo "deb http://repo.mongodb.org/apt/ubuntu precise/mongodb-org/3.4 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-3.4.list
- - echo "deb http://repo.mongodb.org/apt/ubuntu precise/mongodb-org/3.2 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-3.2.list
- - echo "deb http://repo.mongodb.org/apt/ubuntu precise/mongodb-org/3.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-3.0.list
- - echo 'deb http://downloads-distro.mongodb.org/repo/ubuntu-upstart dist 10gen' | sudo tee /etc/apt/sources.list.d/mongodb.list
- - sudo apt-get update
- - if [[ ${MONGO:0:3} == "2.4" ]]; then sudo apt-get install mongodb-10gen=$MONGO; else sudo apt-get install -y mongodb-org=$MONGO mongodb-org-server=$MONGO mongodb-org-shell=$MONGO mongodb-org-tools=$MONGO; fi
- - ls /etc/init.d
- - if [[ ${MONGO:0:3} == "2.4" ]]; then sudo service mongodb start; fi
- - sleep 15 #mongo may not be responded directly. See http://docs.travis-ci.com/user/database-setup/#MongoDB
- - ps axf | grep mongo
- - netstat -apn
- - mongo --version
+   #- sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv EA312927
+   #- sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 7F0CEB10
+   #- sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 0C49F3730359A14518585931BC711F9BA15703C6
+   #- echo "deb http://repo.mongodb.org/apt/ubuntu precise/mongodb-org/3.4 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-3.4.list
+   #- echo "deb http://repo.mongodb.org/apt/ubuntu precise/mongodb-org/3.2 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-3.2.list
+   #- echo "deb http://repo.mongodb.org/apt/ubuntu precise/mongodb-org/3.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-3.0.list
+   #- echo 'deb http://downloads-distro.mongodb.org/repo/ubuntu-upstart dist 10gen' | sudo tee /etc/apt/sources.list.d/mongodb.list
+   #- sudo apt-get update
+   #- if [[ ${MONGO:0:3} == "2.4" ]]; then sudo apt-get install mongodb-10gen=$MONGO; else sudo apt-get install --allow-downgrades -y mongodb-org=$MONGO mongodb-org-server=$MONGO mongodb-org-shell=$MONGO mongodb-org-tools=$MONGO; fi
+   #- ls /etc/init.d
+   #- if [[ ${MONGO:0:3} == "2.4" ]]; then sudo service mongodb start; fi
+   #- sudo service --status-all
+   #- sudo service mongod start
+   #- sleep 15 #mongo may not be responded directly. See http://docs.travis-ci.com/user/database-setup/#MongoDB
+   #- ps axf | grep mongo
+   #- sudo netstat -apn
+   #- mongo --version
+ - sudo docker pull mongo:$MONGO
+ - sudo docker run -d -p 27017:27017 mongo:$MONGO
 
 install:
  - travis_retry cabal update
@@ -69,7 +81,7 @@ script:
 jobs:
   include:
     - stage: deploy
-      env: GHCVER=8.0.2 CABALVER=1.24  MONGO=3.4.3
+      env: GHCVER=8.0.2 CABALVER=1.24  MONGO=3.6
       before_install:
         - travis_retry sudo add-apt-repository -y ppa:hvr/ghc
         - travis_retry sudo apt-get update
