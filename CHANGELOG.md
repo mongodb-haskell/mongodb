@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [2.3.0.1] - 2017-12-28
+
+### Removed
+- Log output that littered stdout in modify many commands.
+
 ## [2.3.0] - 2017-05-31
 
 ### Changed
