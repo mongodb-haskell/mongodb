@@ -144,7 +144,6 @@ finalizeFile filename (FileWriter chunkSize bucket files_id i size acc md5contex
             , "chunkSize" =: chunkSize
             , "filename" =: filename
             ]
-  _ <- liftIO $ putStrLn $ "md5 : " ++ (show md5digest)
   insert_ (files bucket) doc
   return $ File bucket doc
 
