@@ -46,7 +46,7 @@ defaultChunkSize :: Int64
 -- ^ The default chunk size is 256 kB
 defaultChunkSize = 256 * 1024
 
--- magic constant for the
+-- magic constant for md5Finalize
 md5BlockSizeInBytes :: Int
 md5BlockSizeInBytes = 64
 
@@ -159,26 +159,25 @@ finalizeMD5 ctx rest =
 
 -- Write as many chunks as can be written from the file writer
 writeChunks :: (Monad m, MonadIO m) => FileWriter -> L.ByteString -> Action m FileWriter
-writeChunks (FileWriter chunkSize bucket files_id i size acc md5context md5acc) chunk =
-  do
-    -- Update md5 context
-    let md5BlockLength = fromIntegral $ untag (blockLength :: Tagged MD5Digest Int)
-    let md5acc_temp = (md5acc `L.append` chunk)
-    let (md5context', md5acc') =
-          if (L.length md5acc_temp < md5BlockLength)
-          then (md5context, md5acc_temp)
-          else let numBlocks = L.length md5acc_temp `div` md5BlockLength
-                   (current, rest) = L.splitAt (md5BlockLength * numBlocks) md5acc_temp
-               in (md5Update md5context (L.toStrict current), rest)
-    -- Update chunks
-    let size' = (size + L.length chunk)
-    let acc_temp = (acc `L.append` chunk)
-    if (L.length acc_temp < chunkSize)
-      then return (FileWriter chunkSize bucket files_id i size' acc_temp md5context' md5acc')
-      else do
-            let (chunk, acc') = L.splitAt chunkSize acc_temp
-            putChunk bucket files_id i chunk
-            writeChunks (FileWriter chunkSize bucket files_id (i+1) size' acc' md5context' md5acc') L.empty
+writeChunks (FileWriter chunkSize bucket files_id i size acc md5context md5acc) chunk = do
+  -- Update md5 context
+  let md5BlockLength = fromIntegral $ untag (blockLength :: Tagged MD5Digest Int)
+  let md5acc_temp = (md5acc `L.append` chunk)
+  let (md5context', md5acc') = 
+        if (L.length md5acc_temp < md5BlockLength)
+        then (md5context, md5acc_temp)
+        else let numBlocks = L.length md5acc_temp `div` md5BlockLength
+                 (current, rest) = L.splitAt (md5BlockLength * numBlocks) md5acc_temp
+             in (md5Update md5context (L.toStrict current), rest)
+  -- Update chunks
+  let size' = (size + L.length chunk)
+  let acc_temp = (acc `L.append` chunk)
+  if (L.length acc_temp < chunkSize)
+    then return (FileWriter chunkSize bucket files_id i size' acc_temp md5context' md5acc')
+    else do
+      let (chunk, acc') = L.splitAt chunkSize acc_temp
+      putChunk bucket files_id i chunk
+      writeChunks (FileWriter chunkSize bucket files_id (i+1) size' acc' md5context' md5acc') L.empty
 
 sinkFile :: (Monad m, MonadIO m) => Bucket -> Text -> Consumer S.ByteString (Action m) File
 -- ^ A consumer that creates a file in the bucket and puts all consumed data in it
