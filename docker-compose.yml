@@ -3,7 +3,7 @@ services:
   mongodb:
     ports:
       - 27017:27017
-    image: mongo:3.4.3
+    image: mongo:3.6
   mongodb-haskell:
     image: phadej/ghc:8.0.2
     environment:

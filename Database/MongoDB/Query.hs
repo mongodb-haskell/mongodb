@@ -35,7 +35,7 @@ module Database.MongoDB.Query (
     -- *** Cursor
     Cursor, nextBatch, next, nextN, rest, closeCursor, isCursorClosed,
     -- ** Aggregate
-    Pipeline, aggregate,
+    Pipeline, AggregateConfig(..), aggregate, aggregateCursor,
     -- ** Group
     Group(..), GroupKey(..), group,
     -- ** MapReduce
@@ -49,6 +49,7 @@ module Database.MongoDB.Query (
 import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO)
 import Control.Monad (unless, replicateM, liftM, liftM2)
+import Data.Default.Class (Default(..))
 import Data.Int (Int32, Int64)
 import Data.Either (lefts, rights)
 import Data.List (foldl1')
@@ -1307,9 +1308,25 @@ type Pipeline = [Document]
 aggregate :: MonadIO m => Collection -> Pipeline -> Action m [Document]
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
 aggregate aColl agg = do
-    response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg]
+    aggregateCursor aColl agg def >>= rest
+
+data AggregateConfig = AggregateConfig {}
+                       deriving Show
+
+instance Default AggregateConfig where
+  def = AggregateConfig {}
+
+aggregateCursor :: MonadIO m => Collection -> Pipeline -> AggregateConfig -> Action m Cursor
+-- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
+aggregateCursor aColl agg _ = do
+    response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg, "cursor" =: ([] :: Document)]
     case true1 "ok" response of
-        True  -> lookup "result" response
+        True  -> do
+          cursor :: Document <- lookup "cursor" response
+          firstBatch :: [Document] <- lookup "firstBatch" cursor
+          cursorId :: Int64 <- lookup "id" cursor
+          db <- thisDatabase
+          newCursor db aColl 0 $ return $ Batch Nothing cursorId  firstBatch
         False -> liftIO $ throwIO $ AggregateFailure $ at "errmsg" response
 
 -- ** Group
