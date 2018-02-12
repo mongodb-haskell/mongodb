@@ -56,10 +56,10 @@ install:
  # Install the combined dependencies for this package and all other packages
  # needed to reduce conflicts.
  - cabal sandbox init
- - cabal install --only-dependencies --enable-tests
+ - cabal install --only-dependencies --enable-tests --enable-benchmarks
 
 script:
- - cabal configure --enable-tests -v2
+ - cabal configure --enable-tests -v2 --enable-benchmarks
  - cabal build
  # cabal test fails due a to hpc error. Using run-cabal-test instead.
  # - cabal test --show-details=always
