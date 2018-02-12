@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [2.3.0.4] - 2018-02-11
+
+### Fixed
+- Benchmark's build
+
 ## [2.3.0.3] - 2018-02-10
 
 ### Fixed
