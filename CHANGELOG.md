@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [2.3.0.5] - 2018-03-15
+
+### Fixed
+- Resource leak in SCRAM authentication
+
 ## [2.3.0.4] - 2018-02-11
 
 ### Fixed
