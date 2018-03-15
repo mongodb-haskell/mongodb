@@ -263,7 +263,7 @@ authSCRAMSHA1 :: MonadIO m => Username -> Password -> Action m Bool
 -- ^ Authenticate with the current database, using the SCRAM-SHA-1 authentication mechanism (default in MongoDB server >= 3.0)
 authSCRAMSHA1 un pw = do
     let hmac = HMAC.hmac SHA1.hash 64
-    nonce <- (Nonce.new >>= Nonce.nonce128 >>= return . B64.encode)
+    nonce <- liftIO (Nonce.withGenerator Nonce.nonce128 >>= return . B64.encode)
     let firstBare = B.concat [B.pack $ "n=" ++ (T.unpack un) ++ ",r=", nonce]
     let client1 = ["saslStart" =: (1 :: Int), "mechanism" =: ("SCRAM-SHA-1" :: String), "payload" =: (B.unpack . B64.encode $ B.concat [B.pack "n,,", firstBare]), "autoAuthorize" =: (1 :: Int)]
     server1 <- runCommand client1
