@@ -51,7 +51,7 @@ Library
                     , hashtables >= 1.1.2.0
                     , base16-bytestring >= 0.1.1.6
                     , base64-bytestring >= 1.0.0.1
-                    , nonce >= 1.0.2
+                    , nonce >= 1.0.5
 
   Exposed-modules:  Database.MongoDB
                     Database.MongoDB.Admin
@@ -105,7 +105,7 @@ Benchmark bench
                     , mtl >= 2
                     , cryptohash -any
                     , network -any
-                    , nonce
+                    , nonce >= 1.0.5
                     , parsec -any
                     , random -any
                     , random-shuffle -any
