@@ -42,6 +42,7 @@ Library
                     , monad-control >= 0.3.1
                     , lifted-base >= 0.1.0.3
                     , pureMD5
+                    , stm
                     , tagged
                     , tls >= 1.3.0
                     , time
@@ -106,6 +107,7 @@ Benchmark bench
                     , cryptohash -any
                     , network -any
                     , nonce >= 1.0.5
+                    , stm
                     , parsec -any
                     , random -any
                     , random-shuffle -any
