@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [Unreleased]
+
+### Fixed
+- GHC 8.4 compatibility. isEmptyChan is not available in base 4.11 anymore.
+
 ## [2.3.0.5] - 2018-03-15
 
 ### Fixed
