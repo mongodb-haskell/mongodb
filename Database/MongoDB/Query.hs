@@ -611,7 +611,7 @@ upsert :: (MonadIO m)
 upsert = update [Upsert]
 
 type Modifier = Document
--- ^ Update operations on fields in a document. See <http://www.mongodb.org/display/DOCS/Updating#Updating-ModifierOperations>
+-- ^ Update operations on fields in a document. See <https://docs.mongodb.com/manual/reference/operator/update/>
 
 modify :: (MonadIO m)
        => Selection -> Modifier -> Action m ()
