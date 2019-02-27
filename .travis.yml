@@ -56,7 +56,7 @@ install:
  - wget https://www.stackage.org/$STACKAGE/cabal.config
  - sed -e '/mongoDB/d' cabal.config > cabal.config.new
  - mv cabal.config.new cabal.config
- - cabal install --only-dependencies --enable-tests --enable-benchmarks
+ - cabal install --only-dependencies --enable-tests --enable-benchmarks --force-reinstalls
 
 script:
  - cabal configure --enable-tests -v2 --enable-benchmarks
