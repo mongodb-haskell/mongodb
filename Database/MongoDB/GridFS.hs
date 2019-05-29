@@ -27,7 +27,7 @@ import Control.Applicative((<$>))
 
 import Control.Monad(when)
 import Control.Monad.IO.Class
-import Control.Monad.Trans(MonadTrans, lift)
+import Control.Monad.Trans(lift)
 
 import Data.Conduit
 import Data.Digest.Pure.MD5

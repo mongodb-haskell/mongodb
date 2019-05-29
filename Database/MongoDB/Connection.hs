@@ -39,7 +39,7 @@ import qualified Data.List as List
 
 
 import Control.Monad.Identity (runIdentity)
-import Control.Monad.Error (throwError)
+import Control.Monad.Except (throwError)
 import Control.Concurrent.MVar.Lifted (MVar, newMVar, withMVar, modifyMVar,
                                        readMVar)
 import Data.Bson (Document, at, (=:))
