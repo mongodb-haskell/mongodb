@@ -50,7 +50,7 @@ connect host port = bracketOnError (connectTo host port) hClose $ \handle -> do
 
   let params = (TLS.defaultParamsClient host "")
         { TLS.clientSupported = def
-            { TLS.supportedCiphers = TLS.ciphersuite_all}
+            { TLS.supportedCiphers = TLS.ciphersuite_default}
         , TLS.clientHooks = def
             { TLS.onServerCertificate = \_ _ _ _ -> return []}
         }
