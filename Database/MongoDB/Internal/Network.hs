@@ -4,7 +4,7 @@
 module Database.MongoDB.Internal.Network (PortID(..), N.HostName, connectTo) where
 
 
-#if !MIN_VERSION_network(2, 8, 0)
+#if !MIN_VERSION_network(2, 9, 0)
 
 import qualified Network as N
 import System.IO (Handle)
@@ -20,11 +20,11 @@ import System.IO (Handle, IOMode(ReadWriteMode))
 
 
 -- | Wraps network's 'PortNumber'
--- Used to easy compatibility between older and newer network versions.
+-- Used to ease compatibility between older and newer network versions.
 newtype PortID = PortNumber N.PortNumber deriving (Show, Eq, Ord)
 
 
-#if !MIN_VERSION_network(2, 8, 0)
+#if !MIN_VERSION_network(2, 9, 0)
 
 -- Unwrap our newtype and use network's PortID and connectTo
 connectTo :: N.HostName         -- Hostname
