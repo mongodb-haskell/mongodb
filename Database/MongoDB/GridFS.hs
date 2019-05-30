@@ -121,14 +121,14 @@ sourceFile file = yieldChunk 0 where
 
 -- Used to keep data during writing
 data FileWriter = FileWriter
-  { fwChunkSize :: Int64
-  , fwBucket :: Bucket
-  , fwFilesId :: ObjectId
-  , fwChunkIndex :: Int
-  , fwSize :: Int64
-  , fwAcc :: L.ByteString
-  , fwMd5Context :: MD5Context
-  , fwMd5acc :: L.ByteString
+  { _fwChunkSize :: Int64
+  , _fwBucket :: Bucket
+  , _fwFilesId :: ObjectId
+  , _fwChunkIndex :: Int
+  , _fwSize :: Int64
+  , _fwAcc :: L.ByteString
+  , _fwMd5Context :: MD5Context
+  , _fwMd5acc :: L.ByteString
   }
 
 -- Finalize file, calculating md5 digest, saving the last chunk, and creating the file in the bucket
