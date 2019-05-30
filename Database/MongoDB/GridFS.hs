@@ -110,7 +110,7 @@ putChunk :: (Monad m, MonadIO m) => Bucket -> ObjectId -> Int -> L.ByteString ->
 putChunk bucket files_id i chunk = do
   insert_ (chunks bucket) ["files_id" =: files_id, "n" =: i, "data" =: Binary (L.toStrict chunk)]
 
-sourceFile :: (Monad m, MonadIO m) => File -> Producer (Action m) S.ByteString
+sourceFile :: (Monad m, MonadIO m) => File -> ConduitT i S.ByteString (Action m) ()
 -- ^ A producer for the contents of a file
 sourceFile file = yieldChunk 0 where
   yieldChunk i = do
@@ -179,7 +179,7 @@ writeChunks (FileWriter chunkSize bucket files_id i size acc md5context md5acc) 
       putChunk bucket files_id i chunk
       writeChunks (FileWriter chunkSize bucket files_id (i+1) size' acc' md5context' md5acc') L.empty
 
-sinkFile :: (Monad m, MonadIO m) => Bucket -> Text -> Consumer S.ByteString (Action m) File
+sinkFile :: (Monad m, MonadIO m) => Bucket -> Text -> ConduitT S.ByteString o (Action m) File
 -- ^ A consumer that creates a file in the bucket and puts all consumed data in it
 sinkFile bucket filename = do
   files_id <- liftIO $ genObjectId
