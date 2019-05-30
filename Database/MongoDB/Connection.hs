@@ -30,7 +30,6 @@ import Control.Applicative ((<$>))
 #endif
 
 import Control.Monad (forM_)
-import Network (HostName, PortID(..), connectTo)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Timeout (timeout)
 import Text.ParserCombinators.Parsec (parse, many1, letter, digit, char, eof,
@@ -48,6 +47,7 @@ import Data.Text (Text)
 import qualified Data.Bson as B
 import qualified Data.Text as T
 
+import Database.MongoDB.Internal.Network (HostName, PortID(..), connectTo)
 import Database.MongoDB.Internal.Protocol (Pipe, newPipe, close, isClosed)
 import Database.MongoDB.Internal.Util (untilSuccess, liftIOE,
                                        updateAssocs, shuffle, mergesortM)
@@ -79,11 +79,7 @@ showHostPort :: Host -> String
 -- TODO: Distinguish Service and UnixSocket port
 showHostPort (Host hostname port) = hostname ++ ":" ++ portname  where
     portname = case port of
-        Service s -> s
         PortNumber p -> show p
-#if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
-        UnixSocket s -> s
-#endif
 
 readHostPortM :: (Monad m) => String -> m Host
 -- ^ Read string \"hostname:port\" as @Host hosthame (PortNumber port)@ or \"hostname\" as @host hostname@ (default port). Fail if string does not match either syntax.

@@ -39,7 +39,7 @@ import Database.MongoDB.Internal.Protocol (newPipeWith)
 import Database.MongoDB.Transport (Transport(Transport))
 import qualified Database.MongoDB.Transport as T
 import System.IO.Error (mkIOError, eofErrorType)
-import Network (connectTo, HostName, PortID)
+import Database.MongoDB.Internal.Network (connectTo, HostName, PortID)
 import qualified Network.TLS as TLS
 import qualified Network.TLS.Extra.Cipher as TLS
 import Database.MongoDB.Query (access, slaveOk, retrieveServerData)

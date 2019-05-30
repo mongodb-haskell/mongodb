@@ -19,6 +19,12 @@ Build-type:     Simple
 Stability:      alpha
 Extra-Source-Files: CHANGELOG.md
 
+-- Imitated from https://github.com/mongodb-haskell/bson/pull/18
+Flag _old-network
+  description: Control whether to use <http://hackage.haskell.org/package/network-bsd network-bsd>
+  default: False
+  manual: False
+
 Library
   GHC-options:      -Wall
   default-language: Haskell2010
@@ -54,6 +60,13 @@ Library
                     , base64-bytestring >= 1.0.0.1
                     , nonce >= 1.0.5
 
+  if flag(_old-network)
+     -- "Network.BSD" is only available in network < 2.9
+     build-depends: network < 2.9
+  else
+     -- "Network.BSD" has been moved into its own package `network-bsd`
+     build-depends: network-bsd >= 2.7 && < 2.9
+
   Exposed-modules:  Database.MongoDB
                     Database.MongoDB.Admin
                     Database.MongoDB.Connection
@@ -61,7 +74,8 @@ Library
                     Database.MongoDB.Query
                     Database.MongoDB.Transport
                     Database.MongoDB.Transport.Tls
-  Other-modules:    Database.MongoDB.Internal.Protocol
+  Other-modules:    Database.MongoDB.Internal.Network
+                    Database.MongoDB.Internal.Protocol
                     Database.MongoDB.Internal.Util
 
 Source-repository head

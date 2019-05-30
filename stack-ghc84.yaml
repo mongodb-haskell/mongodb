@@ -1,0 +1,4 @@
+resolver: lts-12.26
+flags:
+  mongoDB:
+    _old-network: true

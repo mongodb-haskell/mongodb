@@ -1,9 +1,7 @@
--- | Miscellaneous general functions and Show, Eq, and Ord instances for PortID
+-- | Miscellaneous general functions
 
 {-# LANGUAGE FlexibleInstances, UndecidableInstances, StandaloneDeriving #-}
 {-# LANGUAGE CPP #-}
--- PortID instances
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Database.MongoDB.Internal.Util where
 
@@ -14,7 +12,6 @@ import Control.Exception (handle, throwIO, Exception)
 import Control.Monad (liftM, liftM2)
 import Data.Bits (Bits, (.|.))
 import Data.Word (Word8)
-import Network (PortID(..))
 import Numeric (showHex)
 import System.Random (newStdGen)
 import System.Random.Shuffle (shuffle')
@@ -27,12 +24,6 @@ import Data.Bson
 import Data.Text (Text)
 
 import qualified Data.Text as T
-
-#if !MIN_VERSION_network(2, 4, 1)
-deriving instance Show PortID
-deriving instance Eq PortID
-#endif
-deriving instance Ord PortID
 
 -- | A monadic sort implementation derived from the non-monadic one in ghc's Prelude
 mergesortM :: Monad m => (a -> a -> m Ordering) -> [a] -> m [a]
