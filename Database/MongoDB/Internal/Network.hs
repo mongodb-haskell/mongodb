@@ -1,5 +1,5 @@
 -- | Compatibility layer for network package, including newtype 'PortID'
-{-# LANGUAGE CPP, PackageImports #-}
+{-# LANGUAGE CPP, GeneralizedNewtypeDeriving #-}
 
 module Database.MongoDB.Internal.Network (PortID(..), N.HostName, connectTo) where
 
@@ -21,7 +21,7 @@ import System.IO (Handle, IOMode(ReadWriteMode))
 
 -- | Wraps network's 'PortNumber'
 -- Used to ease compatibility between older and newer network versions.
-newtype PortID = PortNumber N.PortNumber deriving (Show, Eq, Ord)
+newtype PortID = PortNumber N.PortNumber deriving (Enum, Eq, Integral, Num, Ord, Read, Real, Show)
 
 
 #if !MIN_VERSION_network(2, 9, 0)
