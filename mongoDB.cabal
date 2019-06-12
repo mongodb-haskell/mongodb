@@ -22,7 +22,6 @@ Extra-Source-Files: CHANGELOG.md
 -- Imitated from https://github.com/mongodb-haskell/bson/pull/18
 Flag _old-network
   description: Control whether to use <http://hackage.haskell.org/package/network-bsd network-bsd>
-  default: False
   manual: False
 
 Library
