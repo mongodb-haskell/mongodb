@@ -27,7 +27,7 @@ import Control.Applicative((<$>))
 
 import Control.Monad(when)
 import Control.Monad.IO.Class
-import Control.Monad.Trans(MonadTrans, lift)
+import Control.Monad.Trans(lift)
 
 import Data.Conduit
 import Data.Digest.Pure.MD5
@@ -121,14 +121,14 @@ sourceFile file = yieldChunk 0 where
 
 -- Used to keep data during writing
 data FileWriter = FileWriter
-  { fwChunkSize :: Int64
-  , fwBucket :: Bucket
-  , fwFilesId :: ObjectId
-  , fwChunkIndex :: Int
-  , fwSize :: Int64
-  , fwAcc :: L.ByteString
-  , fwMd5Context :: MD5Context
-  , fwMd5acc :: L.ByteString
+  { _fwChunkSize :: Int64
+  , _fwBucket :: Bucket
+  , _fwFilesId :: ObjectId
+  , _fwChunkIndex :: Int
+  , _fwSize :: Int64
+  , _fwAcc :: L.ByteString
+  , _fwMd5Context :: MD5Context
+  , _fwMd5acc :: L.ByteString
   }
 
 -- Finalize file, calculating md5 digest, saving the last chunk, and creating the file in the bucket
@@ -136,10 +136,10 @@ finalizeFile :: (Monad m, MonadIO m) => Text -> FileWriter -> Action m File
 finalizeFile filename (FileWriter chunkSize bucket files_id i size acc md5context md5acc) = do
   let md5digest = finalizeMD5 md5context (L.toStrict md5acc)
   when (L.length acc > 0) $ putChunk bucket files_id i acc
-  timestamp <- liftIO $ getCurrentTime
+  currentTimestamp <- liftIO $ getCurrentTime
   let doc = [ "_id" =: files_id
             , "length" =: size
-            , "uploadDate" =: timestamp
+            , "uploadDate" =: currentTimestamp
             , "md5" =: show (md5digest)
             , "chunkSize" =: chunkSize
             , "filename" =: filename
@@ -149,13 +149,13 @@ finalizeFile filename (FileWriter chunkSize bucket files_id i size acc md5contex
 
 -- finalize the remainder and return the MD5Digest.
 finalizeMD5 :: MD5Context -> S.ByteString -> MD5Digest
-finalizeMD5 ctx rest =
-  md5Finalize ctx2 (S.drop lu rest) -- can only handle max md5BlockSizeInBytes length
+finalizeMD5 ctx remainder =
+  md5Finalize ctx2 (S.drop lu remainder) -- can only handle max md5BlockSizeInBytes length
   where
-    l = S.length rest
+    l = S.length remainder
     r = l `mod` md5BlockSizeInBytes
     lu = l - r
-    ctx2 = md5Update ctx (S.take lu rest)
+    ctx2 = md5Update ctx (S.take lu remainder)
 
 -- Write as many chunks as can be written from the file writer
 writeChunks :: (Monad m, MonadIO m) => FileWriter -> L.ByteString -> Action m FileWriter
@@ -167,16 +167,16 @@ writeChunks (FileWriter chunkSize bucket files_id i size acc md5context md5acc) 
         if (L.length md5acc_temp < md5BlockLength)
         then (md5context, md5acc_temp)
         else let numBlocks = L.length md5acc_temp `div` md5BlockLength
-                 (current, rest) = L.splitAt (md5BlockLength * numBlocks) md5acc_temp
-             in (md5Update md5context (L.toStrict current), rest)
+                 (current, remainder) = L.splitAt (md5BlockLength * numBlocks) md5acc_temp
+             in (md5Update md5context (L.toStrict current), remainder)
   -- Update chunks
   let size' = (size + L.length chunk)
   let acc_temp = (acc `L.append` chunk)
   if (L.length acc_temp < chunkSize)
     then return (FileWriter chunkSize bucket files_id i size' acc_temp md5context' md5acc')
     else do
-      let (chunk, acc') = L.splitAt chunkSize acc_temp
-      putChunk bucket files_id i chunk
+      let (newChunk, acc') = L.splitAt chunkSize acc_temp
+      putChunk bucket files_id i newChunk
       writeChunks (FileWriter chunkSize bucket files_id (i+1) size' acc' md5context' md5acc') L.empty
 
 sinkFile :: (Monad m, MonadIO m) => Bucket -> Text -> Consumer S.ByteString (Action m) File

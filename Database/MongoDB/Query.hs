@@ -72,7 +72,6 @@ import Control.Concurrent.MVar.Lifted (MVar, addMVarFinalizer,
 import Control.Applicative ((<$>))
 import Control.Exception (catch)
 import Control.Monad (when, void)
-import Control.Monad.Error (Error(..))
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask, asks, local)
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.Binary.Put (runPut)
@@ -137,9 +136,6 @@ instance Exception Failure
 
 type ErrorCode = Int
 -- ^ Error code from getLastError or query failure
-
-instance Error Failure where strMsg = error
--- ^ 'fail' is treated the same as a programming 'error'. In other words, don't use it.
 
 -- | Type of reads and writes to perform
 data AccessMode =

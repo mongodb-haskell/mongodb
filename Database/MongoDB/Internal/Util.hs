@@ -1,9 +1,7 @@
--- | Miscellaneous general functions and Show, Eq, and Ord instances for PortID
+-- | Miscellaneous general functions
 
 {-# LANGUAGE FlexibleInstances, UndecidableInstances, StandaloneDeriving #-}
 {-# LANGUAGE CPP #-}
--- PortID instances
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Database.MongoDB.Internal.Util where
 
@@ -14,25 +12,18 @@ import Control.Exception (handle, throwIO, Exception)
 import Control.Monad (liftM, liftM2)
 import Data.Bits (Bits, (.|.))
 import Data.Word (Word8)
-import Network (PortID(..))
 import Numeric (showHex)
 import System.Random (newStdGen)
 import System.Random.Shuffle (shuffle')
 
 import qualified Data.ByteString as S
 
-import Control.Monad.Error (MonadError(..), Error(..))
+import Control.Monad.Except (MonadError(..))
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.Bson
 import Data.Text (Text)
 
 import qualified Data.Text as T
-
-#if !MIN_VERSION_network(2, 4, 1)
-deriving instance Show PortID
-deriving instance Eq PortID
-#endif
-deriving instance Ord PortID
 
 -- | A monadic sort implementation derived from the non-monadic one in ghc's Prelude
 mergesortM :: Monad m => (a -> a -> m Ordering) -> [a] -> m [a]
@@ -69,9 +60,12 @@ loop :: Monad m => m (Maybe a) -> m [a]
 -- ^ Repeatedy execute action, collecting results, until it returns Nothing
 loop act = act >>= maybe (return []) (\a -> (a :) `liftM` loop act)
 
-untilSuccess :: (MonadError e m, Error e) => (a -> m b) -> [a] -> m b
+untilSuccess :: (MonadError e m) => (a -> m b) -> [a] -> m b
 -- ^ Apply action to elements one at a time until one succeeds. Throw last error if all fail. Throw 'strMsg' error if list is empty.
-untilSuccess = untilSuccess' (strMsg "empty untilSuccess")
+untilSuccess = untilSuccess' (error "empty untilSuccess")
+-- Use 'error' copying behavior in removed 'Control.Monad.Error.Error' instance:
+-- instance Error Failure where strMsg = error
+-- 'fail' is treated the same as a programming 'error'. In other words, don't use it.
 
 untilSuccess' :: (MonadError e m) => e -> (a -> m b) -> [a] -> m b
 -- ^ Apply action to elements one at a time until one succeeds. Throw last error if all fail. Throw given error if list is empty
