@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [2.5.0.0] - 2019-06-14
+
+### Fixed
+Compatibility with network 3.0 package
+
 ## [2.4.0.1] - 2019-03-03
 
 ### Fixed
