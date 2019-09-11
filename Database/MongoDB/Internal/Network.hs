@@ -21,7 +21,11 @@ import System.IO (Handle, IOMode(ReadWriteMode))
 
 -- | Wraps network's 'PortNumber'
 -- Used to ease compatibility between older and newer network versions.
-newtype PortID = PortNumber N.PortNumber deriving (Enum, Eq, Integral, Num, Ord, Read, Real, Show)
+data PortID = PortNumber N.PortNumber
+#if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
+            | UnixSocket String
+#endif
+            deriving (Eq, Ord, Show)
 
 
 #if !MIN_VERSION_network(2, 9, 0)
@@ -31,6 +35,10 @@ connectTo :: N.HostName         -- Hostname
           -> PortID             -- Port Identifier
           -> IO Handle          -- Connected Socket
 connectTo hostname (PortNumber port) = N.connectTo hostname (N.PortNumber port)
+
+#if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
+connectTo _ (UnixSocket path) = N.connectTo "" (N.UnixSocket path)
+#endif
 
 #else
 
@@ -49,4 +57,16 @@ connectTo hostname (PortNumber port) = do
           N.connect sock (N.SockAddrInet port (hostAddress he))
           N.socketToHandle sock ReadWriteMode
         )
+
+#if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
+connectTo _ (UnixSocket path) = do
+    bracketOnError
+        (N.socket N.AF_UNIX N.Stream 0)
+        (N.close)
+        (\sock -> do
+          N.connect sock (N.SockAddrUnix path)
+          N.socketToHandle sock ReadWriteMode
+        )
+#endif
+
 #endif

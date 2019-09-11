@@ -29,10 +29,10 @@ import Data.List (intersect, partition, (\\), delete)
 import Control.Applicative ((<$>))
 #endif
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, guard)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Timeout (timeout)
-import Text.ParserCombinators.Parsec (parse, many1, letter, digit, char, eof,
+import Text.ParserCombinators.Parsec (parse, many1, letter, digit, char, anyChar, eof,
                                       spaces, try, (<|>))
 import qualified Data.List as List
 
@@ -76,14 +76,15 @@ host hostname = Host hostname defaultPort
 
 showHostPort :: Host -> String
 -- ^ Display host as \"host:port\"
--- TODO: Distinguish Service and UnixSocket port
-showHostPort (Host hostname port) = hostname ++ ":" ++ portname  where
-    portname = case port of
-        PortNumber p -> show p
+-- TODO: Distinguish Service port
+showHostPort (Host hostname (PortNumber port)) = hostname ++ ":" ++ show port
+#if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
+showHostPort (Host _        (UnixSocket path)) = "unix:" ++ path
+#endif
 
 readHostPortM :: (Monad m) => String -> m Host
 -- ^ Read string \"hostname:port\" as @Host hosthame (PortNumber port)@ or \"hostname\" as @host hostname@ (default port). Fail if string does not match either syntax.
--- TODO: handle Service and UnixSocket port
+-- TODO: handle Service port
 readHostPortM = either (fail . show) return . parse parser "readHostPort" where
     hostname = many1 (letter <|> digit <|> char '-' <|> char '.')
     parser = do
@@ -91,9 +92,15 @@ readHostPortM = either (fail . show) return . parse parser "readHostPort" where
         h <- hostname
         try (spaces >> eof >> return (host h)) <|> do
             _ <- char ':'
-            port :: Int <- read <$> many1 digit
-            spaces >> eof
-            return $ Host h (PortNumber $ fromIntegral port)
+            try (  do port :: Int <- read <$> many1 digit
+                      spaces >> eof
+                      return $ Host h (PortNumber $ fromIntegral port))
+#if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
+              <|>  do guard (h == "unix")
+                      p <- many1 anyChar
+                      eof
+                      return $ Host "" (UnixSocket p)
+#endif
 
 readHostPort :: String -> Host
 -- ^ Read string \"hostname:port\" as @Host hostname (PortNumber port)@ or \"hostname\" as @host hostname@ (default port). Error if string does not match either syntax.
