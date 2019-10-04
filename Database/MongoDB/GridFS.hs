@@ -26,6 +26,7 @@ module Database.MongoDB.GridFS
 import Control.Applicative((<$>))
 
 import Control.Monad(when)
+import Control.Monad.Fail(MonadFail)
 import Control.Monad.IO.Class
 import Control.Monad.Trans(lift)
 
@@ -69,7 +70,7 @@ openBucket name = do
 
 data File = File {bucket :: Bucket, document :: Document}
 
-getChunk :: (Monad m, MonadIO m) => File -> Int -> Action m (Maybe S.ByteString)
+getChunk :: (MonadFail m, MonadIO m) => File -> Int -> Action m (Maybe S.ByteString)
 -- ^ Get a chunk of a file
 getChunk (File bucket doc) i = do
   files_id <- B.look "_id" doc
@@ -98,7 +99,7 @@ fetchFile bucket sel = do
   doc <- fetch $ select sel $ files bucket
   return $ File bucket doc
 
-deleteFile :: (MonadIO m) => File -> Action m ()
+deleteFile :: (MonadIO m, MonadFail m) => File -> Action m ()
 -- ^ Delete files in the bucket
 deleteFile (File bucket doc) = do
   files_id <- B.look "_id" doc
@@ -110,7 +111,7 @@ putChunk :: (Monad m, MonadIO m) => Bucket -> ObjectId -> Int -> L.ByteString ->
 putChunk bucket files_id i chunk = do
   insert_ (chunks bucket) ["files_id" =: files_id, "n" =: i, "data" =: Binary (L.toStrict chunk)]
 
-sourceFile :: (Monad m, MonadIO m) => File -> Producer (Action m) S.ByteString
+sourceFile :: (MonadFail m, MonadIO m) => File -> Producer (Action m) S.ByteString
 -- ^ A producer for the contents of a file
 sourceFile file = yieldChunk 0 where
   yieldChunk i = do

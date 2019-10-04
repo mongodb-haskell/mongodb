@@ -33,6 +33,7 @@ import Control.Applicative ((<$>))
 #endif
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, unless, liftM)
+import Control.Monad.Fail(MonadFail)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (maybeToList)
 import Data.Set (Set)
@@ -76,7 +77,7 @@ renameCollection from to = do
     db <- thisDatabase
     useDb admin $ runCommand ["renameCollection" =: db <.> from, "to" =: db <.> to, "dropTarget" =: True]
 
-dropCollection :: (MonadIO m) => Collection -> Action m Bool
+dropCollection :: (MonadIO m, MonadFail m) => Collection -> Action m Bool
 -- ^ Delete the given collection! Return True if collection existed (and was deleted); return False if collection did not exist (and no action).
 dropCollection coll = do
     resetIndexCache

@@ -24,12 +24,14 @@ module Database.MongoDB.Connection (
 import Prelude hiding (lookup)
 import Data.IORef (IORef, newIORef, readIORef)
 import Data.List (intersect, partition, (\\), delete)
+import Data.Maybe (fromJust)
 
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<$>))
 #endif
 
 import Control.Monad (forM_)
+import Control.Monad.Fail(MonadFail)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Timeout (timeout)
 import Text.ParserCombinators.Parsec (parse, many1, letter, digit, char, eof,
@@ -81,7 +83,7 @@ showHostPort (Host hostname port) = hostname ++ ":" ++ portname  where
     portname = case port of
         PortNumber p -> show p
 
-readHostPortM :: (Monad m) => String -> m Host
+readHostPortM :: (MonadFail m) => String -> m Host
 -- ^ Read string \"hostname:port\" as @Host hosthame (PortNumber port)@ or \"hostname\" as @host hostname@ (default port). Fail if string does not match either syntax.
 -- TODO: handle Service and UnixSocket port
 readHostPortM = either (fail . show) return . parse parser "readHostPort" where
@@ -97,7 +99,7 @@ readHostPortM = either (fail . show) return . parse parser "readHostPort" where
 
 readHostPort :: String -> Host
 -- ^ Read string \"hostname:port\" as @Host hostname (PortNumber port)@ or \"hostname\" as @host hostname@ (default port). Error if string does not match either syntax.
-readHostPort = runIdentity . readHostPortM
+readHostPort = fromJust . readHostPortM
 
 type Secs = Double
 
