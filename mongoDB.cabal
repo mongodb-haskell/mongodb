@@ -57,6 +57,8 @@ Library
                     , base16-bytestring >= 0.1.1.6
                     , base64-bytestring >= 1.0.0.1
                     , nonce >= 1.0.5
+                    , dns
+                    , http-types
 
   if flag(_old-network)
      -- "Network.BSD" is only available in network < 2.9
