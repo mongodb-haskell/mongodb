@@ -1,7 +1,7 @@
 -- | Compatibility layer for network package, including newtype 'PortID'
 {-# LANGUAGE CPP, GeneralizedNewtypeDeriving #-}
 
-module Database.MongoDB.Internal.Network (PortID(..), N.HostName, connectTo) where
+module Database.MongoDB.Internal.Network (Host(..), PortID(..), N.HostName, connectTo) where 
 
 
 #if !MIN_VERSION_network(2, 9, 0)
@@ -50,3 +50,7 @@ connectTo hostname (PortNumber port) = do
           N.socketToHandle sock ReadWriteMode
         )
 #endif
+
+-- * Host
+
+data Host = Host N.HostName PortID  deriving (Show, Eq, Ord)
