@@ -49,6 +49,7 @@ module Database.MongoDB.Query (
 import Prelude hiding (lookup)
 import Control.Exception (Exception, throwIO)
 import Control.Monad (unless, replicateM, liftM, liftM2)
+import Control.Monad.Fail(MonadFail)
 import Data.Default.Class (Default(..))
 import Data.Int (Int32, Int64)
 import Data.Either (lefts, rights)
@@ -1065,7 +1066,7 @@ defFamUpdateOpts ups = FamUpdate
 -- Returns a single updated document (new option is set to true).
 --
 -- see 'findAndModifyOpts' if you want to use findAndModify in a differnt way
-findAndModify :: MonadIO m
+findAndModify :: (MonadIO m, MonadFail m)
               => Query
               -> Document -- ^ updates
               -> Action m (Either String Document)
@@ -1080,7 +1081,7 @@ findAndModify q ups = do
 
 -- | runs the findAndModify command,
 -- allows more options than 'findAndModify'
-findAndModifyOpts :: MonadIO m
+findAndModifyOpts :: (MonadIO m, MonadFail m)
                   => Query
                   ->FindAndModifyOpts
                   -> Action m (Either String (Maybe Document))
@@ -1105,8 +1106,8 @@ findAndModifyOpts (Query {
     return $ case lookupErr result of
         Just e -> leftErr e
         Nothing -> case lookup "value" result of
-            Left err   -> leftErr $ "no document found: " `mappend` err
-            Right mdoc -> case mdoc of
+            Nothing   -> leftErr "no document found"
+            Just mdoc -> case mdoc of
                 Just doc@(_:_) -> Right (Just doc)
                 Just [] -> case famOpts of
                     FamUpdate { famUpsert = True, famNew = False } -> Right Nothing
@@ -1118,9 +1119,10 @@ findAndModifyOpts (Query {
         `mappend` "\nerror: " `mappend` err
 
     -- return Nothing means ok, Just is the error message
-    lookupErr result = case lookup "lastErrorObject" result of
-        Right errObject -> lookup "err" errObject
-        Left err -> Just err
+    lookupErr :: Document -> Maybe String
+    lookupErr result = do
+        errObject <- lookup "lastErrorObject" result
+        lookup "err" errObject
 
 explain :: (MonadIO m) => Query -> Action m Document
 -- ^ Return performance stats of query execution
@@ -1301,7 +1303,7 @@ isCursorClosed (Cursor _ _ var) = do
 type Pipeline = [Document]
 -- ^ The Aggregate Pipeline
 
-aggregate :: MonadIO m => Collection -> Pipeline -> Action m [Document]
+aggregate :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> Action m [Document]
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
 aggregate aColl agg = do
     aggregateCursor aColl agg def >>= rest
@@ -1312,7 +1314,7 @@ data AggregateConfig = AggregateConfig {}
 instance Default AggregateConfig where
   def = AggregateConfig {}
 
-aggregateCursor :: MonadIO m => Collection -> Pipeline -> AggregateConfig -> Action m Cursor
+aggregateCursor :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> AggregateConfig -> Action m Cursor
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
 aggregateCursor aColl agg _ = do
     response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg, "cursor" =: ([] :: Document)]
