@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [Unreleased]
+
+## Fixed
+- Support for unix domain socket connection
+
 ## [2.5.0.0] - 2019-06-14
 
 ### Fixed
