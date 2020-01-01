@@ -8,7 +8,8 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 - MonadFail. It's a standard for newer versions of Haskell.
 
 ## Fixed
-- Support for unix domain socket connection
+- Support for unix domain socket connection,
+- Stubborn listener threads.
 
 ## [2.5.0.0] - 2019-06-14
 
