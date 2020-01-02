@@ -58,6 +58,8 @@ Library
                     , base64-bytestring >= 1.0.0.1
                     , nonce >= 1.0.5
                     , fail
+                    , dns
+                    , http-types
 
   if flag(_old-network)
      -- "Network.BSD" is only available in network < 2.9
@@ -128,7 +130,11 @@ Benchmark bench
                     , lifted-base >= 0.1.0.3
                     , transformers-base >= 0.4.1
                     , hashtables >= 1.1.2.0
+                    , fail
+                    , dns
+                    , http-types
                     , criterion
+                    , tls >= 1.3.0
 
   if flag(_old-network)
      -- "Network.BSD" is only available in network < 2.9

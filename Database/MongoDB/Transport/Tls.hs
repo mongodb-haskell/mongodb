@@ -34,8 +34,7 @@ import Control.Applicative ((<$>))
 import Control.Exception (bracketOnError)
 import Control.Monad (when, unless)
 import System.IO
-import Database.MongoDB (Pipe)
-import Database.MongoDB.Internal.Protocol (newPipeWith)
+import Database.MongoDB.Internal.Protocol (Pipe, newPipeWith)
 import Database.MongoDB.Transport (Transport(Transport))
 import qualified Database.MongoDB.Transport as T
 import System.IO.Error (mkIOError, eofErrorType)
