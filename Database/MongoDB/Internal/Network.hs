@@ -79,7 +79,7 @@ lookupSeedList :: N.HostName -> IO [Host]
 -- ^ Retrieves the replica set seed list from the SRV DNS record for the given hostname
 lookupSeedList hostname = do 
   rs <- makeResolvSeed defaultResolvConf
-  res <- withResolver rs $ \resolver -> lookupSRV resolver $ "_mongodb._tcp." ++ pack hostname
+  res <- withResolver rs $ \resolver -> lookupSRV resolver $ pack $ "_mongodb._tcp." ++ hostname
   case res of 
     Left _ -> pure []
     Right srv -> pure $ map (\(_, _, por, tar) -> 
