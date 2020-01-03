@@ -5,7 +5,8 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 ## [Unreleased]
 
 ## Added
-- MonadFail. It's a standard for newer versions of Haskell.
+- MonadFail. It's a standard for newer versions of Haskell,
+- Open replica sets over tls.
 
 ## Fixed
 - Support for unix domain socket connection,
