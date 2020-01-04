@@ -2,7 +2,7 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
-## [Unreleased]
+## [2.6.0.0] - 2020-01-03
 
 ## Added
 - MonadFail. It's a standard for newer versions of Haskell,
