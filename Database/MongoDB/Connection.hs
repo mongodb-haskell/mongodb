@@ -86,7 +86,7 @@ readHostPortM :: (MonadFail m) => String -> m Host
 -- ^ Read string \"hostname:port\" as @Host hosthame (PortNumber port)@ or \"hostname\" as @host hostname@ (default port). Fail if string does not match either syntax.
 -- TODO: handle Service port
 readHostPortM = either (fail . show) return . parse parser "readHostPort" where
-    hostname = many1 (letter <|> digit <|> char '-' <|> char '.')
+    hostname = many1 (letter <|> digit <|> char '-' <|> char '.' <|> char '_')
     parser = do
         spaces
         h <- hostname
