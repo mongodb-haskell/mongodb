@@ -1,5 +1,5 @@
 Name:           mongoDB
-Version:        2.6.0.1
+Version:        2.7.0.0
 Synopsis:       Driver (client) for MongoDB, a free, scalable, fast, document
                 DBMS
 Description:    This package lets you connect to MongoDB servers and
@@ -31,7 +31,7 @@ Library
   Build-depends:      array -any
                     , base <5
                     , binary -any
-                    , bson >= 0.3 && < 0.4
+                    , bson >= 0.3 && < 0.5
                     , text
                     , bytestring -any
                     , containers -any
@@ -114,7 +114,7 @@ Benchmark bench
                     , base64-bytestring
                     , base16-bytestring
                     , binary -any
-                    , bson >= 0.3 && < 0.4
+                    , bson >= 0.3 && < 0.5
                     , data-default-class -any
                     , text
                     , bytestring -any
