@@ -113,7 +113,7 @@ import Data.Maybe (fromMaybe)
 -- * Monad
 
 type Action = ReaderT MongoContext
--- ^ A monad on top of m (which must be a MonadIO) that may access the database and may fail with a DB 'Failure'.
+-- ^ A monad on top of m (which must be a MonadIO) that may access the database and may fail with a DB 'Failure'
 
 access :: (MonadIO m) => Pipe -> AccessMode -> Database -> Action m a -> m a
 -- ^ Run action against database on server at other end of pipe. Use access mode for any reads and writes.
@@ -198,12 +198,9 @@ writeMode (ConfirmWrites z) = Confirm z
 
 -- | Values needed when executing a db operation
 data MongoContext = MongoContext {
-    -- | operations read/write to this pipelined TCP connection to a MongoDB server
-    mongoPipe :: Pipe, 
-    -- | read/write operation will use this access mode
-    mongoAccessMode :: AccessMode, 
-    -- | operations query/update this database
-    mongoDatabase :: Database 
+    mongoPipe :: Pipe, -- ^ operations read/write to this pipelined TCP connection to a MongoDB server
+    mongoAccessMode :: AccessMode, -- ^ read/write operation will use this access mode
+    mongoDatabase :: Database -- ^ operations query/update this database
 }
 
 mongoReadMode :: MongoContext -> ReadMode
@@ -418,7 +415,7 @@ write notice = asks mongoWriteMode >>= \mode -> case mode of
 -- ** Insert
 
 insert :: (MonadIO m) => Collection -> Document -> Action m Value
--- ^ Insert document into collection and return its @_id@ value, which is created automatically if not supplied
+-- ^ Insert document into collection and return its \"_id\" value, which is created automatically if not supplied
 insert col doc = do
   doc' <- liftIO $ assignId doc
   res <- insertBlock [] col (0, [doc'])
@@ -427,11 +424,11 @@ insert col doc = do
     Right r -> return $ head r
 
 insert_ :: (MonadIO m) => Collection -> Document -> Action m ()
--- ^ Same as 'insert' except don't return @_id@
+-- ^ Same as 'insert' except don't return _id
 insert_ col doc = insert col doc >> return ()
 
 insertMany :: (MonadIO m) => Collection -> [Document] -> Action m [Value]
--- ^ Insert documents into collection and return their @_id@ values,
+-- ^ Insert documents into collection and return their \"_id\" values,
 -- which are created automatically if not supplied.
 -- If a document fails to be inserted (eg. due to duplicate key)
 -- then remaining docs are aborted, and @LastError@ is set.
@@ -439,18 +436,18 @@ insertMany :: (MonadIO m) => Collection -> [Document] -> Action m [Value]
 insertMany = insert' []
 
 insertMany_ :: (MonadIO m) => Collection -> [Document] -> Action m ()
--- ^ Same as 'insertMany' except don't return @_id@ values
+-- ^ Same as 'insertMany' except don't return _ids
 insertMany_ col docs = insertMany col docs >> return ()
 
 insertAll :: (MonadIO m) => Collection -> [Document] -> Action m [Value]
--- ^ Insert documents into collection and return their @_id@ values,
+-- ^ Insert documents into collection and return their \"_id\" values,
 -- which are created automatically if not supplied. If a document fails
 -- to be inserted (eg. due to duplicate key) then remaining docs
 -- are still inserted.
 insertAll = insert' [KeepGoing]
 
 insertAll_ :: (MonadIO m) => Collection -> [Document] -> Action m ()
--- ^ Same as 'insertAll' except don't return @_id@ values.
+-- ^ Same as 'insertAll' except don't return _ids
 insertAll_ col docs = insertAll col docs >> return ()
 
 insertCommandDocument :: [InsertOption] -> Collection -> [Document] -> Document -> Document
@@ -466,7 +463,7 @@ takeRightsUpToLeft l = E.rights $ takeWhile E.isRight l
 
 insert' :: (MonadIO m)
         => [InsertOption] -> Collection -> [Document] -> Action m [Value]
--- ^ Insert documents into collection and return their @_id@ values, which are created automatically if not supplied
+-- ^ Insert documents into collection and return their \"_id\" values, which are created automatically if not supplied
 insert' opts col docs = do
   p <- asks mongoPipe
   let sd = P.serverData p
@@ -581,7 +578,7 @@ sizeOfDocument :: Document -> Int
 sizeOfDocument d = fromIntegral $ LBS.length $ runPut $ putDocument d
 
 assignId :: Document -> IO Document
--- ^ Assign a unique value to @_id@ field if missing
+-- ^ Assign a unique value to _id field if missing
 assignId doc = if any (("_id" ==) . label) doc
     then return doc
     else (\oid -> ("_id" =: oid) : doc) `liftM` genObjectId
@@ -590,7 +587,7 @@ assignId doc = if any (("_id" ==) . label) doc
 
 save :: (MonadIO m)
      => Collection -> Document -> Action m ()
--- ^ Save document to collection, meaning insert it if its new (has no @_id@ field) or upsert it if its not new (has @_id@ field)
+-- ^ Save document to collection, meaning insert it if its new (has no \"_id\" field) or upsert it if its not new (has \"_id\" field)
 save col doc = case look "_id" doc of
     Nothing -> insert_ col doc
     Just i -> upsert (Select ["_id" := i] col) doc

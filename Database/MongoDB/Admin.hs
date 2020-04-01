@@ -1,4 +1,4 @@
--- | Database administrative functions.
+-- | Database administrative functions
 
 {-# LANGUAGE CPP, FlexibleContexts, OverloadedStrings, RecordWildCards #-}
 
@@ -72,7 +72,7 @@ createCollection :: (MonadIO m) => [CollectionOption] -> Collection -> Action m 
 createCollection opts col = runCommand $ ["create" =: col] ++ map coptElem opts
 
 renameCollection :: (MonadIO m) => Collection -> Collection -> Action m Document
--- ^ Rename first collection to second collection.
+-- ^ Rename first collection to second collection
 renameCollection from to = do
     db <- thisDatabase
     useDb admin $ runCommand ["renameCollection" =: db <.> from, "to" =: db <.> to, "dropTarget" =: True]
@@ -139,13 +139,13 @@ dropIndex coll idxName = do
     runCommand ["deleteIndexes" =: coll, "index" =: idxName]
 
 getIndexes :: MonadIO m => Collection -> Action m [Document]
--- ^ Get all indexes on this collection.
+-- ^ Get all indexes on this collection
 getIndexes coll = do
     db <- thisDatabase
     rest =<< find (select ["ns" =: db <.> coll] "system.indexes")
 
 dropIndexes :: (MonadIO m) => Collection -> Action m Document
--- ^ Drop all indexes on this collection.
+-- ^ Drop all indexes on this collection
 dropIndexes coll = do
     resetIndexCache
     runCommand ["deleteIndexes" =: coll, "index" =: ("*" :: Text)]
@@ -192,7 +192,7 @@ resetIndexCache = do
 -- ** User
 
 allUsers :: MonadIO m => Action m [Document]
--- ^ Fetch all users of this database.
+-- ^ Fetch all users of this database
 allUsers = map (exclude ["_id"]) `liftM` (rest =<< find
     (select [] "system.users") {sort = ["user" =: (1 :: Int)], project = ["user" =: (1 :: Int), "readOnly" =: (1 :: Int)]})
 
@@ -301,7 +301,7 @@ dbStats :: (MonadIO m) => Action m Document
 dbStats = runCommand ["dbstats" =: (1 :: Int)]
 
 currentOp :: (MonadIO m) => Action m (Maybe Document)
--- ^ See currently running operation on the database, if any.
+-- ^ See currently running operation on the database, if any
 currentOp = findOne (select [] "$cmd.sys.inprog")
 
 -- | An operation indentifier.

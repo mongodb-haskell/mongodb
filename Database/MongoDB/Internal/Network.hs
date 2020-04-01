@@ -28,7 +28,7 @@ import Network.DNS.Resolver (defaultResolvConf, makeResolvSeed, withResolver)
 import Network.HTTP.Types.URI (parseQueryText)
 
 
--- | Wraps network's 'PortNumber'.
+-- | Wraps network's 'PortNumber'
 -- Used to ease compatibility between older and newer network versions.
 data PortID = PortNumber N.PortNumber
 #if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)

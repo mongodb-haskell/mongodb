@@ -75,8 +75,7 @@ host :: HostName -> Host
 host hostname = Host hostname defaultPort
 
 showHostPort :: Host -> String
--- ^ Display host as \"host:port\".
-
+-- ^ Display host as \"host:port\"
 -- TODO: Distinguish Service port
 showHostPort (Host hostname (PortNumber port)) = hostname ++ ":" ++ show port
 #if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
