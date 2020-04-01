@@ -1055,7 +1055,7 @@ fetch q = findOne q >>= maybe (liftIO $ throwIO $ DocNotFound $ selection q) ret
 data FindAndModifyOpts
   = FamRemove Bool -- ^ remove the selected document when the boolean is @True@
   | FamUpdate
-    { famUpdate :: Document -- ^ update the the selected document
+    { famUpdate :: Document -- ^ the update instructions, or a replacement document
     , famNew :: Bool -- ^ return the document with the modifications made on the update
     , famUpsert :: Bool -- ^ create a new document if no documents match the query
     }
