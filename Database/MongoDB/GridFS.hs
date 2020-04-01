@@ -53,7 +53,7 @@ md5BlockSizeInBytes = 64
 
 
 data Bucket = Bucket {files :: Text, chunks :: Text}
--- ^ Files are stored in "buckets". You open a bucket with openDefaultBucket or openBucket
+-- ^ Files are stored in /buckets/. You open a bucket with 'openDefaultBucket' or 'openBucket'.
 
 openDefaultBucket :: (Monad m, MonadIO m) => Action m Bucket
 -- ^ Open the default 'Bucket' (named "fs")

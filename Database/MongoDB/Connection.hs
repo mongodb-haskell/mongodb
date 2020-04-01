@@ -75,7 +75,8 @@ host :: HostName -> Host
 host hostname = Host hostname defaultPort
 
 showHostPort :: Host -> String
--- ^ Display host as \"host:port\"
+-- ^ Display host as \"host:port\".
+
 -- TODO: Distinguish Service port
 showHostPort (Host hostname (PortNumber port)) = hostname ++ ":" ++ show port
 #if !defined(mingw32_HOST_OS) && !defined(cygwin32_HOST_OS) && !defined(_WIN32)
@@ -84,6 +85,7 @@ showHostPort (Host _        (UnixSocket path)) = "unix:" ++ path
 
 readHostPortM :: (MonadFail m) => String -> m Host
 -- ^ Read string \"hostname:port\" as @Host hosthame (PortNumber port)@ or \"hostname\" as @host hostname@ (default port). Fail if string does not match either syntax.
+
 -- TODO: handle Service port
 readHostPortM = either (fail . show) return . parse parser "readHostPort" where
     hostname = many1 (letter <|> digit <|> char '-' <|> char '.' <|> char '_')
@@ -109,16 +111,16 @@ readHostPort = fromJust . readHostPortM
 type Secs = Double
 
 globalConnectTimeout :: IORef Secs
--- ^ 'connect' (and 'openReplicaSet') fails if it can't connect within this many seconds (default is 6 seconds). Use 'connect\'' (and 'openReplicaSet\'') if you want to ignore this global and specify your own timeout. Note, this timeout only applies to initial connection establishment, not when reading/writing to the connection.
+-- ^ 'connect' (and 'openReplicaSet') fails if it can't connect within this many seconds (default is 6 seconds). Use 'connect'' (and 'openReplicaSet'') if you want to ignore this global and specify your own timeout. Note, this timeout only applies to initial connection establishment, not when reading/writing to the connection.
 globalConnectTimeout = unsafePerformIO (newIORef 6)
 {-# NOINLINE globalConnectTimeout #-}
 
 connect :: Host -> IO Pipe
--- ^ Connect to Host returning pipelined TCP connection. Throw IOError if connection refused or no response within 'globalConnectTimeout'.
+-- ^ Connect to Host returning pipelined TCP connection. Throw 'IOError' if connection refused or no response within 'globalConnectTimeout'.
 connect h = readIORef globalConnectTimeout >>= flip connect' h
 
 connect' :: Secs -> Host -> IO Pipe
--- ^ Connect to Host returning pipelined TCP connection. Throw IOError if connection refused or no response within given number of seconds.
+-- ^ Connect to Host returning pipelined TCP connection. Throw 'IOError' if connection refused or no response within given number of seconds.
 connect' timeoutSecs (Host hostname port) = do
     mh <- timeout (round $ timeoutSecs * 1000000) (connectTo hostname port)
     handle <- maybe (ioError $ userError "connect timed out") return mh
@@ -137,11 +139,11 @@ data TransportSecurity = Secure | Unsecure
 data ReplicaSet = ReplicaSet ReplicaSetName (MVar [(Host, Maybe Pipe)]) Secs TransportSecurity
 
 replSetName :: ReplicaSet -> Text
--- ^ name of connected replica set
+-- ^ Get the name of connected replica set.
 replSetName (ReplicaSet rsName _ _ _) = rsName
 
 openReplicaSet :: (ReplicaSetName, [Host]) -> IO ReplicaSet
--- ^ Open connections (on demand) to servers in replica set. Supplied hosts is seed list. At least one of them must be a live member of the named replica set, otherwise fail. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSet\'' instead.
+-- ^ Open connections (on demand) to servers in replica set. Supplied hosts is seed list. At least one of them must be a live member of the named replica set, otherwise fail. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSet'' instead.
 openReplicaSet rsSeed = readIORef globalConnectTimeout >>= flip openReplicaSet' rsSeed
 
 openReplicaSet' :: Secs -> (ReplicaSetName, [Host]) -> IO ReplicaSet
@@ -149,7 +151,7 @@ openReplicaSet' :: Secs -> (ReplicaSetName, [Host]) -> IO ReplicaSet
 openReplicaSet' timeoutSecs (rs, hosts) = _openReplicaSet timeoutSecs (rs, hosts, Unsecure)
 
 openReplicaSetTLS :: (ReplicaSetName, [Host]) -> IO ReplicaSet 
--- ^ Open secure connections (on demand) to servers in the replica set. Supplied hosts is seed list. At least one of them must be a live member of the named replica set, otherwise fail. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetTLS\'' instead.
+-- ^ Open secure connections (on demand) to servers in the replica set. Supplied hosts is seed list. At least one of them must be a live member of the named replica set, otherwise fail. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetTLS'' instead.
 openReplicaSetTLS  rsSeed = readIORef globalConnectTimeout >>= flip openReplicaSetTLS' rsSeed
 
 openReplicaSetTLS' :: Secs -> (ReplicaSetName, [Host]) -> IO ReplicaSet 
@@ -164,23 +166,23 @@ _openReplicaSet timeoutSecs (rsName, seedList, transportSecurity) = do
     return rs
 
 openReplicaSetSRV :: HostName -> IO ReplicaSet 
--- ^ Open non-secure connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetSRV\'\'\'' instead.
+-- ^ Open /non-secure/ connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetSRV''' instead.
 openReplicaSetSRV hostname = do 
     timeoutSecs <- readIORef globalConnectTimeout
     _openReplicaSetSRV timeoutSecs Unsecure hostname
 
 openReplicaSetSRV' :: HostName -> IO ReplicaSet 
--- ^ Open secure connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetSRV\'\'\'\'' instead.
+-- ^ Open /secure/ connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetSRV'''' instead.
 openReplicaSetSRV' hostname = do 
     timeoutSecs <- readIORef globalConnectTimeout
     _openReplicaSetSRV timeoutSecs Secure hostname
 
 openReplicaSetSRV'' :: Secs -> HostName -> IO ReplicaSet 
--- ^ Open non-secure connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. Supplied seconds timeout is used for connect attempts to members.
+-- ^ Open /non-secure/ connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. Supplied seconds timeout is used for connect attempts to members.
 openReplicaSetSRV'' timeoutSecs = _openReplicaSetSRV timeoutSecs Unsecure
 
 openReplicaSetSRV''' :: Secs -> HostName -> IO ReplicaSet 
--- ^ Open secure connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. Supplied seconds timeout is used for connect attempts to members.
+-- ^ Open /secure/ connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. Supplied seconds timeout is used for connect attempts to members.
 openReplicaSetSRV''' timeoutSecs = _openReplicaSetSRV timeoutSecs Secure
 
 _openReplicaSetSRV :: Secs -> TransportSecurity -> HostName -> IO ReplicaSet 

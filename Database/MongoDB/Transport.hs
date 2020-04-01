@@ -21,10 +21,8 @@ import qualified Data.ByteString as ByteString
 import System.IO
 
 -- | Abstract transport interface
---
--- `read` should return `ByteString.null` on EOF
 data Transport = Transport {
-    read  :: Int -> IO ByteString,
+    read  :: Int -> IO ByteString, -- ^ should return `ByteString.null` on @EOF@
     write :: ByteString -> IO (),
     flush :: IO (),
     close :: IO ()}
