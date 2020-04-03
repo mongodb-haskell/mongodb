@@ -895,25 +895,22 @@ delete' ordered col deleteDocs = do
                         NoConfirm -> ["w" =: (0 :: Int)]
                         Confirm params -> params
   let docSize = sizeOfDocument $ deleteCommandDocument col ordered [] writeConcern
-  let preChunks = splitAtLimit
+  let chunks = splitAtLimit
                       (maxBsonObjectSize sd - docSize)
                                            -- size of auxiliary part of delete
                                            -- document should be subtracted from
                                            -- the overall size
                       (maxWriteBatchSize sd)
                       deletes
-  let chunks =
-        if ordered
-            then takeRightsUpToLeft preChunks
-            else rights preChunks
   ctx <- ask
-  let lens = map length chunks
+  let lens = map (either (const 1) length) chunks
   let lSums = 0 : (zipWith (+) lSums lens)
-  blockResult <- liftIO $ interruptibleFor ordered (zip lSums chunks) $ \b -> do
-    dr <- runReaderT (deleteBlock ordered col b) ctx
-    return dr
-    `catch` \(e :: Failure) -> do
-      return $ WriteResult True 0 Nothing 0 [] [e] []
+  let failureResult e = return $ WriteResult True 0 Nothing 0 [] [e] []
+  let doChunk b = runReaderT (deleteBlock ordered col b) ctx `catch` failureResult
+  blockResult <- liftIO $ interruptibleFor ordered (zip lSums chunks) $ \(n, c) ->
+    case c of
+      Left e -> failureResult e
+      Right b -> doChunk (n, b)
   return $ foldl1' mergeWriteResults blockResult
 
 
