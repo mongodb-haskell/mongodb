@@ -198,7 +198,7 @@ allUsers = map (exclude ["_id"]) `liftM` (rest =<< find
 
 addUser :: (MonadIO m)
         => Bool -> Username -> Password -> Action m ()
--- ^ Add user with password with read-only access if the boolean argument is @True@, or read-write access if its is @False@
+-- ^ Add user with password with read-only access if the boolean argument is @True@, or read-write access if it's @False@
 addUser readOnly user pass = do
     mu <- findOne (select ["user" =: user] "system.users")
     let usr = merge ["readOnly" =: readOnly, "pwd" =: pwHash user pass] (maybe ["user" =: user] id mu)
