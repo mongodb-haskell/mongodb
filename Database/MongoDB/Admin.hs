@@ -78,7 +78,7 @@ renameCollection from to = do
     useDb admin $ runCommand ["renameCollection" =: db <.> from, "to" =: db <.> to, "dropTarget" =: True]
 
 dropCollection :: (MonadIO m, MonadFail m) => Collection -> Action m Bool
--- ^ Delete the given collection! Return True if collection existed (and was deleted); return False if collection did not exist (and no action).
+-- ^ Delete the given collection! Return @True@ if collection existed (and was deleted); return @False@ if collection did not exist (and no action).
 dropCollection coll = do
     resetIndexCache
     r <- runCommand ["drop" =: coll]
@@ -87,7 +87,7 @@ dropCollection coll = do
             fail $ "dropCollection failed: " ++ show r
 
 validateCollection :: (MonadIO m) => Collection -> Action m Document
--- ^ This operation takes a while
+-- ^ Validate the given collection, scanning the data and indexes for correctness. This operation takes a while.
 validateCollection coll = runCommand ["validate" =: coll]
 
 -- ** Index
@@ -112,7 +112,7 @@ idxDocument Index{..} db = [
     "dropDups" =: iDropDups ] ++ (maybeToList $ fmap ((=:) "expireAfterSeconds") iExpireAfterSeconds)
 
 index :: Collection -> Order -> Index
--- ^ Spec of index of ordered keys on collection. Name is generated from keys. Unique and dropDups are False.
+-- ^ Spec of index of ordered keys on collection. 'iName' is generated from keys. 'iUnique' and 'iDropDups' are @False@.
 index coll keys = Index coll keys (genName keys) False False Nothing
 
 genName :: Order -> IndexName
@@ -133,7 +133,7 @@ createIndex :: (MonadIO m) => Index -> Action m ()
 createIndex idx = insert_ "system.indexes" . idxDocument idx =<< thisDatabase
 
 dropIndex :: (MonadIO m) => Collection -> IndexName -> Action m Document
--- ^ Remove the index
+-- ^ Remove the index from the given collection.
 dropIndex coll idxName = do
     resetIndexCache
     runCommand ["deleteIndexes" =: coll, "index" =: idxName]
@@ -198,7 +198,7 @@ allUsers = map (exclude ["_id"]) `liftM` (rest =<< find
 
 addUser :: (MonadIO m)
         => Bool -> Username -> Password -> Action m ()
--- ^ Add user with password with read-only access if bool is True or read-write access if bool is False
+-- ^ Add user with password with read-only access if the boolean argument is @True@, or read-write access if it's @False@
 addUser readOnly user pass = do
     mu <- findOne (select ["user" =: user] "system.users")
     let usr = merge ["readOnly" =: readOnly, "pwd" =: pwHash user pass] (maybe ["user" =: user] id mu)
@@ -211,11 +211,11 @@ removeUser user = delete (select ["user" =: user] "system.users")
 -- ** Database
 
 admin :: Database
--- ^ \"admin\" database
+-- ^ The \"admin\" database, which stores user authorization and authentication data plus other system collections.
 admin = "admin"
 
 cloneDatabase :: (MonadIO m) => Database -> Host -> Action m Document
--- ^ Copy database from given host to the server I am connected to. Fails and returns @"ok" = 0@ if we don't have permission to read from given server (use copyDatabase in this case).
+-- ^ Copy database from given host to the server I am connected to. Fails and returns @"ok" = 0@ if we don't have permission to read from given server (use 'copyDatabase' in this case).
 cloneDatabase db fromHost = useDb db $ runCommand ["clone" =: showHostPort fromHost]
 
 copyDatabase :: (MonadIO m) => Database -> Host -> Maybe (Username, Password) -> Database -> Action m Document
@@ -239,9 +239,11 @@ repairDatabase db = useDb db $ runCommand ["repairDatabase" =: (1 :: Int)]
 -- ** Server
 
 serverBuildInfo :: (MonadIO m) => Action m Document
+-- ^ Return a document containing the parameters used to compile the server instance.
 serverBuildInfo = useDb admin $ runCommand ["buildinfo" =: (1 :: Int)]
 
 serverVersion :: (MonadIO m) => Action m Text
+-- ^ Return the version of the server instance.
 serverVersion = at "version" `liftM` serverBuildInfo
 
 -- * Diagnostics
@@ -249,15 +251,19 @@ serverVersion = at "version" `liftM` serverBuildInfo
 -- ** Collection
 
 collectionStats :: (MonadIO m) => Collection -> Action m Document
+-- ^ Return some storage statistics for the given collection.
 collectionStats coll = runCommand ["collstats" =: coll]
 
 dataSize :: (MonadIO m) => Collection -> Action m Int
+-- ^ Return the total uncompressed size (in bytes) in memory of all records in the given collection. Does not include indexes.
 dataSize c = at "size" `liftM` collectionStats c
 
 storageSize :: (MonadIO m) => Collection -> Action m Int
+-- ^ Return the total bytes allocated to the given collection. Does not include indexes.
 storageSize c = at "storageSize" `liftM` collectionStats c
 
 totalIndexSize :: (MonadIO m) => Collection -> Action m Int
+-- ^ The total size in bytes of all indexes in this collection.
 totalIndexSize c = at "totalIndexSize" `liftM` collectionStats c
 
 totalSize :: MonadIO m => Collection -> Action m Int
@@ -270,34 +276,45 @@ totalSize coll = do
 
 -- ** Profiling
 
-data ProfilingLevel = Off | Slow | All  deriving (Show, Enum, Eq)
+-- | The available profiler levels.
+data ProfilingLevel
+    = Off -- ^ No data collection.
+    | Slow -- ^ Data collected only for slow operations. The slow operation time threshold is 100ms by default, but can be changed using 'setProfilingLevel'.
+    | All -- ^ Data collected for all operations.
+    deriving (Show, Enum, Eq)
 
 getProfilingLevel :: (MonadIO m) => Action m ProfilingLevel
+-- ^ Get the profiler level.
 getProfilingLevel = (toEnum . at "was") `liftM` runCommand ["profile" =: (-1 :: Int)]
 
 type MilliSec = Int
 
 setProfilingLevel :: (MonadIO m) => ProfilingLevel -> Maybe MilliSec -> Action m ()
+-- ^ Set the profiler level, and optionally the slow operation time threshold (in milliseconds).
 setProfilingLevel p mSlowMs =
     runCommand (["profile" =: fromEnum p] ++ ("slowms" =? mSlowMs)) >> return ()
 
 -- ** Database
 
 dbStats :: (MonadIO m) => Action m Document
+-- ^ Return some storage statistics for the given database.
 dbStats = runCommand ["dbstats" =: (1 :: Int)]
 
 currentOp :: (MonadIO m) => Action m (Maybe Document)
 -- ^ See currently running operation on the database, if any
 currentOp = findOne (select [] "$cmd.sys.inprog")
 
+-- | An operation indentifier.
 type OpNum = Int
 
 killOp :: (MonadIO m) => OpNum -> Action m (Maybe Document)
+-- ^ Terminate the operation specified by the given 'OpNum'.
 killOp op = findOne (select ["op" =: op] "$cmd.sys.killop")
 
 -- ** Server
 
 serverStatus :: (MonadIO m) => Action m Document
+-- ^ Return a document with an overview of the state of the database.
 serverStatus = useDb admin $ runCommand ["serverStatus" =: (1 :: Int)]
 
 

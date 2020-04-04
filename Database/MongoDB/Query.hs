@@ -136,17 +136,17 @@ data Failure =
 instance Exception Failure
 
 type ErrorCode = Int
--- ^ Error code from getLastError or query failure
+-- ^ Error code from @getLastError@ or query failure.
 
--- | Type of reads and writes to perform
+-- | Type of reads and writes to perform.
 data AccessMode =
      ReadStaleOk  -- ^ Read-only action, reading stale data from a slave is OK.
     | UnconfirmedWrites  -- ^ Read-write action, slave not OK, every write is fire & forget.
-    | ConfirmWrites GetLastError  -- ^ Read-write action, slave not OK, every write is confirmed with getLastError.
+    | ConfirmWrites GetLastError  -- ^ Read-write action, slave not OK, every write is confirmed with @getLastError@.
     deriving Show
 
 type GetLastError = Document
--- ^ Parameters for getLastError command. For example @[\"w\" =: 2]@ tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See <http://www.mongodb.org/display/DOCS/Last+Error+Commands> for more options.
+-- ^ Parameters for @getLastError@ command. For example @[\"w\" =: 2]@ tells the server to wait for the write to reach at least two servers in replica set before acknowledging. See <http://www.mongodb.org/display/DOCS/Last+Error+Commands> for more options.
 
 class Result a where
   isFailed :: a -> Bool
@@ -200,7 +200,8 @@ writeMode (ConfirmWrites z) = Confirm z
 data MongoContext = MongoContext {
     mongoPipe :: Pipe, -- ^ operations read/write to this pipelined TCP connection to a MongoDB server
     mongoAccessMode :: AccessMode, -- ^ read/write operation will use this access mode
-    mongoDatabase :: Database } -- ^ operations query/update this database
+    mongoDatabase :: Database -- ^ operations query/update this database
+}
 
 mongoReadMode :: MongoContext -> ReadMode
 mongoReadMode = readMode . mongoAccessMode
@@ -430,7 +431,7 @@ insertMany :: (MonadIO m) => Collection -> [Document] -> Action m [Value]
 -- ^ Insert documents into collection and return their \"_id\" values,
 -- which are created automatically if not supplied.
 -- If a document fails to be inserted (eg. due to duplicate key)
--- then remaining docs are aborted, and LastError is set.
+-- then remaining docs are aborted, and @LastError@ is set.
 -- An exception will be throw if any error occurs.
 insertMany = insert' []
 
@@ -632,12 +633,12 @@ updateCommandDocument col ordered updates writeConcern =
   ]
 
 {-| Bulk update operation. If one update fails it will not update the remaining
- - documents. Current returned value is only a place holder. With mongodb server
- - before 2.6 it will send update requests one by one. In order to receive
- - error messages in versions under 2.6 you need to user confirmed writes.
- - Otherwise even if the errors had place the list of errors will be empty and
- - the result will be success.  After 2.6 it will use bulk update feature in
- - mongodb.
+    documents. Current returned value is only a place holder. With mongodb server
+    before 2.6 it will send update requests one by one. In order to receive
+    error messages in versions under 2.6 you need to user confirmed writes.
+    Otherwise even if the errors had place the list of errors will be empty and
+    the result will be success. After 2.6 it will use bulk update feature in
+    mongodb.
  -}
 updateMany :: (MonadIO m)
            => Collection
@@ -646,11 +647,11 @@ updateMany :: (MonadIO m)
 updateMany = update' True
 
 {-| Bulk update operation. If one update fails it will proceed with the
- - remaining documents. With mongodb server before 2.6 it will send update
- - requests one by one. In order to receive error messages in versions under
- - 2.6 you need to use confirmed writes.  Otherwise even if the errors had
- - place the list of errors will be empty and the result will be success.
- - After 2.6 it will use bulk update feature in mongodb.
+    remaining documents. With mongodb server before 2.6 it will send update
+    requests one by one. In order to receive error messages in versions under
+    2.6 you need to use confirmed writes.  Otherwise even if the errors had
+    place the list of errors will be empty and the result will be success.
+    After 2.6 it will use bulk update feature in mongodb.
  -}
 updateAll :: (MonadIO m)
            => Collection
@@ -846,9 +847,9 @@ deleteHelper opts (Select sel col) = do
     liftIO $ runReaderT (void $ write (Delete (db <.> col) opts sel)) ctx
 
 {-| Bulk delete operation. If one delete fails it will not delete the remaining
- - documents. Current returned value is only a place holder. With mongodb server
- - before 2.6 it will send delete requests one by one. After 2.6 it will use
- - bulk delete feature in mongodb.
+    documents. Current returned value is only a place holder. With mongodb server
+    before 2.6 it will send delete requests one by one. After 2.6 it will use
+    bulk delete feature in mongodb.
  -}
 deleteMany :: (MonadIO m)
            => Collection
@@ -857,9 +858,9 @@ deleteMany :: (MonadIO m)
 deleteMany = delete' True
 
 {-| Bulk delete operation. If one delete fails it will proceed with the
- - remaining documents. Current returned value is only a place holder. With
- - mongodb server before 2.6 it will send delete requests one by one. After 2.6
- - it will use bulk delete feature in mongodb.
+    remaining documents. Current returned value is only a place holder. With
+    mongodb server before 2.6 it will send delete requests one by one. After 2.6
+    it will use bulk delete feature in mongodb.
  -}
 deleteAll :: (MonadIO m)
           => Collection
@@ -998,15 +999,15 @@ readModeOption StaleOk = [SlaveOK]
 
 -- | Use 'select' to create a basic query with defaults, then modify if desired. For example, @(select sel col) {limit = 10}@
 data Query = Query {
-    options :: [QueryOption],  -- ^ Default = []
+    options :: [QueryOption],  -- ^ Default = @[]@
     selection :: Selection,
-    project :: Projector,  -- ^ \[\] = all fields. Default = []
+    project :: Projector,  -- ^ @[]@ = all fields. Default = @[]@
     skip :: Word32,  -- ^ Number of initial matching documents to skip. Default = 0
     limit :: Limit, -- ^ Maximum number of documents to return, 0 = no limit. Default = 0
-    sort :: Order,  -- ^ Sort results by this order, [] = no sort. Default = []
-    snapshot :: Bool,  -- ^ If true assures no duplicates are returned, or objects missed, which were present at both the start and end of the query's execution (even if the object were updated). If an object is new during the query, or deleted during the query, it may or may not be returned, even with snapshot mode. Note that short query responses (less than 1MB) are always effectively snapshotted. Default = False
+    sort :: Order,  -- ^ Sort results by this order, @[]@ = no sort. Default = @[]@
+    snapshot :: Bool,  -- ^ If true assures no duplicates are returned, or objects missed, which were present at both the start and end of the query's execution (even if the object were updated). If an object is new during the query, or deleted during the query, it may or may not be returned, even with snapshot mode. Note that short query responses (less than 1MB) are always effectively snapshotted. Default = @False@
     batchSize :: BatchSize,  -- ^ The number of document to return in each batch response from the server. 0 means use Mongo default. Default = 0
-    hint :: Order  -- ^ Force MongoDB to use this index, [] = no hint. Default = []
+    hint :: Order  -- ^ Force MongoDB to use this index, @[]@ = no hint. Default = @[]@
     } deriving (Show, Eq)
 
 type Projector = Document
@@ -1035,7 +1036,7 @@ find q@Query{selection, batchSize} = do
     newCursor db (coll selection) batchSize dBatch
 
 findOne :: (MonadIO m) => Query -> Action m (Maybe Document)
--- ^ Fetch first document satisfying query or Nothing if none satisfy it
+-- ^ Fetch first document satisfying query or @Nothing@ if none satisfy it
 findOne q = do
     pipe <- asks mongoPipe
     qr <- queryRequest False q {limit = 1}
@@ -1047,14 +1048,17 @@ fetch :: (MonadIO m) => Query -> Action m Document
 -- ^ Same as 'findOne' except throw 'DocNotFound' if none match
 fetch q = findOne q >>= maybe (liftIO $ throwIO $ DocNotFound $ selection q) return
 
-data FindAndModifyOpts = FamRemove Bool
-                       | FamUpdate
-                         { famUpdate :: Document
-                         , famNew :: Bool
-                         , famUpsert :: Bool
-                         }
-                       deriving Show
+-- | Options for @findAndModify@
+data FindAndModifyOpts
+  = FamRemove Bool -- ^ remove the selected document when the boolean is @True@
+  | FamUpdate
+    { famUpdate :: Document -- ^ the update instructions, or a replacement document
+    , famNew :: Bool -- ^ return the document with the modifications made on the update
+    , famUpsert :: Bool -- ^ create a new document if no documents match the query
+    }
+  deriving Show
 
+-- | Default options used by 'findAndModify'.
 defFamUpdateOpts :: Document -> FindAndModifyOpts
 defFamUpdateOpts ups = FamUpdate
                        { famNew = True
@@ -1062,10 +1066,10 @@ defFamUpdateOpts ups = FamUpdate
                        , famUpdate = ups
                        }
 
--- | runs the findAndModify command as an update without an upsert and new set to true.
--- Returns a single updated document (new option is set to true).
+-- | Run the @findAndModify@ command as an update without an upsert and new set to @True@.
+-- Return a single updated document (@new@ option is set to @True@).
 --
--- see 'findAndModifyOpts' if you want to use findAndModify in a differnt way
+-- See 'findAndModifyOpts' for more options.
 findAndModify :: (MonadIO m, MonadFail m)
               => Query
               -> Document -- ^ updates
@@ -1079,11 +1083,11 @@ findAndModify q ups = do
       Nothing  -> Left "findAndModify: impossible null result"
       Just doc -> Right doc
 
--- | runs the findAndModify command,
--- allows more options than 'findAndModify'
+-- | Run the @findAndModify@ command
+-- (allows more options than 'findAndModify')
 findAndModifyOpts :: (MonadIO m, MonadFail m)
                   => Query
-                  ->FindAndModifyOpts
+                  -> FindAndModifyOpts
                   -> Action m (Either String (Maybe Document))
 findAndModifyOpts (Query {
     selection = Select sel collection
@@ -1335,12 +1339,12 @@ data Group = Group {
     gKey :: GroupKey,  -- ^ Fields to group by
     gReduce :: Javascript,  -- ^ @(doc, agg) -> ()@. The reduce function reduces (aggregates) the objects iterated. Typical operations of a reduce function include summing and counting. It takes two arguments, the current document being iterated over and the aggregation value, and updates the aggregate value.
     gInitial :: Document,  -- ^ @agg@. Initial aggregation value supplied to reduce
-    gCond :: Selector,  -- ^ Condition that must be true for a row to be considered. [] means always true.
-    gFinalize :: Maybe Javascript  -- ^ @agg -> () | result@. An optional function to be run on each item in the result set just before the item is returned. Can either modify the item (e.g., add an average field given a count and a total) or return a replacement object (returning a new object with just _id and average fields).
+    gCond :: Selector,  -- ^ Condition that must be true for a row to be considered. @[]@ means always true.
+    gFinalize :: Maybe Javascript  -- ^ @agg -> () | result@. An optional function to be run on each item in the result set just before the item is returned. Can either modify the item (e.g., add an average field given a count and a total) or return a replacement object (returning a new object with just @_id@ and average fields).
     } deriving (Show, Eq)
 
 data GroupKey = Key [Label] | KeyF Javascript  deriving (Show, Eq)
--- ^ Fields to group by, or function (@doc -> key@) returning a "key object" to be used as the grouping key. Use KeyF instead of Key to specify a key that is not an existing member of the object (or, to access embedded members).
+-- ^ Fields to group by, or function (@doc -> key@) returning a "key object" to be used as the grouping key. Use 'KeyF' instead of 'Key' to specify a key that is not an existing member of the object (or, to access embedded members).
 
 groupDocument :: Group -> Document
 -- ^ Translate Group data into expected document form
@@ -1359,17 +1363,17 @@ group g = at "retval" `liftM` runCommand ["group" =: groupDocument g]
 -- ** MapReduce
 
 -- | Maps every document in collection to a list of (key, value) pairs, then for each unique key reduces all its associated values to a single result. There are additional parameters that may be set to tweak this basic operation.
--- This implements the latest version of map-reduce that requires MongoDB 1.7.4 or greater. To map-reduce against an older server use runCommand directly as described in http://www.mongodb.org/display/DOCS/MapReduce.
+-- This implements the latest version of map-reduce that requires MongoDB 1.7.4 or greater. To map-reduce against an older server use 'runCommand' directly as described in http://www.mongodb.org/display/DOCS/MapReduce.
 data MapReduce = MapReduce {
     rColl :: Collection,
     rMap :: MapFun,
     rReduce :: ReduceFun,
-    rSelect :: Selector,  -- ^ Operate on only those documents selected. Default is [] meaning all documents.
-    rSort :: Order,  -- ^ Default is [] meaning no sort
+    rSelect :: Selector,  -- ^ Operate on only those documents selected. Default is @[]@ meaning all documents.
+    rSort :: Order,  -- ^ Default is @[]@ meaning no sort
     rLimit :: Limit,  -- ^ Default is 0 meaning no limit
     rOut :: MROut,  -- ^ Output to a collection with a certain merge policy. Default is no collection ('Inline'). Note, you don't want this default if your result set is large.
     rFinalize :: Maybe FinalizeFun,  -- ^ Function to apply to all the results when finished. Default is Nothing.
-    rScope :: Document,  -- ^ Variables (environment) that can be accessed from map/reduce/finalize. Default is [].
+    rScope :: Document,  -- ^ Variables (environment) that can be accessed from map/reduce/finalize. Default is @[]@.
     rVerbose :: Bool  -- ^ Provide statistics on job execution time. Default is False.
     } deriving (Show, Eq)
 
