@@ -77,8 +77,8 @@ import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask, asks, local)
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.Binary.Put (runPut)
 import Data.Bson (Document, Field(..), Label, Val, Value(String, Doc, Bool),
-                  Javascript, at, valueAt, lookup, look, genObjectId, merge,
-                  (=:), (=?), (!?), Val(..), ObjectId, Value(..))
+                  Javascript, at, valueAt, lookup, look, genObjectId, (=:),
+                  (=?), (!?), Val(..), ObjectId, Value(..))
 import Data.Bson.Binary (putDocument)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -1038,19 +1038,21 @@ findCommand :: (MonadIO m, MonadFail m) => Query -> Action m Cursor
 findCommand Query{..} = do
     let aColl = coll selection
     response <- runCommand $
-        [ "find"        =: aColl
-        , "filter"      =: selector selection
-        , "sort"        =: sort
-        , "projection"  =: project
-        , "hint"        =: hint
-        , "skip"        =: toInt32 skip
-        ]
-        ++ mconcat -- optional fields
-             [ "batchSize" =? toMaybe (/= 0) toInt32 batchSize
-             , "limit"     =? toMaybe (/= 0) toInt32 limit
-             ]
+      [ "find"        =: aColl
+      , "filter"      =: selector selection
+      , "sort"        =: sort
+      , "projection"  =: project
+      , "hint"        =: hint
+      , "skip"        =: toInt32 skip
+      ]
+      ++ mconcat -- optional fields
+         [ "batchSize" =? toMaybe (/= 0) toInt32 batchSize
+         , "limit"     =? toMaybe (/= 0) toInt32 limit
+         ]
 
-    getCursorFromResponse aColl response FindFailure
+    getCursorFromResponse aColl response
+    >>= either (liftIO . throwIO . FindFailure) return
+
     where
       toInt32 :: Integral a => a -> Int32
       toInt32 = fromIntegral
@@ -1347,22 +1349,22 @@ aggregateCursor :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> Aggrega
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
 aggregateCursor aColl agg _ = do
     response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg, "cursor" =: ([] :: Document)]
-    getCursorFromResponse aColl response AggregateFailure
+    getCursorFromResponse aColl response
+    >>= either (liftIO . throwIO . AggregateFailure) return
 
 getCursorFromResponse
   :: (MonadIO m, MonadFail m)
   => Collection
   -> Document
-  -> (String -> Failure)
-  -> Action m Cursor
-getCursorFromResponse aColl response err
+  -> Action m (Either String Cursor)
+getCursorFromResponse aColl response
   | true1 "ok" response = do
       cursor     <- lookup "cursor" response
       firstBatch <- lookup "firstBatch" cursor
       cursorId   <- lookup "id" cursor
       db         <- thisDatabase
-      newCursor db aColl 0 (return $ Batch Nothing cursorId firstBatch)
-  | otherwise = liftIO . throwIO . err $ at "errmsg" response
+      Right <$> newCursor db aColl 0 (return $ Batch Nothing cursorId firstBatch)
+  | otherwise = return $ Left $ at "errmsg" response
 
 -- ** Group
 
