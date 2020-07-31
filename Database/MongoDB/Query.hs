@@ -1045,7 +1045,7 @@ findCommand Query{..} = do
       , "hint"        =: hint
       , "skip"        =: toInt32 skip
       ]
-      ++ mconcat -- optional fields
+      ++ mconcat -- optional fields. They should not be present if set to 0 and mongo will use defaults
          [ "batchSize" =? toMaybe (/= 0) toInt32 batchSize
          , "limit"     =? toMaybe (/= 0) toInt32 limit
          ]

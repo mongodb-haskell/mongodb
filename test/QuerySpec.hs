@@ -43,13 +43,20 @@ insertDuplicateWith testInsert = do
                               ]
   return ()
 
-insertUsers :: ActionWith () -> IO ()
-insertUsers doTest = do
-  db $ insertAll_ "users" [ ["_id" =: "jane", "joined" =: parseDate "2011-03-02", "likes" =: ["golf", "racquetball"]]
-                          , ["_id" =: "joe", "joined" =: parseDate "2012-07-02", "likes" =: ["tennis", "golf", "swimming"]]
-                          , ["_id" =: "jill", "joined" =: parseDate "2013-11-17", "likes" =: ["cricket", "golf"]]
-                          ]
-  doTest ()
+insertUsers :: IO ()
+insertUsers = db $
+  insertAll_ "users" [ ["_id" =: "jane", "joined" =: parseDate "2011-03-02", "likes" =: ["golf", "racquetball"]]
+                     , ["_id" =: "joe", "joined" =: parseDate "2012-07-02", "likes" =: ["tennis", "golf", "swimming"]]
+                     , ["_id" =: "jill", "joined" =: parseDate "2013-11-17", "likes" =: ["cricket", "golf"]]
+                     ]
+
+pendingIfMongoVersion :: ((Integer, Integer) -> Bool) -> SpecWith () -> Spec
+pendingIfMongoVersion invalidVersion = before $ do
+  version <- db $ extractVersion . T.splitOn "." . at "version" <$> runCommand1 "buildinfo"
+  when (invalidVersion version) $ pendingWith "This test does not run in the current database version"
+  where
+    extractVersion (major:minor:_) = (read $ T.unpack major, read $ T.unpack minor)
+    extractVersion _               = error "Invalid version specification"
 
 bigDocument :: Document
 bigDocument = (flip map) [1..10000] $ \i -> (fromString $ "team" ++ (show i)) =: ("team " ++ (show i) ++ " name")
@@ -436,31 +443,34 @@ spec = around withCleanDatabase $ do
       collections <- db $ allCollections
       liftIO $ (L.sort collections) `shouldContain` ["team1", "team2", "team3"]
 
-  describe "aggregate" $ around insertUsers $
+  describe "aggregate" $ before_ insertUsers $
     it "aggregates to normalize and sort documents" $ do
       result <- db $ aggregate "users" [ ["$project" =: ["name" =: ["$toUpper" =: "$_id"], "_id" =: 0]]
                                        , ["$sort" =: ["name" =: 1]]
                                        ]
       result `shouldBe` [["name" =: "JANE"], ["name" =: "JILL"], ["name" =: "JOE"]]
 
-  describe "findCommand" $ around insertUsers $ do
-    it "fetches all the records" $ do
-      result <- db $ rest =<< findCommand (select [] "users")
-      length result `shouldBe` 3
+  -- This feature was introduced in MongoDB version 3.2
+  -- https://docs.mongodb.com/manual/reference/command/find/
+  describe "findCommand" $ pendingIfMongoVersion (< (3,2)) $
+    context "when mongo version is 3.2 or superior" $ before insertUsers $ do
+      it "fetches all the records" $ do
+          result <- db $ rest =<< findCommand (select [] "users")
+          length result `shouldBe` 3
 
-    it "filters the records" $ do
-      result <- db $ rest =<< findCommand (select ["_id" =: "joe"] "users")
-      length result `shouldBe` 1
+      it "filters the records" $ do
+        result <- db $ rest =<< findCommand (select ["_id" =: "joe"] "users")
+        length result `shouldBe` 1
 
-    it "projects the records" $ do
-      result <- db $ rest =<< findCommand
-        (select [] "users") { project = [ "_id" =: 1 ] }
-      result `shouldBe` [["_id" =: "jane"], ["_id" =: "joe"], ["_id" =: "jill"]]
+      it "projects the records" $ do
+        result <- db $ rest =<< findCommand
+          (select [] "users") { project = [ "_id" =: 1 ] }
+        result `shouldBe` [["_id" =: "jane"], ["_id" =: "joe"], ["_id" =: "jill"]]
 
-    it "sorts the records" $ do
-      result <- db $ rest =<< findCommand
-        (select [] "users") { project = [ "_id" =: 1 ]
-                            , sort    = [ "_id" =: 1 ]
-                            }
-      result `shouldBe` [["_id" =: "jane"], ["_id" =: "jill"], ["_id" =: "joe"]]
+      it "sorts the records" $ do
+        result <- db $ rest =<< findCommand
+          (select [] "users") { project = [ "_id" =: 1 ]
+                              , sort    = [ "_id" =: 1 ]
+                              }
+        result `shouldBe` [["_id" =: "jane"], ["_id" =: "jill"], ["_id" =: "joe"]]
 
