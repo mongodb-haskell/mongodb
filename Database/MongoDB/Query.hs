@@ -130,7 +130,6 @@ data Failure =
     | WriteConcernFailure Int String  -- ^ Write concern error. It's reported only by insert, update, delete commands. Not by wire protocol.
     | DocNotFound Selection  -- ^ 'fetch' found no document matching selection
     | AggregateFailure String -- ^ 'aggregate' returned an error
-    | FindFailure String -- ^ 'find' returned an error
     | CompoundFailure [Failure] -- ^ When we need to aggregate several failures and report them.
     | ProtocolFailure Int String -- ^ The structure of the returned documents doesn't match what we expected
     deriving (Show, Eq, Typeable)
@@ -1051,7 +1050,7 @@ findCommand Query{..} = do
          ]
 
     getCursorFromResponse aColl response
-    >>= either (liftIO . throwIO . FindFailure) return
+      >>= either (liftIO . throwIO . QueryFailure (at "code" response)) return
 
     where
       toInt32 :: Integral a => a -> Int32
@@ -1350,7 +1349,7 @@ aggregateCursor :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> Aggrega
 aggregateCursor aColl agg _ = do
     response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg, "cursor" =: ([] :: Document)]
     getCursorFromResponse aColl response
-    >>= either (liftIO . throwIO . AggregateFailure) return
+      >>= either (liftIO . throwIO . AggregateFailure) return
 
 getCursorFromResponse
   :: (MonadIO m, MonadFail m)
