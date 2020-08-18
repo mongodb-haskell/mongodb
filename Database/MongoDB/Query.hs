@@ -29,7 +29,7 @@ module Database.MongoDB.Query (
     -- ** Query
     Query(..), QueryOption(NoCursorTimeout, TailableCursor, AwaitData, Partial),
     Projector, Limit, Order, BatchSize,
-    explain, find, findOne, fetch,
+    explain, find, findCommand, findOne, fetch,
     findAndModify, findAndModifyOpts, FindAndModifyOpts(..), defFamUpdateOpts,
     count, distinct,
     -- *** Cursor
@@ -1032,6 +1032,35 @@ find q@Query{selection, batchSize} = do
     dBatch <- liftIO $ request pipe [] qr
     newCursor db (coll selection) batchSize dBatch
 
+findCommand :: (MonadIO m, MonadFail m) => Query -> Action m Cursor
+-- ^ Fetch documents satisfying query using the command "find"
+findCommand Query{..} = do
+    let aColl = coll selection
+    response <- runCommand $
+      [ "find"        =: aColl
+      , "filter"      =: selector selection
+      , "sort"        =: sort
+      , "projection"  =: project
+      , "hint"        =: hint
+      , "skip"        =: toInt32 skip
+      ]
+      ++ mconcat -- optional fields. They should not be present if set to 0 and mongo will use defaults
+         [ "batchSize" =? toMaybe (/= 0) toInt32 batchSize
+         , "limit"     =? toMaybe (/= 0) toInt32 limit
+         ]
+
+    getCursorFromResponse aColl response
+      >>= either (liftIO . throwIO . QueryFailure (at "code" response)) return
+
+    where
+      toInt32 :: Integral a => a -> Int32
+      toInt32 = fromIntegral
+
+      toMaybe :: (a -> Bool) -> (a -> b) -> a -> Maybe b
+      toMaybe predicate f a
+        | predicate a = Just (f a)
+        | otherwise   = Nothing
+
 findOne :: (MonadIO m) => Query -> Action m (Maybe Document)
 -- ^ Fetch first document satisfying query or @Nothing@ if none satisfy it
 findOne q = do
@@ -1319,14 +1348,22 @@ aggregateCursor :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> Aggrega
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
 aggregateCursor aColl agg _ = do
     response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg, "cursor" =: ([] :: Document)]
-    case true1 "ok" response of
-        True  -> do
-          cursor :: Document <- lookup "cursor" response
-          firstBatch :: [Document] <- lookup "firstBatch" cursor
-          cursorId :: Int64 <- lookup "id" cursor
-          db <- thisDatabase
-          newCursor db aColl 0 $ return $ Batch Nothing cursorId  firstBatch
-        False -> liftIO $ throwIO $ AggregateFailure $ at "errmsg" response
+    getCursorFromResponse aColl response
+      >>= either (liftIO . throwIO . AggregateFailure) return
+
+getCursorFromResponse
+  :: (MonadIO m, MonadFail m)
+  => Collection
+  -> Document
+  -> Action m (Either String Cursor)
+getCursorFromResponse aColl response
+  | true1 "ok" response = do
+      cursor     <- lookup "cursor" response
+      firstBatch <- lookup "firstBatch" cursor
+      cursorId   <- lookup "id" cursor
+      db         <- thisDatabase
+      Right <$> newCursor db aColl 0 (return $ Batch Nothing cursorId firstBatch)
+  | otherwise = return $ Left $ at "errmsg" response
 
 -- ** Group
 
