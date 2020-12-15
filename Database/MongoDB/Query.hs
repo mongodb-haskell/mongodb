@@ -1338,16 +1338,28 @@ aggregate :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> Action m [Doc
 aggregate aColl agg = do
     aggregateCursor aColl agg def >>= rest
 
-data AggregateConfig = AggregateConfig {}
-                       deriving Show
+data AggregateConfig = AggregateConfig
+  { allowDiskUse :: Bool -- ^ Enable writing to temporary files (aggregations have a 100Mb RAM limit)
+  }
+  deriving Show
 
 instance Default AggregateConfig where
-  def = AggregateConfig {}
+  def = AggregateConfig
+    { allowDiskUse = False
+    }
+
+aggregateCommand :: Collection -> Pipeline -> AggregateConfig -> Document
+aggregateCommand aColl agg AggregateConfig {..} =
+  [ "aggregate" =: aColl
+  , "pipeline" =: agg
+  , "cursor" =: ([] :: Document)
+  , "allowDiskUse" =: allowDiskUse
+  ]
 
 aggregateCursor :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> AggregateConfig -> Action m Cursor
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
-aggregateCursor aColl agg _ = do
-    response <- runCommand ["aggregate" =: aColl, "pipeline" =: agg, "cursor" =: ([] :: Document)]
+aggregateCursor aColl agg cfg = do
+    response <- runCommand (aggregateCommand aColl agg cfg)
     getCursorFromResponse aColl response
       >>= either (liftIO . throwIO . AggregateFailure) return
 
