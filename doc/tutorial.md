@@ -12,9 +12,10 @@ Start a haskell session:
 	$ ghci
 	> :set prompt "> "
 
-Import the MongoDB driver library, and set OverloadedStrings so literal strings are converted to UTF-8 automatically.
+Import the MongoDB driver library, and set OverloadedStrings so literal strings are converted to UTF-8 automatically and ExtendedDefaultRules for using BSON fields with basic types.
 
 	> :set -XOverloadedStrings
+	> :set -XExtendedDefaultRules
 	> import Database.MongoDB
 
 ### Connecting
