@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ExtendedDefaultRules #-}
 
@@ -7,7 +8,12 @@ import Database.MongoDB    (Action, Document, Document, Value, access,
                             close, connect, delete, exclude, find,
                             host, insertMany, master, project, rest,
                             select, sort, (=:))
+
+#if (__GLASGOW_HASKELL__ >= 800)
+import Control.Monad.IO.Class (liftIO)
+#else
 import Control.Monad.Trans (liftIO)
+#endif
 
 main :: IO ()
 main = do
