@@ -1,6 +1,12 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
+
+## [Unreleased]
+
+### Added
+- Clarification to the tutorial
+
 ## [2.7.1.0] - 2020-08-17
 
 ### Added
