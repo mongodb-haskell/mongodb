@@ -2,7 +2,10 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
-## [Unreleased]
+## [2.7.1.1] - 2021-06-14
+
+### Fixed
+- Sample code
 
 ### Added
 - Clarification to the tutorial
