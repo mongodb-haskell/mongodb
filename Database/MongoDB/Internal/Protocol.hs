@@ -195,7 +195,8 @@ pcall p@Pipeline{..} message = do
 -- * Pipe
 
 type Pipe = Pipeline
--- ^ Thread-safe TCP connection with pipelined requests
+-- ^ Thread-safe TCP connection with pipelined requests. In long-running applications the user is expected to use it as a "client": create a `Pipe` 
+-- at startup, use it as long as possible, and close it on shutdown. Bearing in mind that disconnections may be triggered by MongoDB service providers, the user is responsible for re-creating their `Pipe` whenever necessary. 
 
 newPipe :: ServerData -> Handle -> IO Pipe
 -- ^ Create pipe over handle
