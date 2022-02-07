@@ -172,6 +172,14 @@ openReplicaSetSRV hostname = do
 
 openReplicaSetSRV' :: HostName -> IO ReplicaSet 
 -- ^ Open /secure/ connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetSRV'''' instead.
+--
+-- The preferred connection method for cloud MongoDB providers. A typical connecting sequence is shown in the example below.
+--
+-- ==== __Example__
+-- >   do
+-- >   pipe <- openReplicatSetSRV' "cluster#.xxxxx.yyyyy.zzz"
+-- >   is_auth <- access pipe master "admin" $ auth user_name password
+-- >   unless (not is_auth) (throwIO $ userError "Authentication failed!")
 openReplicaSetSRV' hostname = do 
     timeoutSecs <- readIORef globalConnectTimeout
     _openReplicaSetSRV timeoutSecs Secure hostname
