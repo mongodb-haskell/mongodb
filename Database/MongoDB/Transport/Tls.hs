@@ -28,12 +28,10 @@ module Database.MongoDB.Transport.Tls
 where
 
 import Data.IORef
-import Data.Monoid
-import Data.Maybe(fromMaybe)
+
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as Lazy.ByteString
 import Data.Default.Class (def)
-import Control.Applicative ((<$>))
 import Control.Exception (bracketOnError)
 import Control.Monad (when, unless)
 import System.IO
@@ -68,7 +66,6 @@ connectWithTlsParams clientParams host port = bracketOnError (connectTo host por
     p <- newPipeWith sd conn
     sd <- access p slaveOk "admin" retrieveServerData
   return p
-
 
 tlsConnection :: TLS.Context -> IO Transport
 tlsConnection ctx = do
