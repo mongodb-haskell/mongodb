@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 
 #if (__GLASGOW_HASKELL__ >= 706)
 {-# LANGUAGE RecursiveDo #-}
@@ -21,16 +20,17 @@ ATTENTION!!! Be aware that this module is highly experimental and is
 barely tested. The current implementation doesn't verify server's identity.
 It only allows you to connect to a mongodb server using TLS protocol.
 -}
+
 module Database.MongoDB.Transport.Tls
-(connect)
+( connect
+, connectWithTlsParams
+)
 where
 
 import Data.IORef
-import Data.Monoid
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as Lazy.ByteString
 import Data.Default.Class (def)
-import Control.Applicative ((<$>))
 import Control.Exception (bracketOnError)
 import Control.Monad (when, unless)
 import System.IO
@@ -45,15 +45,19 @@ import Database.MongoDB.Query (access, slaveOk, retrieveServerData)
 
 -- | Connect to mongodb using TLS
 connect :: HostName -> PortID -> IO Pipe
-connect host port = bracketOnError (connectTo host port) hClose $ \handle -> do
-
-  let params = (TLS.defaultParamsClient host "")
+connect host port = connectWithTlsParams params host port
+  where
+    params = (TLS.defaultParamsClient host "")
         { TLS.clientSupported = def
-            { TLS.supportedCiphers = TLS.ciphersuite_default}
+            { TLS.supportedCiphers = TLS.ciphersuite_default }
         , TLS.clientHooks = def
-            { TLS.onServerCertificate = \_ _ _ _ -> return []}
+            { TLS.onServerCertificate = \_ _ _ _ -> return [] }
         }
-  context <- TLS.contextNew handle params
+
+-- | Connect to mongodb using TLS using provided TLS client parameters
+connectWithTlsParams :: TLS.ClientParams -> HostName -> PortID -> IO Pipe
+connectWithTlsParams clientParams host port = bracketOnError (connectTo host port) hClose $ \handle -> do
+  context <- TLS.contextNew handle clientParams
   TLS.handshake context
 
   conn <- tlsConnection context

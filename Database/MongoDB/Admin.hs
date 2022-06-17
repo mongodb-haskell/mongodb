@@ -33,7 +33,6 @@ import Control.Applicative ((<$>))
 #endif
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, unless, liftM)
-import Control.Monad.Fail(MonadFail)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (maybeToList)
 import Data.Set (Set)

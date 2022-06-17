@@ -1,9 +1,8 @@
 -- | Compatibility layer for network package, including newtype 'PortID'
-{-# LANGUAGE CPP, GeneralizedNewtypeDeriving, OverloadedStrings #-}
+{-# LANGUAGE CPP, OverloadedStrings #-}
 
 module Database.MongoDB.Internal.Network (Host(..), PortID(..), N.HostName, connectTo, 
                                           lookupReplicaSetName, lookupSeedList) where
-
 
 #if !MIN_VERSION_network(2, 9, 0)
 
@@ -20,7 +19,7 @@ import System.IO (Handle, IOMode(ReadWriteMode))
 #endif
 
 import Data.ByteString.Char8 (pack, unpack)
-import Data.List (dropWhileEnd, lookup)
+import Data.List (dropWhileEnd)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Network.DNS.Lookup (lookupSRV, lookupTXT)
@@ -60,7 +59,7 @@ connectTo hostname (PortNumber port) = do
     proto <- BSD.getProtocolNumber "tcp"
     bracketOnError
         (N.socket N.AF_INET N.Stream proto)
-        (N.close)  -- only done if there's an error
+        N.close  -- only done if there's an error
         (\sock -> do
           he <- BSD.getHostByName hostname
           N.connect sock (N.SockAddrInet port (hostAddress he))
@@ -71,7 +70,7 @@ connectTo hostname (PortNumber port) = do
 connectTo _ (UnixSocket path) = do
     bracketOnError
         (N.socket N.AF_UNIX N.Stream 0)
-        (N.close)
+        N.close
         (\sock -> do
           N.connect sock (N.SockAddrUnix path)
           N.socketToHandle sock ReadWriteMode
