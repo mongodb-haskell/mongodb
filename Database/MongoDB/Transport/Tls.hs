@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 
 #if (__GLASGOW_HASKELL__ >= 706)
 {-# LANGUAGE RecursiveDo #-}
@@ -21,6 +20,7 @@ ATTENTION!!! Be aware that this module is highly experimental and is
 barely tested. The current implementation doesn't verify server's identity.
 It only allows you to connect to a mongodb server using TLS protocol.
 -}
+
 module Database.MongoDB.Transport.Tls
 ( connect
 , connectWithTlsParams
@@ -28,7 +28,6 @@ module Database.MongoDB.Transport.Tls
 where
 
 import Data.IORef
-
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as Lazy.ByteString
 import Data.Default.Class (def)

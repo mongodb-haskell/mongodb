@@ -17,8 +17,8 @@ module Database.MongoDB.Connection (
     Host(..), PortID(..), defaultPort, host, showHostPort, readHostPort,
     readHostPortM, globalConnectTimeout, connect, connect',
     -- * Replica Set
-    ReplicaSetName, openReplicaSet, openReplicaSet', openReplicaSetTLS, openReplicaSetTLS', 
-    openReplicaSetSRV, openReplicaSetSRV', openReplicaSetSRV'', openReplicaSetSRV''', 
+    ReplicaSetName, openReplicaSet, openReplicaSet', openReplicaSetTLS, openReplicaSetTLS',
+    openReplicaSetSRV, openReplicaSetSRV', openReplicaSetSRV'', openReplicaSetSRV''',
     ReplicaSet, primary, secondaryOk, routedHost, closeReplicaSet, replSetName
 ) where
 
@@ -32,7 +32,6 @@ import Control.Applicative ((<$>))
 #endif
 
 import Control.Monad (forM_, guard)
-import Control.Monad.Fail(MonadFail)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Timeout (timeout)
 import Text.ParserCombinators.Parsec (parse, many1, letter, digit, char, anyChar, eof,
@@ -40,7 +39,6 @@ import Text.ParserCombinators.Parsec (parse, many1, letter, digit, char, anyChar
 import qualified Data.List as List
 
 
-import Control.Monad.Identity (runIdentity)
 import Control.Monad.Except (throwError)
 import Control.Concurrent.MVar.Lifted (MVar, newMVar, withMVar, modifyMVar,
                                        readMVar)
@@ -149,28 +147,28 @@ openReplicaSet' :: Secs -> (ReplicaSetName, [Host]) -> IO ReplicaSet
 -- ^ Open connections (on demand) to servers in replica set. Supplied hosts is seed list. At least one of them must be a live member of the named replica set, otherwise fail. Supplied seconds timeout is used for connect attempts to members.
 openReplicaSet' timeoutSecs (rs, hosts) = _openReplicaSet timeoutSecs (rs, hosts, Unsecure)
 
-openReplicaSetTLS :: (ReplicaSetName, [Host]) -> IO ReplicaSet 
+openReplicaSetTLS :: (ReplicaSetName, [Host]) -> IO ReplicaSet
 -- ^ Open secure connections (on demand) to servers in the replica set. Supplied hosts is seed list. At least one of them must be a live member of the named replica set, otherwise fail. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetTLS'' instead.
 openReplicaSetTLS  rsSeed = readIORef globalConnectTimeout >>= flip openReplicaSetTLS' rsSeed
 
-openReplicaSetTLS' :: Secs -> (ReplicaSetName, [Host]) -> IO ReplicaSet 
+openReplicaSetTLS' :: Secs -> (ReplicaSetName, [Host]) -> IO ReplicaSet
 -- ^ Open secure connections (on demand) to servers in replica set. Supplied hosts is seed list. At least one of them must be a live member of the named replica set, otherwise fail. Supplied seconds timeout is used for connect attempts to members.
 openReplicaSetTLS' timeoutSecs (rs, hosts) = _openReplicaSet timeoutSecs (rs, hosts, Secure)
 
 _openReplicaSet :: Secs -> (ReplicaSetName, [Host], TransportSecurity) -> IO ReplicaSet
-_openReplicaSet timeoutSecs (rsName, seedList, transportSecurity) = do 
+_openReplicaSet timeoutSecs (rsName, seedList, transportSecurity) = do
     vMembers <- newMVar (map (, Nothing) seedList)
     let rs = ReplicaSet rsName vMembers timeoutSecs transportSecurity
     _ <- updateMembers rs
     return rs
 
-openReplicaSetSRV :: HostName -> IO ReplicaSet 
+openReplicaSetSRV :: HostName -> IO ReplicaSet
 -- ^ Open /non-secure/ connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetSRV''' instead.
-openReplicaSetSRV hostname = do 
+openReplicaSetSRV hostname = do
     timeoutSecs <- readIORef globalConnectTimeout
     _openReplicaSetSRV timeoutSecs Unsecure hostname
 
-openReplicaSetSRV' :: HostName -> IO ReplicaSet 
+openReplicaSetSRV' :: HostName -> IO ReplicaSet
 -- ^ Open /secure/ connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. The value of 'globalConnectTimeout' at the time of this call is the timeout used for future member connect attempts. To use your own value call 'openReplicaSetSRV'''' instead.
 --
 -- The preferred connection method for cloud MongoDB providers. A typical connecting sequence is shown in the example below.
@@ -180,27 +178,27 @@ openReplicaSetSRV' :: HostName -> IO ReplicaSet
 -- >   pipe <- openReplicatSetSRV' "cluster#.xxxxx.yyyyy.zzz"
 -- >   is_auth <- access pipe master "admin" $ auth user_name password
 -- >   unless (not is_auth) (throwIO $ userError "Authentication failed!")
-openReplicaSetSRV' hostname = do 
+openReplicaSetSRV' hostname = do
     timeoutSecs <- readIORef globalConnectTimeout
     _openReplicaSetSRV timeoutSecs Secure hostname
 
-openReplicaSetSRV'' :: Secs -> HostName -> IO ReplicaSet 
+openReplicaSetSRV'' :: Secs -> HostName -> IO ReplicaSet
 -- ^ Open /non-secure/ connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. Supplied seconds timeout is used for connect attempts to members.
 openReplicaSetSRV'' timeoutSecs = _openReplicaSetSRV timeoutSecs Unsecure
 
-openReplicaSetSRV''' :: Secs -> HostName -> IO ReplicaSet 
+openReplicaSetSRV''' :: Secs -> HostName -> IO ReplicaSet
 -- ^ Open /secure/ connections (on demand) to servers in a replica set. The seedlist and replica set name is fetched from the SRV and TXT DNS records for the given hostname. Supplied seconds timeout is used for connect attempts to members.
 openReplicaSetSRV''' timeoutSecs = _openReplicaSetSRV timeoutSecs Secure
 
-_openReplicaSetSRV :: Secs -> TransportSecurity -> HostName -> IO ReplicaSet 
-_openReplicaSetSRV timeoutSecs transportSecurity hostname = do 
-    replicaSetName <- lookupReplicaSetName hostname 
-    hosts <- lookupSeedList hostname 
-    case (replicaSetName, hosts) of 
+_openReplicaSetSRV :: Secs -> TransportSecurity -> HostName -> IO ReplicaSet
+_openReplicaSetSRV timeoutSecs transportSecurity hostname = do
+    replicaSetName <- lookupReplicaSetName hostname
+    hosts <- lookupSeedList hostname
+    case (replicaSetName, hosts) of
         (Nothing, _) -> throwError $ userError "Failed to lookup replica set name"
         (_, [])  -> throwError $ userError "Failed to lookup replica set seedlist"
-        (Just rsName, _) -> 
-            case transportSecurity of 
+        (Just rsName, _) ->
+            case transportSecurity of
                 Secure -> openReplicaSetTLS' timeoutSecs (rsName, hosts)
                 Unsecure -> openReplicaSet' timeoutSecs (rsName, hosts)
 
@@ -229,7 +227,7 @@ routedHost :: ((Host, Bool) -> (Host, Bool) -> IO Ordering) -> ReplicaSet -> IO 
 routedHost f rs = do
   info <- updateMembers rs
   hosts <- shuffle (possibleHosts info)
-  let addIsPrimary h = (h, if Just h == statedPrimary info then True else False)
+  let addIsPrimary h = (h, Just h == statedPrimary info)
   hosts' <- mergesortM (\a b -> f (addIsPrimary a) (addIsPrimary b)) hosts
   untilSuccess (connection rs Nothing) hosts'
 
@@ -275,8 +273,8 @@ connection (ReplicaSet _ vMembers timeoutSecs transportSecurity) mPipe host' =
  where
     conn =  modifyMVar vMembers $ \members -> do
         let (Host h p) = host'
-        let conn' = case transportSecurity of 
-                        Secure   -> TLS.connect h p 
+        let conn' = case transportSecurity of
+                        Secure   -> TLS.connect h p
                         Unsecure -> connect' timeoutSecs host'
         let new = conn' >>= \pipe -> return (updateAssocs host' (Just pipe) members, pipe)
         case List.lookup host' members of

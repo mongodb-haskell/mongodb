@@ -4,8 +4,8 @@
 -- This module is not intended for direct use. Use the high-level interface at
 -- "Database.MongoDB.Query" and "Database.MongoDB.Connection" instead.
 
-{-# LANGUAGE RecordWildCards, StandaloneDeriving, OverloadedStrings #-}
-{-# LANGUAGE CPP, FlexibleContexts, TupleSections, TypeSynonymInstances #-}
+{-# LANGUAGE RecordWildCards, OverloadedStrings #-}
+{-# LANGUAGE CPP, FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
 {-# LANGUAGE BangPatterns #-}
 
@@ -35,7 +35,7 @@ module Database.MongoDB.Internal.Protocol (
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<$>))
 #endif
-import Control.Monad (forM, replicateM, unless)
+import Control.Monad ( forM, replicateM, unless, forever )
 import Data.Binary.Get (Get, runGet)
 import Data.Binary.Put (Put, runPut)
 import Data.Bits (bit, testBit)
@@ -46,7 +46,6 @@ import System.IO.Error (doesNotExistErrorType, mkIOError)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Maybe (maybeToList)
 import GHC.Conc (ThreadStatus(..), threadStatus)
-import Control.Monad (forever)
 import Control.Monad.STM (atomically)
 import Control.Concurrent (ThreadId, killThread, forkIOWithUnmask)
 import Control.Concurrent.STM.TChan (TChan, newTChan, readTChan, writeTChan, isEmptyTChan)
@@ -70,6 +69,7 @@ import Database.MongoDB.Internal.Util (bitOr, byteStringHex)
 import Database.MongoDB.Transport (Transport)
 import qualified Database.MongoDB.Transport as Tr
 
+
 #if MIN_VERSION_base(4,6,0)
 import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
                                        putMVar, readMVar, mkWeakMVar, isEmptyMVar)
@@ -82,6 +82,7 @@ import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
 mkWeakMVar :: MVar a -> IO () -> IO ()
 mkWeakMVar = addMVarFinalizer
 #endif
+
 
 -- * Pipeline
 
@@ -270,6 +271,7 @@ type ResponseTo = RequestId
 
 genRequestId :: (MonadIO m) => m RequestId
 -- ^ Generate fresh request id
+{-# NOINLINE genRequestId #-}
 genRequestId = liftIO $ atomicModifyIORef counter $ \n -> (n + 1, n) where
     counter :: IORef RequestId
     counter = unsafePerformIO (newIORef 0)
