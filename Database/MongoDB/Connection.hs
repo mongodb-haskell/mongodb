@@ -177,7 +177,7 @@ openReplicaSetSRV' :: HostName -> IO ReplicaSet
 -- >   do
 -- >   pipe <- openReplicatSetSRV' "cluster#.xxxxx.yyyyy.zzz"
 -- >   is_auth <- access pipe master "admin" $ auth user_name password
--- >   unless (not is_auth) (throwIO $ userError "Authentication failed!")
+-- >   unless is_auth (throwIO $ userError "Authentication failed!")
 openReplicaSetSRV' hostname = do
     timeoutSecs <- readIORef globalConnectTimeout
     _openReplicaSetSRV timeoutSecs Secure hostname
