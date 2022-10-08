@@ -83,6 +83,8 @@ import Data.Bson
     (!?),
     (=:),
     (=?),
+    merge,
+    cast
   )
 import Data.Bson.Binary (putDocument)
 import qualified Data.ByteString as BS
@@ -97,7 +99,7 @@ import Data.Functor ((<&>))
 import Data.Int (Int32, Int64)
 import Data.List (foldl1')
 import qualified Data.Map as Map
-import Data.Maybe (catMaybes, fromMaybe, isNothing, listToMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isNothing, listToMaybe, mapMaybe, maybeToList, fromJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable (Typeable)
@@ -125,7 +127,9 @@ import Database.MongoDB.Internal.Protocol
     ServerData (..),
     UpdateOption (..),
     Username,
+    Cmd (..),
     pwKey,
+    FlagBit (..)
   )
 import qualified Database.MongoDB.Internal.Protocol as P
 import Database.MongoDB.Internal.Util (liftIOE, loop, true1, (<.>))
@@ -343,11 +347,13 @@ parseSCRAM :: B.ByteString -> Map.Map B.ByteString B.ByteString
 parseSCRAM = Map.fromList . fmap (cleanup . T.breakOn "=") . T.splitOn "," . T.pack . B.unpack
     where cleanup (t1, t2) = (B.pack $ T.unpack t1, B.pack . T.unpack $ T.drop 1 t2)
 
+-- As long as server api  is not requested OP_Query has to be used. See:
+-- https://github.com/mongodb/specifications/blob/6dc6f80026f0f8d99a8c81f996389534b14f6602/source/mongodb-handshake/handshake.rst#specification
 retrieveServerData :: (MonadIO m) => Action m ServerData
 retrieveServerData = do
   d <- runCommand1 "isMaster"
   let newSd = ServerData
-                { isMaster = fromMaybe False $ lookup "ismaster" d
+                { isMaster = fromMaybe False $ lookup "isMaster" d
                 , minWireVersion = fromMaybe 0 $ lookup "minWireVersion" d
                 , maxWireVersion = fromMaybe 0 $ lookup "maxWireVersion" d
                 , maxMessageSizeBytes = fromMaybe 48000000 $ lookup "maxMessageSizeBytes" d
@@ -371,19 +377,29 @@ allCollections = do
         db <- thisDatabase
         docs <- rest =<< find (query [] "system.namespaces") {sort = ["name" =: (1 :: Int)]}
         (return . filter (not . isSpecial db)) (map (dropDbPrefix . at "name") docs)
-      else do
-        r <- runCommand1 "listCollections"
-        let curData = do
-                   (Doc curDoc) <- r !? "cursor"
-                   (curId :: Int64) <- curDoc !? "id"
-                   (curNs :: Text) <- curDoc !? "ns"
-                   (firstBatch :: [Value]) <- curDoc !? "firstBatch"
-                   return (curId, curNs, mapMaybe cast' firstBatch :: [Document])
-        case curData of
-          Nothing -> return []
-          Just (curId, curNs, firstBatch) -> do
+      else
+        if maxWireVersion sd < 17
+          then do
+            r <- runCommand1 "listCollections"
+            let curData = do
+                       (Doc curDoc) <- r !? "cursor"
+                       (curId :: Int64) <- curDoc !? "id"
+                       (curNs :: Text) <- curDoc !? "ns"
+                       (firstBatch :: [Value]) <- curDoc !? "firstBatch"
+                       return (curId, curNs, mapMaybe cast' firstBatch :: [Document])
+            case curData of
+              Nothing -> return []
+              Just (curId, curNs, firstBatch) -> do
+                db <- thisDatabase
+                nc <- newCursor db curNs 0 $ return $ Batch Nothing curId firstBatch
+                docs <- rest nc
+                return $ mapMaybe (\d -> d !? "name") docs
+          else do
+            let q = Query [] (Select ["listCollections" =: (1 :: Int)] "$cmd") [] 0 0 [] False 0 []
+            qr <- queryRequestOpMsg False q
+            dBatch <- liftIO $ requestOpMsg p qr []
             db <- thisDatabase
-            nc <- newCursor db curNs 0 $ return $ Batch Nothing curId firstBatch
+            nc <- newCursor db "$cmd" 0 dBatch
             docs <- rest nc
             return $ mapMaybe (\d -> d !? "name") docs
  where
@@ -493,7 +509,7 @@ insert' opts col docs = do
   docs' <- liftIO $ mapM assignId docs
   mode <- asks mongoWriteMode
   let writeConcern = case mode of
-                        NoConfirm -> ["w" =: (0 :: Int)]
+                        NoConfirm -> ["w" =: (0 :: Int32)]
                         Confirm params -> params
   let docSize = sizeOfDocument $ insertCommandDocument opts col [] writeConcern
   let ordered = KeepGoing `notElem` opts
@@ -544,11 +560,40 @@ insertBlock opts col (prevCount, docs) = do
         case errorMessage of
           Just failure -> return $ Left failure
           Nothing -> return $ Right $ map (valueAt "_id") docs
+      else if maxWireVersion sd == 2 && maxWireVersion sd < 17 then do
+        mode <- asks mongoWriteMode
+        let writeConcern = case mode of
+                              NoConfirm -> ["w" =: (0 :: Int32)]
+                              Confirm params -> params
+        doc <- runCommand $ insertCommandDocument opts col docs writeConcern
+        case (look "writeErrors" doc, look "writeConcernError" doc) of
+          (Nothing, Nothing) -> return $ Right $ map (valueAt "_id") docs
+          (Just (Array errs), Nothing) -> do
+            let writeErrors = map (anyToWriteError prevCount) errs
+            let errorsWithFailureIndex = map (addFailureIndex prevCount) writeErrors
+            return $ Left $ CompoundFailure errorsWithFailureIndex
+          (Nothing, Just err) -> do
+            return $ Left $ WriteFailure
+                                    prevCount
+                                    (fromMaybe 0 $ lookup "ok" doc)
+                                    (show err)
+          (Just (Array errs), Just writeConcernErr) -> do
+            let writeErrors = map (anyToWriteError prevCount) errs
+            let errorsWithFailureIndex = map (addFailureIndex prevCount) writeErrors
+            return $ Left $ CompoundFailure $ WriteFailure
+                                    prevCount
+                                    (fromMaybe 0 $ lookup "ok" doc)
+                                    (show writeConcernErr) : errorsWithFailureIndex
+          (Just unknownValue, Nothing) -> do
+            return $ Left $ ProtocolFailure prevCount $ "Expected array of errors. Received: " ++ show unknownValue
+          (Just unknownValue, Just writeConcernErr) -> do
+            return $ Left $ CompoundFailure [ ProtocolFailure prevCount $ "Expected array of errors. Received: " ++ show unknownValue
+                                              , WriteFailure prevCount (fromMaybe 0 $ lookup "ok" doc) $ show writeConcernErr]
       else do
         mode <- asks mongoWriteMode
         let writeConcern = case mode of
-                              NoConfirm -> ["w" =: (0 :: Int)]
-                              Confirm params -> params
+                              NoConfirm -> ["w" =: (0 :: Int32)]
+                              Confirm params -> merge params ["w" =: (1 :: Int32)]
         doc <- runCommand $ insertCommandDocument opts col docs writeConcern
         case (look "writeErrors" doc, look "writeConcernError" doc) of
           (Nothing, Nothing) -> return $ Right $ map (valueAt "_id") docs
@@ -643,9 +688,20 @@ update :: (MonadIO m)
        => [UpdateOption] -> Selection -> Document -> Action m ()
 -- ^ Update first document in selection using updater document, unless 'MultiUpdate' option is supplied then update all documents in selection. If 'Upsert' option is supplied then treat updater as document and insert it if selection is empty.
 update opts (Select sel col) up = do
+    pipe <- asks mongoPipe
     db <- thisDatabase
-    ctx <- ask
-    liftIO $ runReaderT (void $ write (Update (db <.> col) opts sel up)) ctx
+    let sd = P.serverData pipe
+    if maxWireVersion sd < 17
+      then do
+        ctx <- ask
+        liftIO $ runReaderT (void $ write (Update (db <.> col) opts sel up)) ctx
+      else do
+        liftIOE ConnectionFailure $
+          P.sendOpMsg
+            pipe
+            [Nc (Update (db <.> col) opts sel up)]
+            (Just P.MoreToCome)
+            ["writeConcern" =: ["w" =: (0 :: Int32)]]
 
 updateCommandDocument :: Collection -> Bool -> [Document] -> Document -> Document
 updateCommandDocument col ordered updates writeConcern =
@@ -700,7 +756,7 @@ update' ordered col updateDocs = do
   ctx <- ask
   liftIO $ do
     let writeConcern = case mode of
-                          NoConfirm -> ["w" =: (0 :: Int)]
+                          NoConfirm -> ["w" =: (0 :: Int32)]
                           Confirm params -> params
     let docSize = sizeOfDocument $ updateCommandDocument
                                                       col
@@ -752,10 +808,10 @@ updateBlock ordered col (prevCount, docs) = do
   let sd = P.serverData p
   if maxWireVersion sd < 2
     then liftIO $ ioError $ userError "updateMany doesn't support mongodb older than 2.6"
-    else do
+    else if maxWireVersion sd == 2 && maxWireVersion sd < 17 then do
       mode <- asks mongoWriteMode
       let writeConcern = case mode of
-                          NoConfirm -> ["w" =: (0 :: Int)]
+                          NoConfirm -> ["w" =: (0 :: Int32)]
                           Confirm params -> params
       doc <- runCommand $ updateCommandDocument col ordered docs writeConcern
 
@@ -805,7 +861,59 @@ updateBlock ordered col (prevCount, docs) = do
       let upsertedList = maybe [] (map docToUpserted) (doc !? "upserted")
       let successResults = WriteResult False n (doc !? "nModified") 0 upsertedList [] []
       return $ foldl1' mergeWriteResults [writeErrorsResults, writeConcernResults, successResults]
+    else do
+      mode <- asks mongoWriteMode
+      let writeConcern = case mode of
+                          NoConfirm -> ["w" =: (0 :: Int32)]
+                          Confirm params -> merge params ["w" =: (1 :: Int32)]
+      doc <- runCommand $ updateCommandDocument col ordered docs writeConcern
 
+      let n = fromMaybe 0 $ doc !? "n"
+      let writeErrorsResults =
+            case look "writeErrors" doc of
+              Nothing -> WriteResult False 0 (Just 0) 0 [] [] []
+              Just (Array err) -> WriteResult True 0 (Just 0) 0 [] (map (anyToWriteError prevCount) err) []
+              Just unknownErr -> WriteResult
+                                      True
+                                      0
+                                      (Just 0)
+                                      0
+                                      []
+                                      [ ProtocolFailure
+                                            prevCount
+                                          $ "Expected array of error docs, but received: "
+                                              ++ show unknownErr]
+                                      []
+
+      let writeConcernResults =
+            case look "writeConcernError" doc of
+              Nothing ->  WriteResult False 0 (Just 0) 0 [] [] []
+              Just (Doc err) -> WriteResult
+                                    True
+                                    0
+                                    (Just 0)
+                                    0
+                                    []
+                                    []
+                                    [ WriteConcernFailure
+                                        (fromMaybe (-1) $ err !? "code")
+                                        (fromMaybe "" $ err !? "errmsg")
+                                    ]
+              Just unknownErr -> WriteResult
+                                      True
+                                      0
+                                      (Just 0)
+                                      0
+                                      []
+                                      []
+                                      [ ProtocolFailure
+                                            prevCount
+                                          $ "Expected doc in writeConcernError, but received: "
+                                              ++ show unknownErr]
+
+      let upsertedList = maybe [] (map docToUpserted) (doc !? "upserted")
+      let successResults = WriteResult False n (doc !? "nModified") 0 upsertedList [] []
+      return $ foldl1' mergeWriteResults [writeErrorsResults, writeConcernResults, successResults]
 
 interruptibleFor :: (Monad m, Result b) => Bool -> [a] -> (a -> m b) -> m [b]
 interruptibleFor ordered = go []
@@ -853,18 +961,41 @@ docToWriteError doc = WriteFailure ind code msg
 delete :: (MonadIO m)
        => Selection -> Action m ()
 -- ^ Delete all documents in selection
-delete = deleteHelper []
+delete s = do
+    pipe <- asks mongoPipe
+    let sd = P.serverData pipe
+    if maxWireVersion sd < 17
+      then deleteHelper [] s
+      else deleteMany (coll s) [([], [])] >> return ()
 
 deleteOne :: (MonadIO m)
           => Selection -> Action m ()
 -- ^ Delete first document in selection
-deleteOne = deleteHelper [SingleRemove]
+deleteOne sel@((Select sel' col)) = do
+    pipe <- asks mongoPipe
+    let sd = P.serverData pipe
+    if maxWireVersion sd < 17
+      then deleteHelper [SingleRemove] sel
+      else do
+        -- Starting with v6 confirming writes via getLastError as it is
+        -- performed in the deleteHelper call via its call to write is
+        -- deprecated. To confirm writes now an appropriate writeConcern has to be
+        -- set. These confirmations were discarded in deleteHelper anyway so no
+        -- need to dispatch on the writeConcern as it is currently done in deleteHelper
+        -- via write for older versions
+        db <- thisDatabase
+        liftIOE ConnectionFailure $
+          P.sendOpMsg
+            pipe
+            [Nc (Delete (db <.> col) [] sel')]
+            (Just P.MoreToCome)
+            ["writeConcern" =: ["w" =: (0 :: Int32)]]
 
 deleteHelper :: (MonadIO m)
              => [DeleteOption] -> Selection -> Action m ()
 deleteHelper opts (Select sel col) = do
-    db <- thisDatabase
     ctx <- ask
+    db <- thisDatabase
     liftIO $ runReaderT (void $ write (Delete (db <.> col) opts sel)) ctx
 
 {-| Bulk delete operation. If one delete fails it will not delete the remaining
@@ -914,7 +1045,7 @@ delete' ordered col deleteDocs = do
 
   mode <- asks mongoWriteMode
   let writeConcern = case mode of
-                        NoConfirm -> ["w" =: (0 :: Int)]
+                        NoConfirm -> ["w" =: (0 :: Int32)]
                         Confirm params -> params
   let docSize = sizeOfDocument $ deleteCommandDocument col ordered [] writeConcern
   let chunks = splitAtLimit
@@ -947,11 +1078,61 @@ deleteBlock ordered col (prevCount, docs) = do
   let sd = P.serverData p
   if maxWireVersion sd < 2
     then liftIO $ ioError $ userError "deleteMany doesn't support mongodb older than 2.6"
+    else if maxWireVersion sd == 2 && maxWireVersion sd < 17 then do
+      mode <- asks mongoWriteMode
+      let writeConcern = case mode of
+                          NoConfirm -> ["w" =: (0 :: Int32)]
+                          Confirm params -> params
+      doc <- runCommand $ deleteCommandDocument col ordered docs writeConcern
+      let n = fromMaybe 0 $ doc !? "n"
+
+      let successResults = WriteResult False 0 Nothing n [] [] []
+      let writeErrorsResults =
+            case look "writeErrors" doc of
+              Nothing ->  WriteResult False 0 Nothing 0 [] [] []
+              Just (Array err) -> WriteResult True 0 Nothing 0 [] (map (anyToWriteError prevCount) err) []
+              Just unknownErr -> WriteResult
+                                      True
+                                      0
+                                      Nothing
+                                      0
+                                      []
+                                      [ ProtocolFailure
+                                            prevCount
+                                          $ "Expected array of error docs, but received: "
+                                              ++ show unknownErr]
+                                      []
+      let writeConcernResults =
+            case look "writeConcernError" doc of
+              Nothing ->  WriteResult False 0 Nothing 0 [] [] []
+              Just (Doc err) -> WriteResult
+                                    True
+                                    0
+                                    Nothing
+                                    0
+                                    []
+                                    []
+                                    [ WriteConcernFailure
+                                        (fromMaybe (-1) $ err !? "code")
+                                        (fromMaybe "" $ err !? "errmsg")
+                                    ]
+              Just unknownErr -> WriteResult
+                                      True
+                                      0
+                                      Nothing
+                                      0
+                                      []
+                                      []
+                                      [ ProtocolFailure
+                                            prevCount
+                                          $ "Expected doc in writeConcernError, but received: "
+                                              ++ show unknownErr]
+      return $ foldl1' mergeWriteResults [successResults, writeErrorsResults, writeConcernResults]
     else do
       mode <- asks mongoWriteMode
       let writeConcern = case mode of
-                          NoConfirm -> ["w" =: (0 :: Int)]
-                          Confirm params -> params
+                          NoConfirm -> ["w" =: (0 :: Int32)]
+                          Confirm params -> merge params ["w" =: (1 :: Int32)]
       doc <- runCommand $ deleteCommandDocument col ordered docs writeConcern
       let n = fromMaybe 0 $ doc !? "n"
 
@@ -1040,6 +1221,37 @@ type Order = Document
 type BatchSize = Word32
 -- ^ The number of document to return in each batch response from the server. 0 means use Mongo default.
 
+-- noticeCommands and adminCommands are needed to identify whether
+-- queryRequestOpMsg is called via runCommand or not. If not it will
+-- behave like being called by a "find"-like command and add additional fields
+-- specific to the find command into the selector, such as "filter", "projection" etc.
+noticeCommands :: [Text]
+noticeCommands = [ "aggregate"
+                 , "count"
+                 , "delete"
+                 , "findAndModify"
+                 , "insert"
+                 , "listCollections"
+                 , "update"
+                 ]
+
+adminCommands :: [Text]
+adminCommands = [ "buildinfo"
+                , "clone"
+                , "collstats"
+                , "copydb"
+                , "copydbgetnonce"
+                , "create"
+                , "dbstats"
+                , "deleteIndexes"
+                , "drop"
+                , "dropDatabase"
+                , "renameCollection"
+                , "repairDatabase"
+                , "serverStatus"
+                , "validate"
+                ]
+
 query :: Selector -> Collection -> Query
 -- ^ Selects documents in collection that match selector. It uses no query options, projects all fields, does not skip any documents, does not limit result size, uses default batch size, does not sort, does not hint, and does not snapshot.
 query sel col = Query [] (Select sel col) [] 0 0 [] False 0 []
@@ -1047,32 +1259,49 @@ query sel col = Query [] (Select sel col) [] 0 0 [] False 0 []
 find :: MonadIO m => Query -> Action m Cursor
 -- ^ Fetch documents satisfying query
 find q@Query{selection, batchSize} = do
-    db <- thisDatabase
     pipe <- asks mongoPipe
-    qr <- queryRequest False q
-    dBatch <- liftIO $ request pipe [] qr
-    newCursor db (coll selection) batchSize dBatch
+    db <- thisDatabase
+    let sd = P.serverData pipe
+    if maxWireVersion sd < 17
+      then do
+        qr <- queryRequest False q
+        dBatch <- liftIO $ request pipe [] qr
+        newCursor db (coll selection) batchSize dBatch
+      else do
+        qr <- queryRequestOpMsg False q
+        let newQr =
+              case fst qr of
+                Req qry ->
+                  let coll = last $ T.splitOn "." (qFullCollection qry)
+                  in (Req $ qry {qSelector = merge (qSelector qry) [ "find" =: coll ]}, snd qr)
+                -- queryRequestOpMsg only returns Cmd types constructed via Req
+                _ -> error "impossible"
+        dBatch <- liftIO $ requestOpMsg pipe newQr []
+        newCursor db (coll selection) batchSize dBatch
 
 findCommand :: (MonadIO m, MonadFail m) => Query -> Action m Cursor
 -- ^ Fetch documents satisfying query using the command "find"
-findCommand Query{..} = do
-    let aColl = coll selection
-    response <- runCommand $
-      [ "find"        =: aColl
-      , "filter"      =: selector selection
-      , "sort"        =: sort
-      , "projection"  =: project
-      , "hint"        =: hint
-      , "skip"        =: toInt32 skip
-      ]
-      ++ mconcat -- optional fields. They should not be present if set to 0 and mongo will use defaults
-         [ "batchSize" =? toMaybe (/= 0) toInt32 batchSize
-         , "limit"     =? toMaybe (/= 0) toInt32 limit
-         ]
-
-    getCursorFromResponse aColl response
-      >>= either (liftIO . throwIO . QueryFailure (at "code" response)) return
-
+findCommand q@Query{..} = do
+    pipe <- asks mongoPipe
+    let sd = P.serverData pipe
+    if maxWireVersion sd < 17
+      then do
+        let aColl = coll selection
+        response <- runCommand $
+          [ "find"        =: aColl
+          , "filter"      =: selector selection
+          , "sort"        =: sort
+          , "projection"  =: project
+          , "hint"        =: hint
+          , "skip"        =: toInt32 skip
+          ]
+          ++ mconcat -- optional fields. They should not be present if set to 0 and mongo will use defaults
+             [ "batchSize" =? toMaybe (/= 0) toInt32 batchSize
+             , "limit"     =? toMaybe (/= 0) toInt32 limit
+             ]
+        getCursorFromResponse aColl response
+          >>= either (liftIO . throwIO . QueryFailure (at "code" response)) return
+      else find q
     where
       toInt32 :: Integral a => a -> Int32
       toInt32 = fromIntegral
@@ -1086,10 +1315,35 @@ findOne :: (MonadIO m) => Query -> Action m (Maybe Document)
 -- ^ Fetch first document satisfying query or @Nothing@ if none satisfy it
 findOne q = do
     pipe <- asks mongoPipe
-    qr <- queryRequest False q {limit = 1}
-    rq <- liftIO $ request pipe [] qr
-    Batch _ _ docs <- liftDB $ fulfill rq
-    return (listToMaybe docs)
+    let legacyQuery = do
+            qr <- queryRequest False q {limit = 1}
+            rq <- liftIO $ request pipe [] qr
+            Batch _ _ docs <- liftDB $ fulfill rq
+            return (listToMaybe docs)
+        isHandshake = (== ["isMaster" =: (1 :: Int32)])  $ selector $ selection q :: Bool
+    if isHandshake
+      then legacyQuery
+      else do
+        let sd = P.serverData pipe
+        if (maxWireVersion sd < 17)
+          then legacyQuery
+          else do
+            qr <- queryRequestOpMsg False q {limit = 1}
+            let newQr =
+                  case fst qr of
+                    Req qry ->
+                      let coll = last $ T.splitOn "." (qFullCollection qry)
+                          -- We have to understand whether findOne is called as
+                          -- command directly. This is necessary since findOne is used via
+                          -- runCommand as a vehicle to execute any type of commands and notices.
+                          labels = catMaybes $ map (\f -> look f $ qSelector qry) (noticeCommands ++ adminCommands) :: [Value]
+                      in if null labels
+                           then (Req $ qry {qSelector = merge (qSelector qry) [ "find" =: coll ]}, snd qr)
+                           else qr
+                    _ -> error "impossible"
+            rq <- liftIO $ requestOpMsg pipe newQr []
+            Batch _ _ docs <- liftDB $ fulfill rq
+            return (listToMaybe docs)
 
 fetch :: (MonadIO m) => Query -> Action m Document
 -- ^ Same as 'findOne' except throw 'DocNotFound' if none match
@@ -1194,7 +1448,7 @@ distinct :: (MonadIO m) => Label -> Selection -> Action m [Value]
 -- ^ Fetch distinct values of field in selected documents
 distinct k (Select sel col) = at "values" <$> runCommand ["distinct" =: col, "key" =: k, "query" =: sel]
 
-queryRequest :: (Monad m) => Bool -> Query -> Action m (Request, Maybe Limit)
+queryRequest :: (Monad m, MonadIO m) => Bool -> Query -> Action m (Request, Maybe Limit)
 -- ^ Translate Query to Protocol.Query. If first arg is true then add special $explain attribute.
 queryRequest isExplain Query{..} = do
     ctx <- ask
@@ -1212,6 +1466,33 @@ queryRequest isExplain Query{..} = do
         mExplain = if isExplain then Just ("$explain" =: True) else Nothing
         special = catMaybes [mOrder, mSnapshot, mHint, mExplain]
         qSelector = if null special then s else ("$query" =: s) : special where s = selector selection
+
+queryRequestOpMsg :: (Monad m, MonadIO m) => Bool -> Query -> Action m (Cmd, Maybe Limit)
+-- ^ Translate Query to Protocol.Query. If first arg is true then add special $explain attribute.
+queryRequestOpMsg isExplain Query{..} = do
+    ctx <- ask
+    return $ queryRequest' (mongoReadMode ctx) (mongoDatabase ctx)
+ where
+    queryRequest' rm db = (Req P.Query{..}, remainingLimit) where
+        qOptions = readModeOption rm ++ options
+        qFullCollection = db <.> coll selection
+        qSkip = fromIntegral skip
+        (qBatchSize, remainingLimit) = batchSizeRemainingLimit batchSize (if limit == 0 then Nothing else Just limit)
+        -- Check whether this query is not a command in disguise. If
+        -- isNotCommand is true, then we treat this as a find command and add
+        -- the relevant fields to the selector
+        isNotCommand = null $ catMaybes $ map (\l -> look l (selector selection)) (noticeCommands ++ adminCommands)
+        mOrder = if null sort then Nothing else Just ("sort" =: sort)
+        mSnapshot = if snapshot then Just ("snapshot" =: True) else Nothing
+        mHint = if null hint then Nothing else Just ("hint" =: hint)
+        mExplain = if isExplain then Just ("$explain" =: True) else Nothing
+        special = catMaybes [mOrder, mSnapshot, mHint, mExplain]
+        qProjector = if isNotCommand then ["projection" =: project] else project
+        qSelector = if isNotCommand then c else s
+          where s = selector selection
+                bSize = if qBatchSize == 0 then Nothing else Just ("batchSize" =: qBatchSize)
+                mLimit = if limit == 0 then Nothing else maybe Nothing (\rL -> Just ("limit" =: (fromIntegral rL :: Int32))) remainingLimit
+                c = ("filter" =: s) : special ++ maybeToList bSize ++ maybeToList mLimit
 
 batchSizeRemainingLimit :: BatchSize -> Maybe Limit -> (Int32, Maybe Limit)
 -- ^ Given batchSize and limit return P.qBatchSize and remaining limit
@@ -1238,6 +1519,14 @@ request pipe ns (req, remainingLimit) = do
     let protectedPromise = liftIOE ConnectionFailure promise
     return $ fromReply remainingLimit =<< protectedPromise
 
+requestOpMsg :: Pipe -> (Cmd, Maybe Limit) -> Document -> IO DelayedBatch
+-- ^ Send notices and request and return promised batch
+requestOpMsg pipe (Req r, remainingLimit) params = do
+  promise <- liftIOE ConnectionFailure $ P.callOpMsg pipe r Nothing params
+  let protectedPromise = liftIOE ConnectionFailure promise
+  return $ fromReply remainingLimit =<< protectedPromise
+requestOpMsg _ (Nc _, _) _ = error "requestOpMsg: Only messages of type Query are supported"
+
 fromReply :: Maybe Limit -> Reply -> DelayedBatch
 -- ^ Convert Reply to Batch or Failure
 fromReply limit Reply{..} = do
@@ -1249,6 +1538,23 @@ fromReply limit Reply{..} = do
         AwaitCapable -> return ()
         CursorNotFound -> throwIO $ CursorNotFoundFailure rCursorId
         QueryError -> throwIO $ QueryFailure (at "code" $ head rDocuments) (at "$err" $ head rDocuments)
+fromReply limit ReplyOpMsg{..} = do
+    let section = head sections
+        cur = maybe Nothing cast $ look "cursor" section
+    case cur of
+      Nothing -> return (Batch limit 0 sections)
+      Just doc ->
+          case look "firstBatch" doc of
+            Just ar -> do
+              let docs = fromJust $ cast ar
+                  id' = fromJust $ cast $ valueAt "id" doc
+              return (Batch limit id' docs)
+            -- A cursor without a firstBatch field, should be a reply to a
+            -- getMore query and thus have a nextBatch key
+            Nothing -> do
+              let docs = fromJust $ cast $ valueAt "nextBatch" doc
+                  id' = fromJust $ cast $ valueAt "id" doc
+              return (Batch limit id' docs)
 
 fulfill :: DelayedBatch -> Action IO Batch
 -- ^ Demand and wait for result, raise failure if exception
@@ -1297,7 +1603,10 @@ fulfill' fcol batchSize dBatch = do
 nextBatch' :: (MonadIO m) => FullCollection -> BatchSize -> Maybe Limit -> CursorId -> Action m DelayedBatch
 nextBatch' fcol batchSize limit cid = do
     pipe <- asks mongoPipe
-    liftIO $ request pipe [] (GetMore fcol batchSize' cid, remLimit)
+    let sd = P.serverData pipe
+    if maxWireVersion sd < 17
+      then liftIO $ request pipe [] (GetMore fcol batchSize' cid, remLimit)
+      else liftIO $ requestOpMsg pipe (Req $ GetMore fcol batchSize' cid, remLimit) []
     where (batchSize', remLimit) = batchSizeRemainingLimit batchSize limit
 
 next :: MonadIO m => Cursor -> Action m (Maybe Document)
@@ -1320,7 +1629,10 @@ next (Cursor fcol batchSize var) = liftDB $ modifyMVar var nextState where
                         else return $ return (Batch newLimit cid docs')
                     when (newLimit == Just 0) $ unless (cid == 0) $ do
                       pipe <- asks mongoPipe
-                      liftIOE ConnectionFailure $ P.send pipe [KillCursors [cid]]
+                      let sd = P.serverData pipe
+                      if maxWireVersion sd < 17
+                        then liftIOE ConnectionFailure $ P.send pipe [KillCursors [cid]]
+                        else liftIOE ConnectionFailure $ P.sendOpMsg pipe [Kc (P.KillC (KillCursors [cid]) fcol)] (Just MoreToCome) []
                     return (dBatch', Just doc)
                 [] -> if cid == 0
                     then return (return $ Batch (Just 0) 0 [], Nothing)  -- finished
@@ -1380,9 +1692,20 @@ aggregateCommand aColl agg AggregateConfig {..} =
 aggregateCursor :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> AggregateConfig -> Action m Cursor
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
 aggregateCursor aColl agg cfg = do
-    response <- runCommand (aggregateCommand aColl agg cfg)
-    getCursorFromResponse aColl response
-      >>= either (liftIO . throwIO . AggregateFailure) return
+    pipe <- asks mongoPipe
+    let sd = P.serverData pipe
+    if maxWireVersion sd < 17
+      then do
+        response <- runCommand (aggregateCommand aColl agg cfg)
+        getCursorFromResponse aColl response
+           >>= either (liftIO . throwIO . AggregateFailure) return
+      else do
+        let q = select (aggregateCommand aColl agg cfg) aColl
+        qr <- queryRequestOpMsg False q
+        dBatch <- liftIO $ requestOpMsg pipe qr []
+        db <- thisDatabase
+        Right <$> newCursor db aColl 0 dBatch
+           >>= either (liftIO . throwIO . AggregateFailure) return
 
 getCursorFromResponse
   :: (MonadIO m, MonadFail m)
@@ -1518,7 +1841,8 @@ type Command = Document
 
 runCommand :: (MonadIO m) => Command -> Action m Document
 -- ^ Run command against the database and return its result
-runCommand c = fromMaybe err <$> findOne (query c "$cmd") where
+runCommand c = do
+  fromMaybe err <$> findOne (query c "$cmd") where
     err = error $ "Nothing returned for command: " ++ show c
 
 runCommand1 :: (MonadIO m) => Text -> Action m Document
@@ -1527,7 +1851,12 @@ runCommand1 c = runCommand [c =: (1 :: Int)]
 
 eval :: (MonadIO m, Val v) => Javascript -> Action m v
 -- ^ Run code on server
-eval code = at "retval" <$> runCommand ["$eval" =: code]
+eval code = do
+    p <- asks mongoPipe
+    let sd = P.serverData p
+    if maxWireVersion sd <= 7
+      then at "retval" <$> runCommand ["$eval" =: code]
+      else error "The command db.eval() has been removed since MongoDB 4.2"
 
 modifyMVar :: MVar a -> (a -> Action IO (a, b)) -> Action IO b
 modifyMVar v f = do
