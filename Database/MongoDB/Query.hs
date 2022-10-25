@@ -1841,8 +1841,7 @@ type Command = Document
 
 runCommand :: (MonadIO m) => Command -> Action m Document
 -- ^ Run command against the database and return its result
-runCommand c = do
-  fromMaybe err <$> findOne (query c "$cmd") where
+runCommand c = fromMaybe err <$> findOne (query c "$cmd") where
     err = error $ "Nothing returned for command: " ++ show c
 
 runCommand1 :: (MonadIO m) => Text -> Action m Document

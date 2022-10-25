@@ -16,7 +16,6 @@
 #else
 {-# LANGUAGE DoRec #-}
 #endif
-{-# LANGUAGE UnicodeSyntax #-}
 
 module Database.MongoDB.Internal.Protocol (
     FullCollection,
@@ -184,12 +183,12 @@ psend :: Pipeline -> Message -> IO ()
 -- Throw IOError and close pipeline if send fails
 psend p@Pipeline{..} !message = withMVar vStream (flip writeMessage message) `onException` close p
 
-psendOpMsg :: Pipeline -> [Cmd] -> Maybe FlagBit → Document -> IO ()-- IO (IO Response)
+psendOpMsg :: Pipeline -> [Cmd] -> Maybe FlagBit -> Document -> IO ()-- IO (IO Response)
 psendOpMsg p@Pipeline{..} commands flagBit params =
   case flagBit of
     Just f -> case f of
-               MoreToCome -> withMVar vStream (\t → writeOpMsgMessage t (commands, Nothing) flagBit params) `onException` close p -- >> return (return (0, ReplyEmpty))
-               _ → error "moreToCome has to be set if no response is expected"
+               MoreToCome -> withMVar vStream (\t -> writeOpMsgMessage t (commands, Nothing) flagBit params) `onException` close p -- >> return (return (0, ReplyEmpty))
+               _ -> error "moreToCome has to be set if no response is expected"
     _ -> error "moreToCome has to be set if no response is expected"
 
 pcall :: Pipeline -> Message -> IO (IO Response)
@@ -207,7 +206,7 @@ pcall p@Pipeline{..} message = do
         liftIO $ atomically $ writeTChan responseQueue var
         return $ readMVar var >>= either throwIO return -- return promise
 
-pcallOpMsg :: Pipeline -> Maybe (Request, RequestId) -> Maybe FlagBit → Document → IO (IO Response)
+pcallOpMsg :: Pipeline -> Maybe (Request, RequestId) -> Maybe FlagBit -> Document -> IO (IO Response)
 -- ^ Send message to destination and return /promise/ of response from one message only. The destination must reply to the message (otherwise promises will have the wrong responses in them).
 -- Throw IOError and closes pipeline if send fails, likewise for promised response.
 pcallOpMsg p@Pipeline{..} message flagbit params = do
@@ -242,7 +241,7 @@ send :: Pipe -> [Notice] -> IO ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
 send pipe notices = psend pipe (notices, Nothing)
 
-sendOpMsg :: Pipe -> [Cmd] -> Maybe FlagBit → Document → IO ()
+sendOpMsg :: Pipe -> [Cmd] -> Maybe FlagBit -> Document -> IO ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
 sendOpMsg pipe commands@(Nc _ : _) flagBit params =  psendOpMsg pipe commands flagBit params
 sendOpMsg pipe commands@(Kc _ : _) flagBit params =  psendOpMsg pipe commands flagBit params
@@ -258,12 +257,12 @@ call pipe notices request = do
     check requestId (responseTo, reply) = if requestId == responseTo then reply else
         error $ "expected response id (" ++ show responseTo ++ ") to match request id (" ++ show requestId ++ ")"
 
-callOpMsg :: Pipe -> Request -> Maybe FlagBit → Document → IO (IO Reply)
+callOpMsg :: Pipe -> Request -> Maybe FlagBit -> Document -> IO (IO Reply)
 -- ^ Send requests as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call and resulting promise will throw IOError if connection fails.
 callOpMsg pipe request flagBit params = do
     requestId <- genRequestId
     promise <- pcallOpMsg pipe (Just (request, requestId)) flagBit params
-    promise' ← promise ∷ IO Response
+    promise' <- promise :: IO Response
     return $ snd <$> produce requestId promise'
  where
    -- We need to perform streaming here as within the OP_MSG protocol mongoDB expects
@@ -277,7 +276,7 @@ callOpMsg pipe request flagBit params = do
       case p of
         (_, r) ->
           case r of
-            ReplyOpMsg{..} → flagBits == [MoreToCome]
+            ReplyOpMsg{..} -> flagBits == [MoreToCome]
              -- This is called by functions using the OP_MSG protocol,
              -- so this has to be ReplyOpMsg
             _ -> error "Impossible"
@@ -285,7 +284,7 @@ callOpMsg pipe request flagBit params = do
       case p of
         (rt, r) ->
           case r of
-              ReplyOpMsg{..} →
+              ReplyOpMsg{..} ->
                 if flagBits == [MoreToCome]
                   then yieldResponses .| foldlC mergeResponses p
                   else return $ (rt, check reqId p)
@@ -294,27 +293,27 @@ callOpMsg pipe request flagBit params = do
           (do
              var <- newEmptyMVar
              liftIO $ atomically $ writeTChan (responseQueue pipe) var
-             readMVar var >>= either throwIO return ∷ IO Response
+             readMVar var >>= either throwIO return :: IO Response
           )
           checkFlagBit
     mergeResponses p@(rt,rep) p' =
       case (p, p') of
           ((_, r), (_, r')) ->
             case (r, r') of
-                (ReplyOpMsg _ sec _, ReplyOpMsg _ sec' _) → do
+                (ReplyOpMsg _ sec _, ReplyOpMsg _ sec' _) -> do
                     let (section, section') = (head sec, head sec')
                         (cur, cur') = (maybe Nothing cast $ look "cursor" section,
                                       maybe Nothing cast $ look "cursor" section')
                     case (cur, cur') of
-                      (Just doc, Just doc') → do
+                      (Just doc, Just doc') -> do
                         let (docs, docs') =
-                              ( fromJust $ cast $ valueAt "nextBatch" doc ∷ [Document]
-                              , fromJust $ cast $ valueAt "nextBatch" doc' ∷ [Document])
-                            id' = fromJust $ cast $ valueAt "id" doc' ∷ Int32
+                              ( fromJust $ cast $ valueAt "nextBatch" doc :: [Document]
+                              , fromJust $ cast $ valueAt "nextBatch" doc' :: [Document])
+                            id' = fromJust $ cast $ valueAt "id" doc' :: Int32
                         (rt, check id' (rt, rep{ sections = docs' ++ docs })) -- todo: avoid (++)
                         -- Since we use this to process moreToCome messages, we
                         -- know that there will be a nextBatch key in the document
-                      _ →  error "Impossible"
+                      _ ->  error "Impossible"
                 _ -> error "Impossible" -- see comment above
     check requestId (responseTo, reply) = if requestId == responseTo then reply else
         error $ "expected response id (" ++ show responseTo ++ ") to match request id (" ++ show requestId ++ ")"
@@ -345,7 +344,7 @@ writeMessage conn (notices, mRequest) = do
     lenBytes bytes = encodeSize . toEnum . fromEnum $ L.length bytes
     encodeSize = runPut . putInt32 . (+ 4)
 
-writeOpMsgMessage :: Transport -> OpMsgMessage -> Maybe FlagBit → Document → IO ()
+writeOpMsgMessage :: Transport -> OpMsgMessage -> Maybe FlagBit -> Document -> IO ()
 -- ^ Write message to connection
 writeOpMsgMessage conn (notices, mRequest) flagBit params = do
     noticeStrings <- forM notices $ \n -> do
@@ -485,7 +484,7 @@ putNotice notice requestId = do
             putInt32 $ toEnum (length kCursorIds)
             mapM_ putInt64 kCursorIds
 
-data KillC = KillC { killCursor ∷ Notice, kFullCollection ∷ FullCollection} deriving Show
+data KillC = KillC { killCursor :: Notice, kFullCollection:: FullCollection} deriving Show
 
 data Cmd = Nc Notice | Req Request | Kc KillC deriving Show
 
@@ -506,20 +505,20 @@ data FlagBit =
   + X Full command document {insert: "test", writeConcern: {...}}
   + Y command identifier ("documents", "deletes", "updates") ( + \0)
 -}
-putOpMsg :: Cmd -> RequestId -> Maybe FlagBit → Document → Put
+putOpMsg :: Cmd -> RequestId -> Maybe FlagBit -> Document -> Put
 putOpMsg cmd requestId flagBit params = do
-    let biT = maybe zeroBits (bit . bitOpMsg) flagBit ∷ Int32
+    let biT = maybe zeroBits (bit . bitOpMsg) flagBit:: Int32
     putOpMsgHeader opMsgOpcode requestId -- header
     case cmd of
-        Nc n → case n of
+        Nc n -> case n of
             Insert{..} -> do
                 let (sec0, sec1Size) =
                       prepSectionInfo
                           iFullCollection
-                          (Just (iDocuments ∷ [Document]))
-                          (Nothing ∷ Maybe Document)
-                          ("insert" ∷ Text)
-                          ("documents" ∷ Text)
+                          (Just (iDocuments:: [Document]))
+                          (Nothing:: Maybe Document)
+                          ("insert":: Text)
+                          ("documents":: Text)
                           params
                 putInt32 biT                         -- flagBit
                 putInt8 0                            -- payload type 0
@@ -533,10 +532,10 @@ putOpMsg cmd requestId flagBit params = do
                     (sec0, sec1Size) =
                       prepSectionInfo
                           uFullCollection
-                          (Nothing ∷ Maybe [Document])
+                          (Nothing:: Maybe [Document])
                           (Just doc)
-                          ("update" ∷ Text)
-                          ("updates" ∷ Text)
+                          ("update":: Text)
+                          ("updates":: Text)
                           params
                 putInt32 biT
                 putInt8 0
@@ -551,10 +550,10 @@ putOpMsg cmd requestId flagBit params = do
                     (sec0, sec1Size) =
                       prepSectionInfo
                           dFullCollection
-                          (Nothing ∷ Maybe [Document])
+                          (Nothing:: Maybe [Document])
                           (Just doc)
-                          ("delete" ∷ Text)
-                          ("deletes" ∷ Text)
+                          ("delete":: Text)
+                          ("deletes":: Text)
                           params
                 putInt32 biT
                 putInt8 0
@@ -563,8 +562,8 @@ putOpMsg cmd requestId flagBit params = do
                 putInt32 sec1Size
                 putCString "deletes"
                 putDocument doc
-            _ → error "The KillCursors command cannot be wrapped into a Nc type constructor. Please use the Kc type constructor"
-        Req r → case r of
+            _ -> error "The KillCursors command cannot be wrapped into a Nc type constructor. Please use the Kc type constructor"
+        Req r -> case r of
             Query{..} -> do
                 let n = T.splitOn "." qFullCollection
                     db = head n
@@ -579,27 +578,27 @@ putOpMsg cmd requestId flagBit params = do
                 putInt32 (bit $ bitOpMsg $ ExhaustAllowed)
                 putInt8 0
                 putDocument pre
-        Kc k → case k of
+        Kc k -> case k of
             KillC{..} -> do
                 let n = T.splitOn "." kFullCollection
                     (db, coll) = (head n, last n)
                 case killCursor of
-                  KillCursors{..} → do
+                  KillCursors{..} -> do
                       let doc = ["killCursors" =: coll, "cursors" =: kCursorIds, "$db" =: db]
                       putInt32 biT
                       putInt8 0
                       putDocument doc
                   -- Notices are already captured at the beginning, so all
                   -- other cases are impossible
-                  _ → error "impossible"
+                  _ -> error "impossible"
  where
-    lenBytes bytes = toEnum . fromEnum $ L.length bytes ∷ Int32
+    lenBytes bytes = toEnum . fromEnum $ L.length bytes:: Int32
     prepSectionInfo fullCollection documents document command identifier ps =
       let n = T.splitOn "." fullCollection
           (db, coll) = (head n, last n)
       in
       case documents of
-        Just ds →
+        Just ds ->
             let
                 sec0 = merge ps [command =: coll, "$db" =: db]
                 s = sum $ map (lenBytes . runPut . putDocument) ds
@@ -608,7 +607,7 @@ putOpMsg cmd requestId flagBit params = do
                 -- transported in addition to the type 1 section document
                 sec1Size = s + lenBytes i + 4
             in (sec0, sec1Size)
-        Nothing →
+        Nothing ->
             let
                 sec0 = merge ps [command =: coll, "$db" =: db]
                 s = runPut $ putDocument $ fromJust document
@@ -718,7 +717,7 @@ data Reply = Reply {
    | ReplyOpMsg {
         flagBits :: [FlagBit],
         sections :: [Document],
-        checksum ∷ Maybe Int32
+        checksum :: Maybe Int32
     }
     deriving (Show, Eq)
 
@@ -742,8 +741,8 @@ getReply = do
             -- Checksum bits that are set by the server don't seem to be supported by official drivers.
             -- See: https://github.com/mongodb/mongo-python-driver/blob/master/pymongo/message.py#L1423
             flagBits <-  rFlagsOpMsg <$> getInt32
-            _ ← getInt8
-            sec0 ← getDocument
+            _ <- getInt8
+            sec0 <- getDocument
             let sections = [sec0]
                 checksum = Nothing
             return (responseTo, ReplyOpMsg{..})
@@ -764,7 +763,7 @@ rFlagsOpMsg :: Int32 -> [FlagBit]
 rFlagsOpMsg bits = isValidFlag bits
   where isValidFlag bt =
           let setBits = map fst $ filter (\(_,b) -> b == True) $ zip ([0..31] :: [Int32]) $ map (testBit bt) [0 .. 31]
-          in if any (\n → not $ elem n [0,1,16]) setBits
+          in if any (\n -> not $ elem n [0,1,16]) setBits
                then error "Unsopported bit was set"
                else filter (testBit bt . bitOpMsg) [ChecksumPresent ..]
 
