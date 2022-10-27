@@ -20,31 +20,32 @@
 module Database.MongoDB.Internal.Protocol (
     FullCollection,
     -- * Pipe
-    Pipe, newPipe, newPipeWith, send, call,
+    Pipe,  newPipe, newPipeWith, send, sendOpMsg, call, callOpMsg,
     -- ** Notice
     Notice(..), InsertOption(..), UpdateOption(..), DeleteOption(..), CursorId,
     -- ** Request
-    Request(..), QueryOption(..),
+    Request(..), QueryOption(..), Cmd (..), KillC(..),
     -- ** Reply
-    Reply(..), ResponseFlag(..),
+    Reply(..), ResponseFlag(..), FlagBit(..),
     -- * Authentication
     Username, Password, Nonce, pwHash, pwKey,
-    isClosed, close, ServerData(..), Pipeline(..)
+    isClosed, close, ServerData(..), Pipeline(..), putOpMsg,
+    bitOpMsg
 ) where
 
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<$>))
 #endif
 import Control.Monad ( forM, replicateM, unless, forever )
-import Data.Binary.Get (Get, runGet)
-import Data.Binary.Put (Put, runPut)
-import Data.Bits (bit, testBit)
+import Data.Binary.Get (Get, runGet, getInt8)
+import Data.Binary.Put (Put, runPut, putInt8)
+import Data.Bits (bit, testBit, zeroBits)
 import Data.Int (Int32, Int64)
 import Data.IORef (IORef, newIORef, atomicModifyIORef)
 import System.IO (Handle)
 import System.IO.Error (doesNotExistErrorType, mkIOError)
 import System.IO.Unsafe (unsafePerformIO)
-import Data.Maybe (maybeToList)
+import Data.Maybe (maybeToList, fromJust)
 import GHC.Conc (ThreadStatus(..), threadStatus)
 import Control.Monad.STM (atomically)
 import Control.Concurrent (ThreadId, killThread, forkIOWithUnmask)
@@ -55,7 +56,7 @@ import Control.Exception.Lifted (SomeException, mask_, onException, throwIO, try
 import qualified Data.ByteString.Lazy as L
 
 import Control.Monad.Trans (MonadIO, liftIO)
-import Data.Bson (Document)
+import Data.Bson (Document, (=:), merge, cast, valueAt, look)
 import Data.Bson.Binary (getDocument, putDocument, getInt32, putInt32, getInt64,
                          putInt64, putCString)
 import Data.Text (Text)
@@ -73,6 +74,8 @@ import qualified Database.MongoDB.Transport as Tr
 #if MIN_VERSION_base(4,6,0)
 import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
                                        putMVar, readMVar, mkWeakMVar, isEmptyMVar)
+import GHC.List (foldl1')
+import Conduit (repeatWhileMC, (.|), runConduit, foldlC)
 #else
 import Control.Concurrent.MVar.Lifted (MVar, newEmptyMVar, newMVar, withMVar,
                                          putMVar, readMVar, addMVarFinalizer)
@@ -89,7 +92,7 @@ mkWeakMVar = addMVarFinalizer
 -- | Thread-safe and pipelined connection
 data Pipeline = Pipeline
     { vStream :: MVar Transport -- ^ Mutex on handle, so only one thread at a time can write to it
-    , responseQueue :: TChan (MVar (Either IOError Response)) -- ^ Queue of threads waiting for responses. Every time a response arrive we pop the next thread and give it the response.
+    , responseQueue :: TChan (MVar (Either IOError Response)) -- ^ Queue of threads waiting for responses. Every time a response arrives we pop the next thread and give it the response.
     , listenThread :: ThreadId
     , finished :: MVar ()
     , serverData :: ServerData
@@ -103,6 +106,7 @@ data ServerData = ServerData
                 , maxBsonObjectSize   :: Int
                 , maxWriteBatchSize   :: Int
                 }
+                deriving Show
 
 -- | @'forkUnmaskedFinally' action and_then@ behaves the same as @'forkFinally' action and_then@, except that @action@ is run completely unmasked, whereas with 'forkFinally', @action@ is run with the same mask as the parent thread.
 forkUnmaskedFinally :: IO a -> (Either SomeException a -> IO ()) -> IO ThreadId
@@ -159,6 +163,7 @@ isClosed Pipeline{listenThread} = do
         ThreadFinished -> True
         ThreadBlocked _ -> False
         ThreadDied -> True
+
 --isPipeClosed Pipeline{..} = isClosed =<< readMVar vHandle  -- isClosed hangs while listen loop is waiting on read
 
 listen :: Pipeline -> IO ()
@@ -178,6 +183,14 @@ psend :: Pipeline -> Message -> IO ()
 -- Throw IOError and close pipeline if send fails
 psend p@Pipeline{..} !message = withMVar vStream (flip writeMessage message) `onException` close p
 
+psendOpMsg :: Pipeline -> [Cmd] -> Maybe FlagBit -> Document -> IO ()-- IO (IO Response)
+psendOpMsg p@Pipeline{..} commands flagBit params =
+  case flagBit of
+    Just f -> case f of
+               MoreToCome -> withMVar vStream (\t -> writeOpMsgMessage t (commands, Nothing) flagBit params) `onException` close p -- >> return (return (0, ReplyEmpty))
+               _ -> error "moreToCome has to be set if no response is expected"
+    _ -> error "moreToCome has to be set if no response is expected"
+
 pcall :: Pipeline -> Message -> IO (IO Response)
 -- ^ Send message to destination and return /promise/ of response from one message only. The destination must reply to the message (otherwise promises will have the wrong responses in them).
 -- Throw IOError and closes pipeline if send fails, likewise for promised response.
@@ -193,11 +206,28 @@ pcall p@Pipeline{..} message = do
         liftIO $ atomically $ writeTChan responseQueue var
         return $ readMVar var >>= either throwIO return -- return promise
 
+pcallOpMsg :: Pipeline -> Maybe (Request, RequestId) -> Maybe FlagBit -> Document -> IO (IO Response)
+-- ^ Send message to destination and return /promise/ of response from one message only. The destination must reply to the message (otherwise promises will have the wrong responses in them).
+-- Throw IOError and closes pipeline if send fails, likewise for promised response.
+pcallOpMsg p@Pipeline{..} message flagbit params = do
+  listenerStopped <- isFinished p
+  if listenerStopped
+    then ioError $ mkIOError doesNotExistErrorType "Handle has been closed" Nothing Nothing
+    else withMVar vStream doCall `onException` close p
+  where
+    doCall stream = do
+        writeOpMsgMessage stream ([], message) flagbit params
+        var <- newEmptyMVar
+        -- put var into the response-queue so that it can
+        -- fetch the latest response
+        liftIO $ atomically $ writeTChan responseQueue var
+        return $ readMVar var >>= either throwIO return -- return promise
+
 -- * Pipe
 
 type Pipe = Pipeline
--- ^ Thread-safe TCP connection with pipelined requests. In long-running applications the user is expected to use it as a "client": create a `Pipe` 
--- at startup, use it as long as possible, watch out for possible timeouts, and close it on shutdown. Bearing in mind that disconnections may be triggered by MongoDB service providers, the user is responsible for re-creating their `Pipe` whenever necessary. 
+-- ^ Thread-safe TCP connection with pipelined requests. In long-running applications the user is expected to use it as a "client": create a `Pipe`
+-- at startup, use it as long as possible, watch out for possible timeouts, and close it on shutdown. Bearing in mind that disconnections may be triggered by MongoDB service providers, the user is responsible for re-creating their `Pipe` whenever necessary.
 
 newPipe :: ServerData -> Handle -> IO Pipe
 -- ^ Create pipe over handle
@@ -211,6 +241,12 @@ send :: Pipe -> [Notice] -> IO ()
 -- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
 send pipe notices = psend pipe (notices, Nothing)
 
+sendOpMsg :: Pipe -> [Cmd] -> Maybe FlagBit -> Document -> IO ()
+-- ^ Send notices as a contiguous batch to server with no reply. Throw IOError if connection fails.
+sendOpMsg pipe commands@(Nc _ : _) flagBit params =  psendOpMsg pipe commands flagBit params
+sendOpMsg pipe commands@(Kc _ : _) flagBit params =  psendOpMsg pipe commands flagBit params
+sendOpMsg _ _ _ _ =  error "This function only supports Cmd types wrapped in Nc or Kc type constructors"
+
 call :: Pipe -> [Notice] -> Request -> IO (IO Reply)
 -- ^ Send notices and request as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call and resulting promise will throw IOError if connection fails.
 call pipe notices request = do
@@ -221,11 +257,73 @@ call pipe notices request = do
     check requestId (responseTo, reply) = if requestId == responseTo then reply else
         error $ "expected response id (" ++ show responseTo ++ ") to match request id (" ++ show requestId ++ ")"
 
+callOpMsg :: Pipe -> Request -> Maybe FlagBit -> Document -> IO (IO Reply)
+-- ^ Send requests as a contiguous batch to server and return reply promise, which will block when invoked until reply arrives. This call and resulting promise will throw IOError if connection fails.
+callOpMsg pipe request flagBit params = do
+    requestId <- genRequestId
+    promise <- pcallOpMsg pipe (Just (request, requestId)) flagBit params
+    promise' <- promise :: IO Response
+    return $ snd <$> produce requestId promise'
+ where
+   -- We need to perform streaming here as within the OP_MSG protocol mongoDB expects
+   -- our client to keep receiving messages after the MoreToCome flagbit was
+   -- set by the server until our client receives an empty flagbit. After the
+   -- first MoreToCome flagbit was set the responseTo field in the following
+   -- headers will reference the cursorId that was set in the previous message.
+   -- see:
+   -- https://github.com/mongodb/specifications/blob/master/source/message/OP_MSG.rst#moretocome-on-responses
+    checkFlagBit p =
+      case p of
+        (_, r) ->
+          case r of
+            ReplyOpMsg{..} -> flagBits == [MoreToCome]
+             -- This is called by functions using the OP_MSG protocol,
+             -- so this has to be ReplyOpMsg
+            _ -> error "Impossible"
+    produce reqId p = runConduit $
+      case p of
+        (rt, r) ->
+          case r of
+              ReplyOpMsg{..} ->
+                if flagBits == [MoreToCome]
+                  then yieldResponses .| foldlC mergeResponses p
+                  else return $ (rt, check reqId p)
+              _ -> error "Impossible" -- see comment above
+    yieldResponses = repeatWhileMC
+          (do
+             var <- newEmptyMVar
+             liftIO $ atomically $ writeTChan (responseQueue pipe) var
+             readMVar var >>= either throwIO return :: IO Response
+          )
+          checkFlagBit
+    mergeResponses p@(rt,rep) p' =
+      case (p, p') of
+          ((_, r), (_, r')) ->
+            case (r, r') of
+                (ReplyOpMsg _ sec _, ReplyOpMsg _ sec' _) -> do
+                    let (section, section') = (head sec, head sec')
+                        (cur, cur') = (maybe Nothing cast $ look "cursor" section,
+                                      maybe Nothing cast $ look "cursor" section')
+                    case (cur, cur') of
+                      (Just doc, Just doc') -> do
+                        let (docs, docs') =
+                              ( fromJust $ cast $ valueAt "nextBatch" doc :: [Document]
+                              , fromJust $ cast $ valueAt "nextBatch" doc' :: [Document])
+                            id' = fromJust $ cast $ valueAt "id" doc' :: Int32
+                        (rt, check id' (rt, rep{ sections = docs' ++ docs })) -- todo: avoid (++)
+                        -- Since we use this to process moreToCome messages, we
+                        -- know that there will be a nextBatch key in the document
+                      _ ->  error "Impossible"
+                _ -> error "Impossible" -- see comment above
+    check requestId (responseTo, reply) = if requestId == responseTo then reply else
+        error $ "expected response id (" ++ show responseTo ++ ") to match request id (" ++ show requestId ++ ")"
+
 -- * Message
 
 type Message = ([Notice], Maybe (Request, RequestId))
 -- ^ A write notice(s) with getLastError request, or just query request.
 -- Note, that requestId will be out of order because request ids will be generated for notices after the request id supplied was generated. This is ok because the mongo server does not care about order just uniqueness.
+type OpMsgMessage = ([Cmd], Maybe (Request, RequestId))
 
 writeMessage :: Transport -> Message -> IO ()
 -- ^ Write message to connection
@@ -239,6 +337,25 @@ writeMessage conn (notices, mRequest) = do
           (request, requestId) <- mRequest
           let s = runPut $ putRequest request requestId
           return $ (lenBytes s) `L.append` s
+
+    Tr.write conn $ L.toStrict $ L.concat $ noticeStrings ++ (maybeToList requestString)
+    Tr.flush conn
+ where
+    lenBytes bytes = encodeSize . toEnum . fromEnum $ L.length bytes
+    encodeSize = runPut . putInt32 . (+ 4)
+
+writeOpMsgMessage :: Transport -> OpMsgMessage -> Maybe FlagBit -> Document -> IO ()
+-- ^ Write message to connection
+writeOpMsgMessage conn (notices, mRequest) flagBit params = do
+    noticeStrings <- forM notices $ \n -> do
+          requestId <- genRequestId
+          let s = runPut $ putOpMsg n requestId flagBit params
+          return $ (lenBytes s) `L.append` s
+
+    let requestString = do
+           (request, requestId) <- mRequest
+           let s = runPut $ putOpMsg (Req request) requestId flagBit params
+           return $ (lenBytes s) `L.append` s
 
     Tr.write conn $ L.toStrict $ L.concat $ noticeStrings ++ (maybeToList requestString)
     Tr.flush conn
@@ -282,6 +399,13 @@ genRequestId = liftIO $ atomicModifyIORef counter $ \n -> (n + 1, n) where
 putHeader :: Opcode -> RequestId -> Put
 -- ^ Note, does not write message length (first int32), assumes caller will write it
 putHeader opcode requestId = do
+    putInt32 requestId
+    putInt32 0
+    putInt32 opcode
+
+putOpMsgHeader :: Opcode -> RequestId -> Put
+-- ^ Note, does not write message length (first int32), assumes caller will write it
+putOpMsgHeader opcode requestId = do
     putInt32 requestId
     putInt32 0
     putInt32 opcode
@@ -360,6 +484,137 @@ putNotice notice requestId = do
             putInt32 $ toEnum (length kCursorIds)
             mapM_ putInt64 kCursorIds
 
+data KillC = KillC { killCursor :: Notice, kFullCollection:: FullCollection} deriving Show
+
+data Cmd = Nc Notice | Req Request | Kc KillC deriving Show
+
+data FlagBit =
+      ChecksumPresent  -- ^ The message ends with 4 bytes containing a CRC-32C checksum
+    | MoreToCome  -- ^ Another message will follow this one without further action from the receiver.
+    | ExhaustAllowed  -- ^ The client is prepared for multiple replies to this request using the moreToCome bit.
+    deriving (Show, Eq, Enum)
+
+
+{-
+  OP_MSG header == 16 byte
+  + 4 bytes flagBits
+  + 1 byte payload type = 1
+  + 1 byte payload type = 2
+  + 4 byte size of payload
+  == 26 bytes opcode overhead
+  + X Full command document {insert: "test", writeConcern: {...}}
+  + Y command identifier ("documents", "deletes", "updates") ( + \0)
+-}
+putOpMsg :: Cmd -> RequestId -> Maybe FlagBit -> Document -> Put
+putOpMsg cmd requestId flagBit params = do
+    let biT = maybe zeroBits (bit . bitOpMsg) flagBit:: Int32
+    putOpMsgHeader opMsgOpcode requestId -- header
+    case cmd of
+        Nc n -> case n of
+            Insert{..} -> do
+                let (sec0, sec1Size) =
+                      prepSectionInfo
+                          iFullCollection
+                          (Just (iDocuments:: [Document]))
+                          (Nothing:: Maybe Document)
+                          ("insert":: Text)
+                          ("documents":: Text)
+                          params
+                putInt32 biT                         -- flagBit
+                putInt8 0                            -- payload type 0
+                putDocument sec0                     -- payload
+                putInt8 1                            -- payload type 1
+                putInt32 sec1Size                    -- size of section
+                putCString "documents"               -- identifier
+                mapM_ putDocument iDocuments         -- payload
+            Update{..} -> do
+                let doc = ["q" =: uSelector, "u" =: uUpdater]
+                    (sec0, sec1Size) =
+                      prepSectionInfo
+                          uFullCollection
+                          (Nothing:: Maybe [Document])
+                          (Just doc)
+                          ("update":: Text)
+                          ("updates":: Text)
+                          params
+                putInt32 biT
+                putInt8 0
+                putDocument sec0
+                putInt8 1
+                putInt32 sec1Size
+                putCString "updates"
+                putDocument doc
+            Delete{..} -> do
+                -- Setting limit to 1 here is ok, since this is only used by deleteOne
+                let doc = ["q" =: dSelector, "limit" =: (1 :: Int32)]
+                    (sec0, sec1Size) =
+                      prepSectionInfo
+                          dFullCollection
+                          (Nothing:: Maybe [Document])
+                          (Just doc)
+                          ("delete":: Text)
+                          ("deletes":: Text)
+                          params
+                putInt32 biT
+                putInt8 0
+                putDocument sec0
+                putInt8 1
+                putInt32 sec1Size
+                putCString "deletes"
+                putDocument doc
+            _ -> error "The KillCursors command cannot be wrapped into a Nc type constructor. Please use the Kc type constructor"
+        Req r -> case r of
+            Query{..} -> do
+                let n = T.splitOn "." qFullCollection
+                    db = head n
+                    sec0 = foldl1' merge [qProjector, [ "$db" =: db ], qSelector]
+                putInt32 biT
+                putInt8 0
+                putDocument sec0
+            GetMore{..} -> do
+                let n = T.splitOn "." gFullCollection
+                    (db, coll) = (head n, last n)
+                    pre = ["getMore" =: gCursorId, "collection" =: coll, "$db" =: db, "batchSize" =: gBatchSize]
+                putInt32 (bit $ bitOpMsg $ ExhaustAllowed)
+                putInt8 0
+                putDocument pre
+        Kc k -> case k of
+            KillC{..} -> do
+                let n = T.splitOn "." kFullCollection
+                    (db, coll) = (head n, last n)
+                case killCursor of
+                  KillCursors{..} -> do
+                      let doc = ["killCursors" =: coll, "cursors" =: kCursorIds, "$db" =: db]
+                      putInt32 biT
+                      putInt8 0
+                      putDocument doc
+                  -- Notices are already captured at the beginning, so all
+                  -- other cases are impossible
+                  _ -> error "impossible"
+ where
+    lenBytes bytes = toEnum . fromEnum $ L.length bytes:: Int32
+    prepSectionInfo fullCollection documents document command identifier ps =
+      let n = T.splitOn "." fullCollection
+          (db, coll) = (head n, last n)
+      in
+      case documents of
+        Just ds ->
+            let
+                sec0 = merge ps [command =: coll, "$db" =: db]
+                s = sum $ map (lenBytes . runPut . putDocument) ds
+                i = runPut $ putCString identifier
+                -- +4 bytes for the type 1 section size that has to be
+                -- transported in addition to the type 1 section document
+                sec1Size = s + lenBytes i + 4
+            in (sec0, sec1Size)
+        Nothing ->
+            let
+                sec0 = merge ps [command =: coll, "$db" =: db]
+                s = runPut $ putDocument $ fromJust document
+                i = runPut $ putCString identifier
+                sec1Size = lenBytes s + lenBytes i + 4
+            in (sec0, sec1Size)
+
 iBit :: InsertOption -> Int32
 iBit KeepGoing = bit 0
 
@@ -378,6 +633,11 @@ dBit SingleRemove = bit 0
 
 dBits :: [DeleteOption] -> Int32
 dBits = bitOr . map dBit
+
+bitOpMsg :: FlagBit -> Int
+bitOpMsg ChecksumPresent = 0
+bitOpMsg MoreToCome = 1
+bitOpMsg ExhaustAllowed = 16
 
 -- ** Request
 
@@ -414,6 +674,9 @@ qOpcode :: Request -> Opcode
 qOpcode Query{} = 2004
 qOpcode GetMore{} = 2005
 
+opMsgOpcode :: Opcode
+opMsgOpcode = 2013
+
 putRequest :: Request -> RequestId -> Put
 putRequest request requestId = do
     putHeader (qOpcode request) requestId
@@ -437,7 +700,7 @@ qBit SlaveOK = bit 2
 qBit NoCursorTimeout = bit 4
 qBit AwaitData = bit 5
 --qBit Exhaust = bit 6
-qBit Partial = bit 7
+qBit Database.MongoDB.Internal.Protocol.Partial = bit 7
 
 qBits :: [QueryOption] -> Int32
 qBits = bitOr . map qBit
@@ -450,7 +713,13 @@ data Reply = Reply {
     rCursorId :: CursorId,  -- ^ 0 = cursor finished
     rStartingFrom :: Int32,
     rDocuments :: [Document]
-    } deriving (Show, Eq)
+    }
+   | ReplyOpMsg {
+        flagBits :: [FlagBit],
+        sections :: [Document],
+        checksum :: Maybe Int32
+    }
+    deriving (Show, Eq)
 
 data ResponseFlag =
       CursorNotFound  -- ^ Set when getMore is called but the cursor id is not valid at the server. Returned with zero results.
@@ -466,16 +735,37 @@ replyOpcode = 1
 getReply :: Get (ResponseTo, Reply)
 getReply = do
     (opcode, responseTo) <- getHeader
-    unless (opcode == replyOpcode) $ fail $ "expected reply opcode (1) but got " ++ show opcode
-    rResponseFlags <-  rFlags <$> getInt32
-    rCursorId <- getInt64
-    rStartingFrom <- getInt32
-    numDocs <- fromIntegral <$> getInt32
-    rDocuments <- replicateM numDocs getDocument
-    return (responseTo, Reply{..})
+    if opcode == 2013
+      then do
+            -- Notes:
+            -- Checksum bits that are set by the server don't seem to be supported by official drivers.
+            -- See: https://github.com/mongodb/mongo-python-driver/blob/master/pymongo/message.py#L1423
+            flagBits <-  rFlagsOpMsg <$> getInt32
+            _ <- getInt8
+            sec0 <- getDocument
+            let sections = [sec0]
+                checksum = Nothing
+            return (responseTo, ReplyOpMsg{..})
+      else do
+          unless (opcode == replyOpcode) $ fail $ "expected reply opcode (1) but got " ++ show opcode
+          rResponseFlags <-  rFlags <$> getInt32
+          rCursorId <- getInt64
+          rStartingFrom <- getInt32
+          numDocs <- fromIntegral <$> getInt32
+          rDocuments <- replicateM numDocs getDocument
+          return (responseTo, Reply{..})
 
 rFlags :: Int32 -> [ResponseFlag]
 rFlags bits = filter (testBit bits . rBit) [CursorNotFound ..]
+
+-- See https://github.com/mongodb/specifications/blob/master/source/message/OP_MSG.rst#flagbits
+rFlagsOpMsg :: Int32 -> [FlagBit]
+rFlagsOpMsg bits = isValidFlag bits
+  where isValidFlag bt =
+          let setBits = map fst $ filter (\(_,b) -> b == True) $ zip ([0..31] :: [Int32]) $ map (testBit bt) [0 .. 31]
+          in if any (\n -> not $ elem n [0,1,16]) setBits
+               then error "Unsopported bit was set"
+               else filter (testBit bt . bitOpMsg) [ChecksumPresent ..]
 
 rBit :: ResponseFlag -> Int
 rBit CursorNotFound = 0
