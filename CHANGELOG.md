@@ -2,6 +2,13 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [2.7.1.2] - 2022-10-26
+
+### Added
+- Support of OP_MSG protocol
+- Clarifications in the documentation
+- Allow optional TLS parameters
+
 ## [2.7.1.1] - 2021-06-14
 
 ### Fixed
