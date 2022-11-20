@@ -59,6 +59,7 @@ import Control.Monad
     void,
     when,
   )
+import Control.Monad.Fail (MonadFail)
 import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, local, runReaderT)
 import Control.Monad.Trans (MonadIO, liftIO)
 import qualified Crypto.Hash.MD5 as MD5

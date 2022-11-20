@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+## [2.7.1.3] - 2022-11-20
+
+### Fixed
+
+- Build failure on GHCs which don't have `MonadFail` in the `Prelude`
+
 ## [2.7.1.2] - 2022-10-26
 
 ### Added

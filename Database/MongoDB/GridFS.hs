@@ -25,6 +25,7 @@ module Database.MongoDB.GridFS
 
 
 import Control.Monad(when)
+import Control.Monad.Fail (MonadFail)
 import Control.Monad.IO.Class
 import Control.Monad.Trans(lift)
 

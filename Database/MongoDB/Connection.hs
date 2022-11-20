@@ -32,6 +32,7 @@ import Control.Applicative ((<$>))
 #endif
 
 import Control.Monad (forM_, guard)
+import Control.Monad.Fail (MonadFail)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Timeout (timeout)
 import Text.ParserCombinators.Parsec (parse, many1, letter, digit, char, anyChar, eof,

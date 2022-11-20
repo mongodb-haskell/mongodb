@@ -105,6 +105,8 @@ test-suite test
 
   default-language: Haskell2010
   default-extensions: OverloadedStrings
+  build-tool-depends:
+    hspec-discover:hspec-discover
 
 Benchmark bench
   main-is:            Benchmark.hs
