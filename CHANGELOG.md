@@ -2,6 +2,8 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Package_versioning_policy).
 
+* Get rid of `MonadFail` constraints in `Database.MongoDB.Query`
+
 ## [2.7.1.2] - 2022-10-26
 
 ### Added
