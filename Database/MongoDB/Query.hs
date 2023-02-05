@@ -60,7 +60,7 @@ import Control.Monad
     when,
   )
 import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, local, runReaderT)
-import Control.Monad.Trans (MonadIO, liftIO)
+import Control.Monad.Trans (MonadIO, liftIO, lift)
 import qualified Crypto.Hash.MD5 as MD5
 import qualified Crypto.Hash.SHA1 as SHA1
 import qualified Crypto.MAC.HMAC as HMAC
@@ -131,6 +131,7 @@ import Database.MongoDB.Internal.Protocol
     pwKey,
     FlagBit (..)
   )
+import Control.Monad.Trans.Except
 import qualified Database.MongoDB.Internal.Protocol as P
 import Database.MongoDB.Internal.Util (liftIOE, loop, true1, (<.>))
 import System.Mem.Weak (Weak)
@@ -1279,7 +1280,7 @@ find q@Query{selection, batchSize} = do
         dBatch <- liftIO $ requestOpMsg pipe newQr []
         newCursor db (coll selection) batchSize dBatch
 
-findCommand :: (MonadIO m, MonadFail m) => Query -> Action m Cursor
+findCommand :: (MonadIO m) => Query -> Action m Cursor
 -- ^ Fetch documents satisfying query using the command "find"
 findCommand q@Query{..} = do
     pipe <- asks mongoPipe
@@ -1371,7 +1372,7 @@ defFamUpdateOpts ups = FamUpdate
 -- Return a single updated document (@new@ option is set to @True@).
 --
 -- See 'findAndModifyOpts' for more options.
-findAndModify :: (MonadIO m, MonadFail m)
+findAndModify :: (MonadIO m)
               => Query
               -> Document -- ^ updates
               -> Action m (Either String Document)
@@ -1386,7 +1387,7 @@ findAndModify q ups = do
 
 -- | Run the @findAndModify@ command
 -- (allows more options than 'findAndModify')
-findAndModifyOpts :: (MonadIO m, MonadFail m)
+findAndModifyOpts :: (MonadIO m)
                   => Query
                   -> FindAndModifyOpts
                   -> Action m (Either String (Maybe Document))
@@ -1666,7 +1667,7 @@ isCursorClosed (Cursor _ _ var) = do
 type Pipeline = [Document]
 -- ^ The Aggregate Pipeline
 
-aggregate :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> Action m [Document]
+aggregate :: (MonadIO m) => Collection -> Pipeline -> Action m [Document]
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
 aggregate aColl agg = do
     aggregateCursor aColl agg def >>= rest
@@ -1689,7 +1690,7 @@ aggregateCommand aColl agg AggregateConfig {..} =
   , "allowDiskUse" =: allowDiskUse
   ]
 
-aggregateCursor :: (MonadIO m, MonadFail m) => Collection -> Pipeline -> AggregateConfig -> Action m Cursor
+aggregateCursor :: (MonadIO m) => Collection -> Pipeline -> AggregateConfig -> Action m Cursor
 -- ^ Runs an aggregate and unpacks the result. See <http://docs.mongodb.org/manual/core/aggregation/> for details.
 aggregateCursor aColl agg cfg = do
     pipe <- asks mongoPipe
@@ -1708,18 +1709,21 @@ aggregateCursor aColl agg cfg = do
            >>= either (liftIO . throwIO . AggregateFailure) return
 
 getCursorFromResponse
-  :: (MonadIO m, MonadFail m)
+  :: (MonadIO m)
   => Collection
   -> Document
   -> Action m (Either String Cursor)
 getCursorFromResponse aColl response
-  | true1 "ok" response = do
-      cursor     <- lookup "cursor" response
-      firstBatch <- lookup "firstBatch" cursor
-      cursorId   <- lookup "id" cursor
-      db         <- thisDatabase
-      Right <$> newCursor db aColl 0 (return $ Batch Nothing cursorId firstBatch)
+  | true1 "ok" response = runExceptT $ do
+      cursor     <- lookup "cursor" response ?? "cursor is missing"
+      firstBatch <- lookup "firstBatch" cursor ?? "firstBatch is missing"
+      cursorId   <- lookup "id" cursor ?? "id is missing"
+      db         <- lift thisDatabase
+      lift $ newCursor db aColl 0 (return $ Batch Nothing cursorId firstBatch)
   | otherwise = return $ Left $ at "errmsg" response
+  where
+    Nothing ?? e = throwE e
+    Just a ?? _ = pure a
 
 -- ** Group
 
