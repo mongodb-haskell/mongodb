@@ -494,6 +494,9 @@ data FlagBit =
     | ExhaustAllowed  -- ^ The client is prepared for multiple replies to this request using the moreToCome bit.
     deriving (Show, Eq, Enum)
 
+uOptDoc :: UpdateOption -> Document
+uOptDoc Upsert = ["upsert" =: True]
+uOptDoc MultiUpdate = ["multi" =: True]
 
 {-
   OP_MSG header == 16 byte
@@ -528,7 +531,7 @@ putOpMsg cmd requestId flagBit params = do
                 putCString "documents"               -- identifier
                 mapM_ putDocument iDocuments         -- payload
             Update{..} -> do
-                let doc = ["q" =: uSelector, "u" =: uUpdater]
+                let doc = ["q" =: uSelector, "u" =: uUpdater] <> concatMap uOptDoc uOptions
                     (sec0, sec1Size) =
                       prepSectionInfo
                           uFullCollection

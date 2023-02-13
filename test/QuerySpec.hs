@@ -4,6 +4,7 @@
 module QuerySpec (spec) where
 import Data.String (IsString(..))
 import TestImport
+import Control.Concurrent (threadDelay)
 import Control.Exception
 import Control.Monad (forM_, when)
 import System.Environment (getEnv)
@@ -86,6 +87,21 @@ spec = around withCleanDatabase $ do
       _id <- db $ insert_ "team" ["name" =: "Yankees", "league" =: "American"]
       db (count $ select ["name" =: "Yankees", "league" =: "American"] "team") `shouldReturn` 1
       _id `shouldBe` ()
+
+  describe "upsert" $ do
+    it "upserts a document twice with the same spec" $ do
+      let q = select ["name" =: "jack"] "users"
+      db $ upsert q ["color" =: "blue", "name" =: "jack"]
+      -- since there is no way to ask for a ack, we must wait for "a sufficient time"
+      -- for the write to be visible
+      threadDelay 10000
+      db (rest =<< find (select [] "users")) >>= print
+      db (count $ select ["name" =: "jack"] "users") `shouldReturn` 1
+      db $ upsert q ["color" =: "red", "name" =: "jack"]
+      threadDelay 10000
+      db (count $ select ["name" =: "jack"] "users") `shouldReturn` 1
+      Just doc <- db $ findOne (select ["name" =: "jack"] "users")
+      doc !? "color" `shouldBe` Just "red"
 
   describe "insertMany" $ do
     it "inserts documents to the collection and returns their _ids" $ do
