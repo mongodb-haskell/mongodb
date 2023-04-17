@@ -11,7 +11,7 @@ module Database.MongoDB.Query (
     -- * Database
     Database, allDatabases, useDb, thisDatabase,
     -- ** Authentication
-    Username, Password, auth, authMongoCR, authSCRAMSHA1,
+    Username, Password, auth, authMongoCR, authSCRAMSHA1, authSCRAMSHA256,
     -- * Collection
     Collection, allCollections,
     -- ** Selection
@@ -61,8 +61,10 @@ import Control.Monad
   )
 import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, local, runReaderT)
 import Control.Monad.Trans (MonadIO, liftIO, lift)
+import Control.Monad.Trans.Except
 import qualified Crypto.Hash.MD5 as MD5
 import qualified Crypto.Hash.SHA1 as SHA1
+import qualified Crypto.Hash.SHA256 as SHA256
 import qualified Crypto.MAC.HMAC as HMAC
 import qualified Crypto.Nonce as Nonce
 import Data.Binary.Put (runPut)
@@ -285,62 +287,93 @@ authMongoCR usr pss = do
     n <- at "nonce" <$> runCommand ["getnonce" =: (1 :: Int)]
     true1 "ok" <$> runCommand ["authenticate" =: (1 :: Int), "user" =: usr, "nonce" =: n, "key" =: pwKey n usr pss]
 
+data HashAlgorithm = SHA1 | SHA256 deriving Show
+
+hash :: HashAlgorithm -> B.ByteString -> B.ByteString
+hash SHA1 = SHA1.hash
+hash SHA256 = SHA256.hash
+
 authSCRAMSHA1 :: MonadIO m => Username -> Password -> Action m Bool
+authSCRAMSHA1 = authSCRAMWith SHA1
+
+authSCRAMSHA256 :: MonadIO m => Username -> Password -> Action m Bool
+authSCRAMSHA256 = authSCRAMWith SHA256
+
+toAuthResult :: Functor m => ExceptT String (Action m) () -> Action m Bool
+toAuthResult = fmap (either (const False) (const True)) . runExceptT
+
+-- | It should technically perform SASLprep, but the implementation is currently id
+saslprep :: Text -> Text
+saslprep = id
+
+authSCRAMWith :: MonadIO m => HashAlgorithm -> Username -> Password -> Action m Bool
 -- ^ Authenticate with the current database, using the SCRAM-SHA-1 authentication mechanism (default in MongoDB server >= 3.0)
-authSCRAMSHA1 un pw = do
-    let hmac = HMAC.hmac SHA1.hash 64
+authSCRAMWith algo un pw = toAuthResult $ do
+    let hmac = HMAC.hmac (hash algo) 64
     nonce <- liftIO (Nonce.withGenerator Nonce.nonce128 <&> B64.encode)
     let firstBare = B.concat [B.pack $ "n=" ++ T.unpack un ++ ",r=", nonce]
-    let client1 = ["saslStart" =: (1 :: Int), "mechanism" =: ("SCRAM-SHA-1" :: String), "payload" =: (B.unpack . B64.encode $ B.concat [B.pack "n,,", firstBare]), "autoAuthorize" =: (1 :: Int)]
-    server1 <- runCommand client1
+    let client1 =
+          [ "saslStart" =: (1 :: Int)
+          , "mechanism" =: case algo of
+            SHA1 -> "SCRAM-SHA-1" :: String
+            SHA256 -> "SCRAM-SHA-256"
+          , "payload" =: (B.unpack . B64.encode $ B.concat [B.pack "n,,", firstBare])
+          , "autoAuthorize" =: (1 :: Int)
+          ]
+    server1 <- lift $ runCommand client1
 
-    shortcircuit (true1 "ok" server1) $ do
-        let serverPayload1 = B64.decodeLenient . B.pack . at "payload" $ server1
-        let serverData1 = parseSCRAM serverPayload1
-        let iterations = read . B.unpack $ Map.findWithDefault "1" "i" serverData1
-        let salt = B64.decodeLenient $ Map.findWithDefault "" "s" serverData1
-        let snonce = Map.findWithDefault "" "r" serverData1
+    shortcircuit (true1 "ok" server1) (show server1)
+    let serverPayload1 = B64.decodeLenient . B.pack . at "payload" $ server1
+    let serverData1 = parseSCRAM serverPayload1
+    let iterations = read . B.unpack $ Map.findWithDefault "1" "i" serverData1
+    let salt = B64.decodeLenient $ Map.findWithDefault "" "s" serverData1
+    let snonce = Map.findWithDefault "" "r" serverData1
 
-        shortcircuit (B.isInfixOf nonce snonce) $ do
-            let withoutProof = B.concat [B.pack "c=biws,r=", snonce]
-            let digestS = B.pack $ T.unpack un ++ ":mongo:" ++ T.unpack pw
-            let digest = B16.encode $ MD5.hash digestS
-            let saltedPass = scramHI digest salt iterations
-            let clientKey = hmac saltedPass (B.pack "Client Key")
-            let storedKey = SHA1.hash clientKey
-            let authMsg = B.concat [firstBare, B.pack ",", serverPayload1, B.pack ",", withoutProof]
-            let clientSig = hmac storedKey authMsg
-            let pval = B64.encode . BS.pack $ BS.zipWith xor clientKey clientSig
-            let clientFinal = B.concat [withoutProof, B.pack ",p=", pval]
-            let serverKey = hmac saltedPass (B.pack "Server Key")
-            let serverSig = B64.encode $ hmac serverKey authMsg
-            let client2 = ["saslContinue" =: (1 :: Int), "conversationId" =: (at "conversationId" server1 :: Int), "payload" =: B.unpack (B64.encode clientFinal)]
-            server2 <- runCommand client2
+    shortcircuit (B.isInfixOf nonce snonce) "nonce"
+    let withoutProof = B.concat [B.pack "c=biws,r=", snonce]
+    let digest = case algo of
+          SHA1 -> B16.encode $ MD5.hash $ B.pack $ T.unpack un ++ ":mongo:" ++ T.unpack pw
+          SHA256 -> B.pack $ T.unpack $ saslprep pw
+    let saltedPass = scramHI algo digest salt iterations
+    let clientKey = hmac saltedPass (B.pack "Client Key")
+    let storedKey = hash algo clientKey
+    let authMsg = B.concat [firstBare, B.pack ",", serverPayload1, B.pack ",", withoutProof]
+    let clientSig = hmac storedKey authMsg
+    let pval = B64.encode . BS.pack $ BS.zipWith xor clientKey clientSig
+    let clientFinal = B.concat [withoutProof, B.pack ",p=", pval]
 
-            shortcircuit (true1 "ok" server2) $ do
-                let serverPayload2 = B64.decodeLenient . B.pack $ at "payload" server2
-                let serverData2 = parseSCRAM serverPayload2
-                let serverSigComp = Map.findWithDefault "" "v" serverData2
+    let client2 =
+            [ "saslContinue" =: (1 :: Int)
+            , "conversationId" =: (at "conversationId" server1 :: Int)
+            , "payload" =: B.unpack (B64.encode clientFinal)
+            ]
+    server2 <- lift $ runCommand client2
+    shortcircuit (true1 "ok" server2) (show server2)
 
-                shortcircuit (serverSig == serverSigComp) $ do
-                  let done = true1 "done" server2
-                  if done
-                    then return True
-                    else do
-                      let client2Step2 = [ "saslContinue" =: (1 :: Int)
-                                         , "conversationId" =: (at "conversationId" server1 :: Int)
-                                         , "payload" =: String ""]
-                      server3 <- runCommand client2Step2
-                      shortcircuit (true1 "ok" server3) $ do
-                        return True
+    let serverKey = hmac saltedPass (B.pack "Server Key")
+    let serverSig = B64.encode $ hmac serverKey authMsg
+    let serverPayload2 = B64.decodeLenient . B.pack $ at "payload" server2
+    let serverData2 = parseSCRAM serverPayload2
+    let serverSigComp = Map.findWithDefault "" "v" serverData2
+
+    shortcircuit (serverSig == serverSigComp) "server signature does not match"
+    if true1 "done" server2
+      then return ()
+      else do
+        let client2Step2 = [ "saslContinue" =: (1 :: Int)
+                            , "conversationId" =: (at "conversationId" server1 :: Int)
+                            , "payload" =: String ""]
+        server3 <- lift $ runCommand client2Step2
+        shortcircuit (true1 "ok" server3) "server3"
+
+shortcircuit :: Monad m => Bool -> String -> ExceptT String m ()
+shortcircuit True _ = pure ()
+shortcircuit False reason = throwE (show reason)
+
+scramHI :: HashAlgorithm -> B.ByteString -> B.ByteString -> Int -> B.ByteString
+scramHI algo digest salt iters = snd $ foldl com (u1, u1) [1..(iters-1)]
     where
-    shortcircuit True f = f
-    shortcircuit False _ = return False
-
-scramHI :: B.ByteString -> B.ByteString -> Int -> B.ByteString
-scramHI digest salt iters = snd $ foldl com (u1, u1) [1..(iters-1)]
-    where
-    hmacd = HMAC.hmac SHA1.hash 64 digest
+    hmacd = HMAC.hmac (hash algo) 64 digest
     u1 = hmacd (B.concat [salt, BS.pack [0, 0, 0, 1]])
     com (u,uc) _ = let u' = hmacd u in (u', BS.pack $ BS.zipWith xor uc u')
 
