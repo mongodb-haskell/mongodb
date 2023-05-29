@@ -133,7 +133,7 @@ import Database.MongoDB.Internal.Protocol
   )
 import Control.Monad.Trans.Except
 import qualified Database.MongoDB.Internal.Protocol as P
-import Database.MongoDB.Internal.Util (liftIOE, loop, true1, (<.>))
+import Database.MongoDB.Internal.Util (liftIOE, loop, true1, (<.>), splitDot)
 import System.Mem.Weak (Weak)
 import Text.Read (readMaybe)
 import Prelude hiding (lookup)
@@ -1273,7 +1273,7 @@ find q@Query{selection, batchSize} = do
         let newQr =
               case fst qr of
                 Req qry ->
-                  let coll = last $ T.splitOn "." (qFullCollection qry)
+                  let (_db, coll) = splitDot (qFullCollection qry)
                   in (Req $ qry {qSelector = merge (qSelector qry) [ "find" =: coll ]}, snd qr)
                 -- queryRequestOpMsg only returns Cmd types constructed via Req
                 _ -> error "impossible"
@@ -1333,7 +1333,7 @@ findOne q = do
             let newQr =
                   case fst qr of
                     Req qry ->
-                      let coll = last $ T.splitOn "." (qFullCollection qry)
+                      let (_db, coll) = splitDot (qFullCollection qry)
                           -- We have to understand whether findOne is called as
                           -- command directly. This is necessary since findOne is used via
                           -- runCommand as a vehicle to execute any type of commands and notices.
