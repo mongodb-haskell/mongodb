@@ -76,6 +76,14 @@ spec = around withCleanDatabase $ do
       db thisDatabase `shouldReturn` testDBName
       db (useDb anotherDBName thisDatabase) `shouldReturn` anotherDBName
 
+  describe "collectionWithDot" $ do
+    it "uses a collection with dots in the name" $ do
+      let coll = "collection.with.dot"
+      _id <- db $ insert coll ["name" =: "jack", "color" =: "blue"]
+      Just doc <- db $ findOne (select ["name" =: "jack"] coll)
+      doc !? "color" `shouldBe` (Just "blue")
+
+
   describe "insert" $ do
     it "inserts a document to the collection and returns its _id" $ do
       _id <- db $ insert "team" ["name" =: "Yankees", "league" =: "American"]

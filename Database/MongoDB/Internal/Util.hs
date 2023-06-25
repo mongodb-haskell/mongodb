@@ -92,6 +92,9 @@ bitOr = foldl (.|.) 0
 -- ^ Concat first and second together with period in between. Eg. @\"hello\" \<.\> \"world\" = \"hello.world\"@
 a <.> b = T.append a (T.cons '.' b)
 
+splitDot :: Text -> (Text, Text)
+splitDot t = let (pre, post) = T.break (== '.') t in (pre, T.drop 1 post) 
+
 true1 :: Label -> Document -> Bool
 -- ^ Is field's value a 1 or True (MongoDB use both Int and Bools for truth values). Error if field not in document or field not a Num or Bool.
 true1 k doc = case valueAt k doc of
