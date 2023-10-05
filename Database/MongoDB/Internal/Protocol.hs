@@ -581,6 +581,10 @@ putOpMsg cmd requestId flagBit params = do
                 putInt32 (bit $ bitOpMsg $ ExhaustAllowed)
                 putInt8 0
                 putDocument pre
+            Message{..} -> do
+                putInt32 biT
+                putInt8 0
+                putDocument $ merge [ "$db" =: mDatabase ] mParams
         Kc k -> case k of
             KillC{..} -> do
                 let n = T.splitOn "." kFullCollection
@@ -656,7 +660,11 @@ data Request =
     } | GetMore {
         gFullCollection :: FullCollection,
         gBatchSize :: Int32,
-        gCursorId :: CursorId}
+        gCursorId :: CursorId
+    } | Message {
+        mDatabase :: Text,
+        mParams :: Document
+    }
     deriving (Show, Eq)
 
 data QueryOption =
@@ -676,6 +684,7 @@ data QueryOption =
 qOpcode :: Request -> Opcode
 qOpcode Query{} = 2004
 qOpcode GetMore{} = 2005
+qOpcode Message{} = 2013
 
 opMsgOpcode :: Opcode
 opMsgOpcode = 2013
@@ -696,6 +705,10 @@ putRequest request requestId = do
             putCString gFullCollection
             putInt32 gBatchSize
             putInt64 gCursorId
+        Message{..} -> do
+            putInt32 0
+            putInt8 0
+            putDocument $ merge [ "$db" =: mDatabase ] mParams
 
 qBit :: QueryOption -> Int32
 qBit TailableCursor = bit 1
