@@ -1,19 +1,17 @@
 module Main where
 
-import Database.MongoDB.Admin (serverVersion)
-import Database.MongoDB.Connection (connect, host)
-import Database.MongoDB.Query (access, slaveOk)
-import Data.Text (unpack)
-import Test.Hspec.Runner
-import System.Environment (getEnv)
-import System.IO.Error (catchIOError)
-import TestImport
+import Control.Exception (assert)
+import Control.Monad (when)
+import Data.Maybe (isJust)
 import qualified Spec
+import System.Environment (getEnv, lookupEnv)
+import Test.Hspec.Runner
+import TestImport
 
 main :: IO ()
 main = do
-  mongodbHost <- getEnv mongodbHostEnvVariable `catchIOError` (\_ -> return "localhost")
-  p <- connect $ host mongodbHost
-  version <- access p slaveOk "admin" serverVersion
-  putStrLn $ "Running tests with mongodb version: " ++ (unpack version)
+  version <- getEnv "MONGO_VERSION"
+  when (version == "mongo_atlas") $ do
+    connection_string <- lookupEnv "CONNECTION_STRING"
+    pure $ assert (isJust connection_string) ()
   hspecWith defaultConfig Spec.spec
