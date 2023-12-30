@@ -658,19 +658,20 @@ splitAtLimit maxSize maxCount list = chop (go 0 0 []) list
   where
     go :: Int -> Int -> [Document] -> [Document] -> (Either Failure [Document], [Document])
     go _ _ res [] = (Right $ reverse res, [])
-    go curSize curCount [] (x:xs) |
-      (curSize + sizeOfDocument x + 2 + curCount) > maxSize =
-        (Left $ WriteFailure 0 0 "One document is too big for the message", xs)
-    go curSize curCount res (x:xs) =
-      if ((curSize + sizeOfDocument x + 2 + curCount) > maxSize)
-                                 -- we have ^ 2 brackets and curCount commas in
-                                 -- the document that we need to take into
-                                 -- account
-          || ((curCount + 1) > maxCount)
-        then
-          (Right $ reverse res, x:xs)
-        else
-          go (curSize + sizeOfDocument x) (curCount + 1) (x:res) xs
+    go curSize curCount res (x : xs) =
+      let size = sizeOfDocument x + 8
+       in {- 8 bytes =
+            1 byte: element type.
+            6 bytes: key name. |key| <= log (maxWriteBatchSize = 100000)
+            1 byte: \x00.
+            See https://bsonspec.org/spec.html
+          -}
+          if (curSize + size > maxSize) || (curCount + 1 > maxCount)
+            then
+              if curCount == 0
+                then (Left $ WriteFailure 0 0 "One document is too big for the message", xs)
+                else (Right $ reverse res, x : xs)
+            else go (curSize + size) (curCount + 1) (x : res) xs
 
     chop :: ([a] -> (b, [a])) -> [a] -> [b]
     chop _ [] = []
