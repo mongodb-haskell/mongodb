@@ -8,6 +8,7 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 
 ### Fixed
 - Collections with dot in the name
+- Upper limit for batch size in Query.splitAtLimit
 
 ## [2.7.1.2] - 2022-10-26
 
