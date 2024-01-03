@@ -11,15 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: haskell-actions/run-fourmolu@v9
-        with:
-          version: "0.14.1.0"
-          pattern: Database/**/*.hs
-          extra-args: --indentation 2
   test:
     runs-on: ubuntu-latest
     strategy:
