@@ -1,0 +1,55 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mongodb:
+          - mongo:4.0
+          - mongo:5.0
+          - mongo:6.0
+          - mongo:7.0
+          - mongo_atlas
+        ghc:
+          - "8.10.4"
+          - "9.4.7" # oldest version with HLS support
+          - latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Haskell tooling
+        uses: haskell-actions/setup@v2
+        with:
+          enable-stack: true
+          ghc-version: ${{ matrix.ghc }}
+          stack-version: latest
+
+      - name: Setup container and run tests
+        run: |
+          # the job-level 'if' expression is evaluated before the matrix variable
+          # so it cannot be used to configure this step
+          if [[ ${{ matrix.mongodb }} = "mongo_atlas" ]]
+          then 
+            export CONNECTION_STRING=${{ secrets.CONNECTION_STRING }}
+          else
+            docker run -d \
+              -p 27017:27017 \
+              -e MONGO_INITDB_ROOT_USERNAME=testadmin \
+              -e MONGO_INITDB_ROOT_PASSWORD=123 \
+              ${{ matrix.mongodb }}
+          fi
+          # build & run tests
+          export MONGO_VERSION=${{ matrix.mongodb }}
+          stack test --fast

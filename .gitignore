@@ -4,3 +4,5 @@ cabal.sandbox.config
 .stack-work/
 dist-newstyle/*
 !dist-newstyle/config
+*.nix
+.vscode/*

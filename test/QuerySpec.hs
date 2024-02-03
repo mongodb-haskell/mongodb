@@ -7,7 +7,7 @@ import TestImport
 import Control.Concurrent (threadDelay)
 import Control.Exception
 import Control.Monad (forM_, when)
-import System.Environment (getEnv)
+import System.Environment (getEnv, lookupEnv)
 import System.IO.Error (catchIOError)
 import qualified Data.List as L
 
@@ -17,12 +17,26 @@ testDBName :: Database
 testDBName = "mongodb-haskell-test"
 
 db :: Action IO a -> IO a
-db action = do
+db action = bracket start end inbetween
+ where
+  start = lookupEnv "CONNECTION_STRING" >>= getPipe
+  end (_, pipe) = close pipe
+  inbetween (testuser, pipe) = do
+    logged_in <-
+      access pipe master "admin" $ do
+        auth (u_name testuser) (u_passwd testuser)
+    assert logged_in $ pure ()
+    access pipe master testDBName action
+  getPipe Nothing = do
+    let user = TestUser "testadmin" "123"
     mongodbHost <- getEnv mongodbHostEnvVariable `catchIOError` (\_ -> return "localhost")
     pipe <- connect (host mongodbHost)
-    result <- access pipe master testDBName action
-    close pipe
-    return result
+    pure (user, pipe)
+  getPipe (Just cs) = do
+    let creds = extractMongoAtlasCredentials . T.pack $ cs
+        user = TestUser "testadmin" (atlas_password creds)
+    pipe <- connectAtlas creds
+    pure (user, pipe)
 
 getWireVersion :: IO Int
 getWireVersion = db $ do
@@ -68,6 +82,8 @@ fineGrainedBigDocument = (flip map) [1..1000] $ \i -> (fromString $ "team" ++ (s
 hugeDocument :: Document
 hugeDocument = (flip map) [1..1000000] $ \i -> (fromString $ "team" ++ (show i)) =: ("team " ++ (show i) ++ " name")
 
+data TestUser = TestUser {u_name :: T.Text, u_passwd :: T.Text}
+
 spec :: Spec
 spec = around withCleanDatabase $ do
   describe "useDb" $ do
@@ -78,11 +94,13 @@ spec = around withCleanDatabase $ do
 
   describe "collectionWithDot" $ do
     it "uses a collection with dots in the name" $ do
-      let coll = "collection.with.dot"
-      _id <- db $ insert coll ["name" =: "jack", "color" =: "blue"]
-      Just doc <- db $ findOne (select ["name" =: "jack"] coll)
-      doc !? "color" `shouldBe` (Just "blue")
-
+      -- Dots in collection names are disallowed from Mongo 6 on
+      mongo_version <- getEnv "MONGO_VERSION"
+      when (mongo_version `elem` ["mongo:5.0", "mongo:4.0"]) $ do
+        let collec = "collection.with.dot"
+        _id <- db $ insert collec ["name" =: "jack", "color" =: "blue"]
+        Just doc <- db $ findOne (select ["name" =: "jack"] collec)
+        doc !? "color" `shouldBe` Just "blue"
 
   describe "insert" $ do
     it "inserts a document to the collection and returns its _id" $ do
@@ -497,4 +515,3 @@ spec = around withCleanDatabase $ do
                               , sort    = [ "_id" =: 1 ]
                               }
         result `shouldBe` [["_id" =: "jane"], ["_id" =: "jill"], ["_id" =: "joe"]]
-
