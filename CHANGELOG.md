@@ -4,7 +4,7 @@ This project adheres to [Package Versioning Policy](https://wiki.haskell.org/Pac
 
 * Get rid of `MonadFail` constraints in `Database.MongoDB.Query`
 
-## [] - 2023-??-??
+## [2.7.1.3] - 2024-02-04
 
 ### Fixed
 - Collections with dot in the name
